@@ -33,7 +33,7 @@
 ## Status
 
 - [ ] M0 Setup + experiments (12 Oct AM) — **done except GPay dumps (Q5)**: Portal ping OK over Wi-Fi · WhatsApp + Blinkit trees dumped · TalkBack behavior known · Sarvam STT/TTS works
-- [ ] M1 Text agent — F1 in text mode (12 Oct PM)
+- [x] M1 Text agent — F1 in text mode (12 Oct PM) — **3/3 from WhatsApp chat list, 12–15 s, ~₹0.06/run (gpt-5-nano)**
 - [ ] M2 Voice in/out (12 Oct night)
 - [ ] M3 Safety gate + GPay ₹1 to PIN handoff (13 Oct AM)
 - [ ] M4 Blinkit + screen summary (13 Oct PM)
@@ -66,6 +66,10 @@
 | 12 Oct | TTS: `bulbul:v4-flash`, default voice | Owner preferred it by ear over `bulbul:v3`/shubh; 0.8 s vs 1.0 s |
 | 12 Oct | LLM client provider-neutral (OpenAI SDK + configurable base URL); pick model by benchmark in M1 | Owner's "Hermes" is Hermes Agent (wraps Claude), not a callable model; local Ollama `qwen2.5vl:7b` is a free fallback |
 | 12 Oct | Model: OpenAI `gpt-5-nano` (paid, data sharing OFF); Ollama `qwen3:4b` as offline backup only | Probe on real WhatsApp screen + screenshot: gpt-5-nano / gpt-6-luna / gpt-5.4-nano / gpt-5.4-mini all chose the right tap with strict JSON + Devanagari; nano cheapest (~₹0.03/step, 6.9 s). Local qwen3:4b was right but ~35–40 s/step on the 8 GB Mac; qwen2.5vl:7b doesn't fit in RAM. Free "shared traffic" tokens rejected: would send personal chats/payment screens to training |
+| 12 Oct | Until M3, a safety `hold` (send / pay / order) cancels instead of asking | No spoken confirmation yet; confirmation defaults to cancel (hard rule 5) |
+| 12 Oct | Saathi restores the user's keyboard on exit (`device.restore_keyboard()` in `finally`) | `AndroidDriver.connect()` silently switches the IME to Portal's keyboard, which has no visible keys — left the tablet without a usable keyboard during M0 |
+| 12 Oct | Safety R10 also blocks calls and "Payments on WhatsApp"; R2 blocks newlines typed into WhatsApp | Calls are outward actions; "Enter is send" can turn a newline into a send that bypasses the R2 hold |
+| 12 Oct | `open_app` waits up to 8 s for a screen change (taps 3 s) | WhatsApp cold start took ~3.5 s and was miscounted as a failed step |
 | 12 Oct | Rename `.env` `LANG` → `SAATHI_LANG` (when voice.py lands) | macOS shell already sets `LANG` (e.g. `en_US.UTF-8`), which overrides `.env` in pydantic-settings |
 
 ---
@@ -98,6 +102,9 @@
 - Dumped: WhatsApp home, WhatsApp chat, WhatsApp notification popup, Blinkit search (+ a uiautomator-format dump). Normalizer + 15 tests pass.
 - Latency over hotspot: tree ~1.7 s, screenshot ~1.2 s (budget says observe ≤ 1 s) — re-measure on home Wi-Fi / USB in M1.
 - TalkBack: taps click with it on; suspend/restore verified. Sarvam STT + TTS hello-world works.
+- Model: gpt-5-nano chosen (paid, no data sharing); local Ollama too slow on the 8 GB Mac.
+- M1 done: actions + safety (R1–R4, R7–R10, 60 tests) + agent loop + traces. "WhatsApp kholo aur Mummy ka last message padho" 3/3 from the chat list (open_app → tap chat → done), answer verified against the lowest message_text on screen.
+- Open issue for M2: gpt-5-nano writes `say` in Roman Hinglish about half the time despite the prompt — handle in narrator (validate / fall back) before TTS.
 
 ### 13 Oct
 - 

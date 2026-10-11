@@ -59,12 +59,12 @@ flowchart LR
 
 ```python
 async def run_command(cmd: str) -> Result:
-    ctx = CommandContext.from_utterance(cmd)        # spoken payee/amount/recipient extracted up front
+    ctx = CommandContext.from_utterance(cmd)  # spoken payee/amount/recipient extracted up front
     await talkback.suspend()
     try:
         history = []
         failures = 0
-        for step in range(MAX_STEPS):               # 25
+        for step in range(MAX_STEPS):  # 25
             if controls.interrupted():
                 return await halt("Ruk gaya. Aap aage khud kar sakte hain.")
 
@@ -78,7 +78,8 @@ async def run_command(cmd: str) -> Result:
 
             verdict = safety.check(decision.action, state, ctx)
             if verdict.kind == "block":
-                narrator.say(verdict.message); return await ask_or_abort(verdict)
+                narrator.say(verdict.message)
+                return await ask_or_abort(verdict)
             if verdict.kind == "hold":
                 if not await confirm(verdict.readback):  # spoken yes / no / unclear
                     return await halt("Cancel kar diya.")
@@ -95,7 +96,7 @@ async def run_command(cmd: str) -> Result:
             history.append(summarize(decision, ok, changed))
         return await halt("Bahut steps ho gaye, main ruk raha hoon.")
     finally:
-        await talkback.restore()                     # ALWAYS, including crashes
+        await talkback.restore()  # ALWAYS, including crashes
 ```
 
 ---
@@ -110,10 +111,10 @@ async def run_command(cmd: str) -> Result:
 ```python
 class Element(BaseModel):
     index: int
-    cls: str            # "Button", "EditText", "TextView", ...
+    cls: str  # "Button", "EditText", "TextView", ...
     text: str
-    desc: str           # content-description
-    rid: str            # short resource-id
+    desc: str  # content-description
+    rid: str  # short resource-id
     clickable: bool
     editable: bool
     password: bool
@@ -158,13 +159,13 @@ The gate runs on **every** action before execution. It returns `allow`, `hold(re
 ```python
 PAYMENT_APPS = {
     "com.google.android.apps.nbu.paisa.user",  # Google Pay (India)
-    "com.phonepe.app",                         # PhonePe
-    "net.one97.paytm",                         # Paytm
-    "in.org.npci.upiapp",                      # BHIM
+    "com.phonepe.app",  # PhonePe
+    "net.one97.paytm",  # Paytm
+    "in.org.npci.upiapp",  # BHIM
 }
 PAY_REGEX = r"(?i)\b(pay|send|proceed|confirm|place order)\b|भेजें|पे करें|भुगतान|₹"
 YES = {"haan", "haa", "ha", "yes", "confirm", "kar do", "bhej do", "हाँ", "हां", "ठीक है"}
-NO  = {"nahi", "na", "no", "cancel", "ruko", "mat", "नहीं", "रुको"}
+NO = {"nahi", "na", "no", "cancel", "ruko", "mat", "नहीं", "रुको"}
 ```
 
 **Confirmation default is cancel.** Unclear answer → ask once more → still unclear → cancel.

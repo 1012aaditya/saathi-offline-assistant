@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saathi Voice Agent</title>
+<meta name="description" content="Saathi is a Hindi + English voice agent that operates everyday Indian Android apps for blind and low-vision users, with a hard safety layer for money.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anek+Devanagari:wdth,wght@75..125,300..800&family=Mukta:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --neel: #14183a;        /* page */
+    --neel-2: #1e2352;      /* surfaces */
+    --neel-3: #2b3170;      /* lines, raised */
+    --haldi: #f5b935;       /* speech, hold, focus */
+    --chalk: #f3f1ff;       /* primary text */
+    --mist: #a9add6;        /* secondary text */
+    --sindoor: #ff6b52;     /* block, stop */
+    --patti: #5fd3a0;       /* allow */
+
+    --f-display: "Anek Devanagari", "Mukta", system-ui, sans-serif;
+    --f-body: "Mukta", system-ui, sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+    --wrap: 1180px;
+    --gutter: clamp(16px, 4vw, 40px);
+    --radius: 14px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--neel);
+    color: var(--chalk);
+    font-family: var(--f-body);
+    font-size: clamp(17px, 1.1vw + 12px, 20px);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--haldi); text-underline-offset: 3px; }
+  :focus-visible { outline: 3px solid var(--haldi); outline-offset: 3px; border-radius: 6px; }
+  [lang="hi"] { font-family: var(--f-display); }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 var(--gutter); }
+  .mono { font-family: var(--f-mono); font-size: 0.78em; letter-spacing: 0.01em; }
+  .muted { color: var(--mist); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  .skip { position: absolute; left: 16px; top: -60px; background: var(--haldi); color: var(--neel); padding: 10px 16px; border-radius: 8px; font-weight: 700; z-index: 10; }
+  .skip:focus { top: 12px; }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    font: 600 0.92rem/1 var(--f-body);
+    padding: 14px 20px; border-radius: 999px; cursor: pointer;
+    border: 2px solid var(--haldi); background: var(--haldi); color: var(--neel);
+    text-decoration: none; transition: transform .15s ease, background .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn.ghost { background: transparent; color: var(--chalk); border-color: var(--neel-3); }
+  .btn.ghost:hover { border-color: var(--mist); }
+  .btn[aria-pressed="true"] { background: var(--chalk); border-color: var(--chalk); }
+  .btn svg { width: 18px; height: 18px; flex: none; }
+
+  /* ---------- header ---------- */
+  header.top { padding: 22px 0; }
+  header.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .mark { display: flex; align-items: baseline; gap: 10px; text-decoration: none; color: var(--chalk); }
+  .mark b { font: 700 1.9rem/1 var(--f-display); color: var(--haldi); }
+  .mark span { font: 500 0.95rem/1 var(--f-body); letter-spacing: 0.04em; }
+  .top nav { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: clamp(32px, 6vw, 80px) 0 clamp(56px, 8vw, 110px); }
+  .speaker { display: flex; align-items: center; gap: 12px; color: var(--mist); font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; }
+  .speaker::after { content: ""; height: 1px; flex: 1; background: var(--neel-3); }
+  .utterance {
+    font-family: var(--f-display);
+    font-variation-settings: "wdth" 78;
+    font-weight: 700;
+    font-size: clamp(3.2rem, 11vw, 9.5rem);
+    line-height: 0.98;
+    letter-spacing: -0.01em;
+    margin: 0;
+    color: var(--chalk);
+  }
+  .utterance .w { display: inline-block; opacity: 0; transform: translateY(0.25em); animation: rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
+  .utterance .w.hl { color: var(--haldi); }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .gloss { margin: 14px 0 0; color: var(--mist); font-size: 1.05rem; }
+  .gloss i { color: var(--chalk); font-style: normal; }
+
+  .wave { display: flex; align-items: center; gap: 5px; height: 46px; margin: 28px 0 40px; }
+  .wave i { width: 5px; border-radius: 3px; background: var(--haldi); height: calc(var(--h, 70%) * 0.45); animation: bar 1.4s ease-in-out infinite; }
+  @keyframes bar { 50% { height: var(--h, 70%); } }
+
+  .reply { display: grid; gap: 8px; max-width: 900px; }
+  .reply p { margin: 0; font: 600 clamp(1.6rem, 3.6vw, 2.7rem)/1.2 var(--f-display); font-variation-settings: "wdth" 92; }
+  .reply p.gloss { margin-top: 0; font: 400 1.05rem/1.55 var(--f-body); font-variation-settings: normal; }
+
+  .thesis { display: grid; grid-template-columns: 1.3fr 1fr; gap: clamp(24px, 5vw, 64px); align-items: end; margin-top: clamp(48px, 7vw, 88px); padding-top: 32px; border-top: 1px solid var(--neel-3); }
+  .thesis h1 { margin: 0; font: 600 clamp(1.5rem, 2.6vw, 2.2rem)/1.25 var(--f-body); letter-spacing: -0.005em; }
+  .thesis h1 em { font-style: normal; color: var(--haldi); }
+  .thesis .ctas { display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+
+  /* ---------- sections ---------- */
+  section.band { padding: clamp(64px, 9vw, 120px) 0; border-top: 1px solid var(--neel-3); }
+  .eyebrow { font: 500 0.8rem/1 var(--f-mono); color: var(--haldi); letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 18px; }
+  h2 { font: 700 clamp(2rem, 4.6vw, 3.6rem)/1.05 var(--f-display); font-variation-settings: "wdth" 85; margin: 0 0 20px; letter-spacing: -0.01em; max-width: 18ch; }
+  .lede { max-width: 62ch; color: var(--mist); margin: 0 0 40px; }
+
+  /* problem */
+  .facts { display: grid; gap: 0; }
+  .fact { display: grid; grid-template-columns: minmax(150px, 0.8fr) 2fr; gap: 24px; padding: 26px 0; border-bottom: 1px solid var(--neel-3); align-items: baseline; }
+  .fact .n { font: 700 clamp(2.4rem, 6vw, 4.6rem)/0.9 var(--f-display); font-variation-settings: "wdth" 75; color: var(--haldi); }
+  .fact p { margin: 0; max-width: 56ch; }
+  .fact small { display: block; margin-top: 6px; color: var(--mist); font-size: 0.8rem; }
+
+  /* demo */
+  .demo { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: clamp(28px, 5vw, 64px); align-items: start; }
+  .phone-col { position: sticky; top: 24px; }
+  .phone {
+    position: relative; aspect-ratio: 9 / 18.5; border-radius: 38px; padding: 12px;
+    background: #0b0d22; border: 2px solid var(--neel-3);
+    box-shadow: 0 40px 80px -30px rgba(0,0,0,.6);
+  }
+  .screen { position: relative; height: 100%; border-radius: 28px; background: #f6f7fb; color: #1b1d2e; overflow: hidden; font-family: var(--f-body); font-size: 15px; }
+  .screen .bar { height: 30px; display: flex; justify-content: space-between; align-items: center; padding: 0 18px; font-size: 12px; color: #555; }
+  .screen .view { position: absolute; inset: 30px 0 0; padding: 14px 16px; opacity: 0; transition: opacity .35s ease; }
+  .screen .view.on { opacity: 1; }
+  .app-title { font-weight: 700; font-size: 17px; margin: 4px 0 14px; }
+  .field { border: 1.5px solid #c9cbe0; border-radius: 12px; padding: 10px 12px; color: #777; background: #fff; }
+  .field.typed { color: #1b1d2e; border-color: #4a55c9; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid #e4e5f0; }
+  .av { width: 36px; height: 36px; border-radius: 50%; background: #d9dcf7; display: grid; place-items: center; font-weight: 700; color: #3b46b5; flex: none; }
+  .row.pick { background: #fff4d6; border-radius: 10px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+  .grid4 span { aspect-ratio: 1; border-radius: 14px; background: #e3e5f6; }
+  .amount { text-align: center; font-size: 54px; font-weight: 700; margin: 40px 0 6px; }
+  .paybtn { position: absolute; left: 16px; right: 16px; bottom: 22px; text-align: center; background: #3b46b5; color: #fff; border-radius: 999px; padding: 13px; font-weight: 700; }
+  .paybtn.held { outline: 4px solid var(--haldi); outline-offset: 3px; }
+  .pin { text-align: center; margin-top: 50px; }
+  .pin .dots { display: flex; gap: 14px; justify-content: center; margin: 20px 0; }
+  .pin .dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #555; }
+  .tick { width: 72px; height: 72px; border-radius: 50%; background: #2fa774; margin: 60px auto 18px; display: grid; place-items: center; color: #fff; font-size: 38px; }
+
+  .blackout { position: absolute; inset: 12px; border-radius: 28px; background: #000; opacity: 0; pointer-events: none; transition: opacity 1.2s ease; display: grid; place-items: center; }
+  .eyes-closed .blackout { opacity: 1; }
+  .blackout .caption { padding: 24px; text-align: center; font: 600 1.45rem/1.3 var(--f-display); color: var(--haldi); }
+
+  .reads { margin-top: 16px; background: var(--neel-2); border: 1px solid var(--neel-3); border-radius: var(--radius); padding: 14px 16px; }
+  .reads h3 { margin: 0 0 8px; font: 500 0.75rem/1 var(--f-mono); color: var(--mist); letter-spacing: 0.08em; text-transform: uppercase; }
+  .reads pre { margin: 0; font: 400 0.74rem/1.6 var(--f-mono); color: var(--chalk); white-space: pre-wrap; word-break: break-word; }
+  .reads pre b { color: var(--haldi); font-weight: 500; }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
+
+  ol.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  .log li { border-left: 3px solid var(--neel-3); padding: 14px 0 14px 22px; transition: border-color .3s ease, opacity .3s ease; opacity: .55; cursor: pointer; }
+  .log li.on { border-color: var(--haldi); opacity: 1; }
+  .log li:hover { opacity: 1; }
+  .log .who { font: 500 0.72rem/1 var(--f-mono); color: var(--mist); letter-spacing: 0.08em; text-transform: uppercase; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .log .said { font: 600 clamp(1.25rem, 2.2vw, 1.6rem)/1.3 var(--f-display); margin: 6px 0 2px; }
+  .log .said.user { color: var(--haldi); }
+  .log .en { color: var(--mist); font-size: 0.92rem; margin: 0; }
+
+  .verdict { font: 500 0.7rem/1 var(--f-mono); padding: 5px 8px; border-radius: 6px; letter-spacing: 0.06em; }
+  .v-allow { color: var(--patti); background: rgba(95,211,160,.12); }
+  .v-hold { color: var(--haldi); background: rgba(245,185,53,.14); }
+  .v-stop { color: var(--sindoor); background: rgba(255,107,82,.14); }
+
+  /* safety */
+  .lines { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 56px; }
+  .line { background: var(--neel-2); border-radius: var(--radius); padding: 26px; }
+  .line .k { display: block; font: 500 0.7rem/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--sindoor); margin-bottom: 12px; }
+  .line h3 { margin: 0 0 8px; font: 700 1.35rem/1.2 var(--f-display); }
+  .line p { margin: 0; color: var(--mist); font-size: 0.95rem; }
+  .rules { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+  .rules th, .rules td { text-align: left; padding: 14px 12px 14px 0; border-bottom: 1px solid var(--neel-3); vertical-align: top; }
+  .rules th { font: 500 0.72rem/1 var(--f-mono); color: var(--mist); letter-spacing: 0.08em; text-transform: uppercase; }
+  .rules td:first-child { font-family: var(--f-mono); font-size: 0.8rem; color: var(--mist); white-space: nowrap; }
+  .rules td:nth-child(2) { font-weight: 700; }
+  .rules td:last-child { white-space: nowrap; }
+  .table-scroll { overflow-x: auto; }
+  .note { margin-top: 24px; color: var(--mist); font-size: 0.9rem; max-width: 70ch; }
+
+  /* loop */
+  .loop { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; counter-reset: s; position: relative; }
+  .stage { padding: 28px 24px 28px 0; border-top: 2px solid var(--neel-3); position: relative; }
+  .stage::before { content: ""; position: absolute; top: -7px; left: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--neel); border: 2px solid var(--haldi); }
+  .stage.gate::before { background: var(--haldi); }
+  .stage h3 { margin: 0 0 6px; font: 700 1.6rem/1 var(--f-display); font-variation-settings: "wdth" 85; }
+  .stage p { margin: 0 0 12px; color: var(--mist); font-size: 0.95rem; }
+  .stage code { font-family: var(--f-mono); font-size: 0.74rem; color: var(--chalk); background: var(--neel-2); padding: 3px 7px; border-radius: 5px; }
+  .loop-foot { margin-top: 18px; display: flex; gap: 24px; flex-wrap: wrap; color: var(--mist); font-size: 0.9rem; }
+  .loop-foot b { color: var(--chalk); font-weight: 500; }
+
+  /* flows */
+  .flows { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .flow { background: var(--neel-2); border-radius: var(--radius); padding: 28px; display: grid; gap: 10px; align-content: start; }
+  .flow .tag { justify-self: start; font: 500 0.7rem/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--neel-3); color: var(--mist); }
+  .flow .tag.must { border-color: var(--haldi); color: var(--haldi); }
+  .flow h3 { margin: 0; font: 600 1rem/1.2 var(--f-body); color: var(--mist); }
+  .flow .cmd { margin: 0; font: 700 clamp(1.5rem, 2.6vw, 2rem)/1.15 var(--f-display); font-variation-settings: "wdth" 88; }
+  .flow .en { margin: 0; color: var(--mist); font-size: 0.92rem; }
+  .flow .stop { margin: 6px 0 0; font-size: 0.92rem; padding-top: 12px; border-top: 1px solid var(--neel-3); }
+
+  /* numbers */
+  .bars { display: grid; gap: 22px; max-width: 860px; }
+  .bar-row { display: grid; grid-template-columns: 200px 1fr 70px; gap: 18px; align-items: center; }
+  .bar-row .lbl { font-size: 0.95rem; }
+  .bar-row .lbl small { display: block; color: var(--mist); font-size: 0.78rem; }
+  .track { height: 16px; border-radius: 999px; background: var(--neel-2); position: relative; overflow: hidden; }
+  .fill { position: absolute; inset: 0; border-radius: 999px; transform-origin: left; transform: scaleX(0); transition: transform 1.2s cubic-bezier(.2,.7,.2,1); }
+  .fill.base { background: var(--mist); }
+  .fill.target { background: repeating-linear-gradient(-45deg, var(--haldi) 0 6px, transparent 6px 11px); border: 1.5px solid var(--haldi); }
+  .bar-row .val { font: 500 0.9rem/1 var(--f-mono); text-align: right; }
+  .legend { display: flex; gap: 22px; margin: 28px 0 0; color: var(--mist); font-size: 0.85rem; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 26px; height: 10px; border-radius: 5px; margin-right: 8px; vertical-align: middle; }
+
+  /* stack */
+  .stack { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .stack div { border: 1px solid var(--neel-3); border-radius: var(--radius); padding: 22px; }
+  .stack h3 { margin: 0 0 4px; font: 700 1.2rem/1.2 var(--f-display); }
+  .stack p { margin: 0; color: var(--mist); font-size: 0.92rem; }
+
+  footer { border-top: 1px solid var(--neel-3); padding: 48px 0 64px; color: var(--mist); font-size: 0.9rem; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  footer p { margin: 0 0 6px; }
+
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 900px) {
+    .thesis { grid-template-columns: 1fr; }
+    .thesis .ctas { justify-content: flex-start; }
+    .demo { grid-template-columns: 1fr; }
+    .phone-col { position: static; max-width: 340px; margin: 0 auto; width: 100%; }
+    .lines, .stack { grid-template-columns: 1fr; }
+    .loop { grid-template-columns: 1fr 1fr; row-gap: 8px; }
+    .flows { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) {
+    .fact { grid-template-columns: 1fr; gap: 6px; }
+    .loop { grid-template-columns: 1fr; }
+    .bar-row { grid-template-columns: 1fr 56px; }
+    .bar-row .lbl { grid-column: 1 / -1; }
+    .top nav .btn { padding: 11px 15px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .utterance .w, .reveal { opacity: 1; transform: none; }
+    .wave i { height: var(--h); }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="#" aria-label="Saathi home"><b lang="hi">साथी</b><span>Saathi</span></a>
+    <nav aria-label="Page">
+      <button class="btn ghost" id="listen" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+        <span>Listen to this page</span>
+      </button>
+      <a class="btn ghost" href="#demo">See the demo</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <!-- HERO: the spoken exchange is the thesis -->
+  <section class="hero" aria-labelledby="h1">
+    <div class="wrap">
+      <div class="speaker" aria-hidden="true">You say</div>
+      <p class="utterance" lang="hi" aria-label="राहुल को एक रुपया भेजो">
+        <span class="w">राहुल</span> <span class="w">को</span> <span class="w hl">एक&nbsp;रुपया</span><br><span class="w">भेजो।</span>
+      </p>
+      <p class="gloss">“Rahul ko ek rupaya bhejo”: <i>Send Rahul one rupee.</i></p>
+
+      <div class="wave" aria-hidden="true" id="wave"></div>
+
+      <div class="speaker" aria-hidden="true">Saathi reads it back before paying</div>
+      <div class="reply">
+        <p lang="hi">₹1 राहुल शर्मा को भेज रहे हैं। Confirm?</p>
+        <p class="gloss">You say <i lang="hi">“हाँ”</i>. Saathi taps Pay, then hands the phone back to you for your UPI PIN.</p>
+      </div>
+
+      <div class="thesis">
+        <h1 id="h1">Saathi is a Hindi voice agent that works your Android apps (<em>WhatsApp, Google Pay, Blinkit</em>) for people who can’t see the screen.</h1>
+        <div class="ctas">
+          <button class="btn" id="hear">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+            Hear this exchange
+          </button>
+          <a class="btn ghost" href="#safety">How money stays safe</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section class="band" aria-labelledby="problem-h">
+    <div class="wrap">
+      <p class="eyebrow">The problem</p>
+      <h2 id="problem-h" class="reveal">Formally included. Functionally excluded.</h2>
+      <p class="lede reveal">TalkBack, Android’s screen reader, only works when an app is built for it. Many Indian UPI and shopping apps use unlabeled icons, gesture menus and CAPTCHAs with no audio option. So blind users ask a nephew to send money for them.</p>
+      <div class="facts">
+        <div class="fact reveal">
+          <span class="n">40M</span>
+          <p>Indians live with a visual impairment; about 4.8 million are fully blind.<small>Source: <a href="https://tcd.thecore.in/p/enabling-differently-abled">The Core</a></small></p>
+        </div>
+        <div class="fact reveal">
+          <span class="n">52.5%</span>
+          <p>of commands completed by the best AI phone agent in a three-week study with blind users. Half the time, it didn’t work.<small>Source: <a href="https://arxiv.org/pdf/2609.00524">arXiv 2609.00524</a></small></p>
+        </div>
+        <div class="fact reveal">
+          <span class="n">92%</span>
+          <p>of phones in India run Android, which lets an assistant operate other apps. iOS doesn’t allow that.<small>Source: <a href="https://gs.statcounter.com/os-market-share/mobile-/india">StatCounter, Jul 2026</a></small></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIGNATURE DEMO -->
+  <section class="band" id="demo" aria-labelledby="demo-h">
+    <div class="wrap">
+      <p class="eyebrow">Try it the way our users do</p>
+      <h2 id="demo-h" class="reveal">Sending ₹1, with your eyes closed.</h2>
+      <p class="lede reveal">Press play and the phone goes dark. You’ll hear each step in Hindi, as a blind user would, with captions on screen. Or step through it yourself and see what Saathi reads from the screen at each step.</p>
+
+      <div class="demo">
+        <div class="phone-col">
+          <div class="phone" id="phone">
+            <div class="screen" aria-hidden="true">
+              <div class="bar"><span>9:41</span><span>●●● 4G</span></div>
+
+              <div class="view" data-v="0">
+                <div class="app-title">Home</div>
+                <div class="grid4"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+              </div>
+              <div class="view" data-v="1">
+                <div class="app-title">UPI app</div>
+                <div class="field">Pay by name or phone number</div>
+                <div class="grid4"><span></span><span></span><span></span><span></span></div>
+              </div>
+              <div class="view" data-v="2">
+                <div class="app-title">Search</div>
+                <div class="field typed">Rahul</div>
+                <div class="row"><span class="av">RS</span><div>Rahul Sharma<br><small>rahul.s@okbank</small></div></div>
+                <div class="row"><span class="av">RV</span><div>Rahul Verma<br><small>rv88@okbank</small></div></div>
+              </div>
+              <div class="view" data-v="3">
+                <div class="app-title">Search</div>
+                <div class="field typed">Rahul</div>
+                <div class="row pick"><span class="av">RS</span><div>Rahul Sharma<br><small>rahul.s@okbank</small></div></div>
+                <div class="row"><span class="av">RV</span><div>Rahul Verma<br><small>rv88@okbank</small></div></div>
+              </div>
+              <div class="view" data-v="4">
+                <div class="app-title">Rahul Sharma</div>
+                <div class="amount">₹1</div>
+                <div style="text-align:center;color:#666;font-size:13px">rahul.s@okbank</div>
+                <div class="paybtn">Pay</div>
+              </div>
+              <div class="view" data-v="5">
+                <div class="app-title">Rahul Sharma</div>
+                <div class="amount">₹1</div>
+                <div style="text-align:center;color:#666;font-size:13px">rahul.s@okbank</div>
+                <div class="paybtn held">Pay</div>
+              </div>
+              <div class="view" data-v="6">
+                <div class="pin">
+                  <div style="font-weight:700">Enter UPI PIN</div>
+                  <div class="dots"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <small style="color:#666">Saathi has stopped. TalkBack is back on.</small>
+                </div>
+              </div>
+              <div class="view" data-v="7">
+                <div class="tick">✓</div>
+                <div style="text-align:center;font-weight:700;font-size:18px">₹1 paid to Rahul Sharma</div>
+                <div style="text-align:center;color:#666;font-size:13px;margin-top:6px">Payment successful</div>
+              </div>
+            </div>
+            <div class="blackout" aria-hidden="true"><div class="caption" id="caption" lang="hi"></div></div>
+          </div>
+
+          <div class="reads">
+            <h3>What Saathi reads from the screen</h3>
+            <pre id="tree"></pre>
+          </div>
+        </div>
+
+        <div>
+          <div class="controls">
+            <button class="btn" id="play" aria-pressed="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><path d="M3 3l18 18"/></svg>
+              <span>Play with eyes closed</span>
+            </button>
+            <button class="btn ghost" id="prev" aria-label="Previous step">← Back</button>
+            <button class="btn ghost" id="next" aria-label="Next step">Next →</button>
+          </div>
+          <p class="sr-only" aria-live="polite" id="live"></p>
+          <ol class="log" id="log"></ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SAFETY -->
+  <section class="band" id="safety" aria-labelledby="safety-h">
+    <div class="wrap">
+      <p class="eyebrow">Safety gate</p>
+      <h2 id="safety-h" class="reveal">The AI suggests. Plain code decides.</h2>
+      <p class="lede reveal">Every tap Saathi wants to make goes through a safety check first. That check is ordinary, tested code, not an AI guess. It can let the tap through, hold it until you say yes, or stop it.</p>
+
+      <div class="lines">
+        <div class="line reveal"><span class="k">Hard line</span><h3>Never touches your PIN</h3><p>On a PIN, password or OTP screen, Saathi stops, turns TalkBack back on and says “अपना UPI PIN डालिए”.</p></div>
+        <div class="line reveal"><span class="k">Hard line</span><h3>Never reads back a guess</h3><p>The name and amount it reads to you must appear word for word on the screen. If they don’t, it asks you instead.</p></div>
+        <div class="line reveal"><span class="k">Hard line</span><h3>Unclear means cancel</h3><p>If it doesn’t hear a clear “haan”, it asks once more. Still unclear? It cancels.</p></div>
+      </div>
+
+      <div class="table-scroll reveal">
+        <table class="rules">
+          <thead><tr><th scope="col">Rule</th><th scope="col">What it guards</th><th scope="col">When it applies</th><th scope="col">Result</th></tr></thead>
+          <tbody>
+            <tr><td>R1</td><td>Payments</td><td>Tapping Pay or Send in a UPI app</td><td><span class="verdict v-hold">HOLD · read back</span></td></tr>
+            <tr><td>R2</td><td>Messages</td><td>Tapping Send in WhatsApp</td><td><span class="verdict v-hold">HOLD · read back</span></td></tr>
+            <tr><td>R3</td><td>Orders</td><td>Placing an order on Blinkit</td><td><span class="verdict v-hold">HOLD · read back</span></td></tr>
+            <tr><td>R4</td><td>Read-backs</td><td>Any word not found on the screen</td><td><span class="verdict v-stop">STOP · ask</span></td></tr>
+            <tr><td>R5</td><td>Right person</td><td>Name on screen doesn’t match the name you said</td><td><span class="verdict v-stop">STOP · ask</span></td></tr>
+            <tr><td>R6</td><td>Amount limit</td><td>Amount above the set cap (₹10 while testing)</td><td><span class="verdict v-stop">STOP</span></td></tr>
+            <tr><td>R7</td><td>Secret fields</td><td>Typing into a PIN, OTP or password box</td><td><span class="verdict v-stop">STOP</span></td></tr>
+            <tr><td>R8</td><td>PIN screens</td><td>“Enter UPI PIN” or a blacked-out secure screen</td><td><span class="verdict v-hold">HAND OVER</span></td></tr>
+            <tr><td>R9</td><td>CAPTCHAs</td><td>Any CAPTCHA on screen</td><td><span class="verdict v-hold">HAND OVER</span></td></tr>
+            <tr><td>R10</td><td>Risky taps</td><td>Delete, log out or settings you didn’t ask for</td><td><span class="verdict v-stop">STOP · ask</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Hold SPACE or press ESC at any moment and Saathi stops mid-step. Whenever it stops, finishes or crashes, TalkBack is switched back on, so you’re never left without your screen reader.</p>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="band" aria-labelledby="loop-h">
+    <div class="wrap">
+      <p class="eyebrow">How it works</p>
+      <h2 id="loop-h" class="reveal">One step at a time, checked every time.</h2>
+      <p class="lede reveal">For each command, Saathi repeats the same four steps until the job is done, up to 25 steps. If three steps in a row don’t change the screen, it stops and tells you.</p>
+      <div class="loop">
+        <div class="stage reveal"><h3>Look</h3><p>Reads every button and label on the phone’s screen. Takes a screenshot only when labels are missing.</p><code>device.observe()</code></div>
+        <div class="stage reveal"><h3>Decide</h3><p>An AI model picks exactly one next action and a short Hindi line to say.</p><code>{"type": "tap", "index": 4}</code></div>
+        <div class="stage gate reveal"><h3>Check</h3><p>The safety gate allows it, holds it for your yes, or stops it.</p><code>safety.check()</code></div>
+        <div class="stage reveal"><h3>Act</h3><p>Taps, types or scrolls, then confirms the screen actually changed.</p><code>wait_for_change()</code></div>
+      </div>
+      <div class="loop-foot">
+        <span><b>Speech in:</b> Sarvam Saaras (Hindi, English, Hinglish)</span>
+        <span><b>Speech out:</b> Sarvam Bulbul, ≤ 12 words a line</span>
+        <span><b>Phone control:</b> Mobilerun over wireless ADB</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- FLOWS -->
+  <section class="band" aria-labelledby="flows-h">
+    <div class="wrap">
+      <p class="eyebrow">What you can ask</p>
+      <h2 id="flows-h" class="reveal">Four everyday jobs, done well.</h2>
+      <p class="lede reveal">We picked the tasks blind users most often hand to someone else, and focused on making them reliable rather than adding more apps.</p>
+      <div class="flows">
+        <article class="flow reveal">
+          <span class="tag must">Core</span>
+          <h3>WhatsApp: read and reply</h3>
+          <p class="cmd" lang="hi">मम्मी का last message पढ़ो</p>
+          <p class="en">“Read Mummy’s last message.” Then: “Reply: main 7 baje aaunga.”</p>
+          <p class="stop">Before sending, Saathi reads back who it’s going to and the exact words.</p>
+        </article>
+        <article class="flow reveal">
+          <span class="tag must">Core</span>
+          <h3>Google Pay: send money</h3>
+          <p class="cmd" lang="hi">राहुल को एक रुपया भेजो</p>
+          <p class="en">“Send Rahul one rupee.” If there are two Rahuls, it asks which one.</p>
+          <p class="stop">Reads back the name, UPI ID and amount, then hands over for your PIN.</p>
+        </article>
+        <article class="flow reveal">
+          <span class="tag">Next</span>
+          <h3>Blinkit: order groceries</h3>
+          <p class="cmd" lang="hi">Blinkit से अमूल दूध 1 लीटर मंगाओ</p>
+          <p class="en">“Order 1 litre of Amul milk from Blinkit.”</p>
+          <p class="stop">Reads back the items and the total before placing the order.</p>
+        </article>
+        <article class="flow reveal">
+          <span class="tag">Next</span>
+          <h3>Any app: what’s on screen?</h3>
+          <p class="cmd" lang="hi">स्क्रीन पे क्या है?</p>
+          <p class="en">“What’s on the screen?”</p>
+          <p class="stop">One sentence about the screen, plus the top three things you can do there.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- NUMBERS -->
+  <section class="band" aria-labelledby="num-h">
+    <div class="wrap">
+      <p class="eyebrow">Measured, not promised</p>
+      <h2 id="num-h" class="reveal">We test every flow on a real phone.</h2>
+      <p class="lede reveal">An automated test runs each task ten times on a real phone. It never places real orders, and test payments are capped at ₹10 to our own accounts. The striped bars are our targets. Measured results replace them when the test run finishes.</p>
+      <div class="bars" id="bars">
+        <div class="bar-row"><span class="lbl">Best agent today<small>Study with blind users</small></span><div class="track"><div class="fill base" data-w="52.5"></div></div><span class="val">52.5%</span></div>
+        <div class="bar-row"><span class="lbl">WhatsApp read &amp; reply<small>Target</small></span><div class="track"><div class="fill target" data-w="90"></div></div><span class="val">≥ 9/10</span></div>
+        <div class="bar-row"><span class="lbl">Send ₹1 up to PIN<small>Target</small></span><div class="track"><div class="fill target" data-w="80"></div></div><span class="val">≥ 8/10</span></div>
+        <div class="bar-row"><span class="lbl">Blinkit order<small>Target</small></span><div class="track"><div class="fill target" data-w="70"></div></div><span class="val">≥ 7/10</span></div>
+      </div>
+      <div class="legend"><span><i style="background:var(--mist)"></i>Published result</span><span><i style="background:repeating-linear-gradient(-45deg,var(--haldi) 0 4px,transparent 4px 7px);border:1px solid var(--haldi)"></i>Saathi target</span><span>Payments, messages or orders sent without your yes: <b style="color:var(--chalk)">0, enforced by tests</b></span></div>
+    </div>
+  </section>
+
+  <!-- STACK -->
+  <section class="band" aria-labelledby="stack-h">
+    <div class="wrap">
+      <p class="eyebrow">Built with</p>
+      <h2 id="stack-h" class="reveal">Built in 80 hours for HACK47.</h2>
+      <p class="lede reveal">Today a laptop does the thinking and controls the phone wirelessly. Next is an Android app that runs on the phone itself, with no laptop needed.</p>
+      <div class="stack">
+        <div class="reveal"><h3>Mobilerun</h3><p>Open-source (MIT) Android control: reads the screen and taps through an accessibility service.</p></div>
+        <div class="reveal"><h3>Sarvam</h3><p>Saaras for Hindi and Hinglish speech-to-text. Bulbul for natural Hindi speech.</p></div>
+        <div class="reveal"><h3>OpenAI</h3><p>Picks the next step from the screen, with strict, validated JSON output. Data sharing is off.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <p><b lang="hi" style="color:var(--haldi);font-size:1.3rem">साथी</b> means “companion”.</p>
+      <p>Built by Aadi for HACK47: OFFGRID, October 2026.</p>
+    </div>
+    <div>
+      <p><a href="https://hack47-offgrid.devpost.com/">HACK47 on Devpost</a></p>
+      <p>Screen recordings stay on the laptop and are never uploaded.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---- hero word stagger + waveform ---- */
+  document.querySelectorAll('.utterance .w').forEach((w, i) => w.style.animationDelay = (0.15 + i * 0.12) + 's');
+  const wave = document.getElementById('wave');
+  for (let i = 0; i < 48; i++) {
+    const b = document.createElement('i');
+    const h = 25 + Math.abs(Math.sin(i * 0.55) * 60) + (i % 3) * 5;
+    b.style.setProperty('--h', Math.min(h, 100) + '%');
+    b.style.animationDelay = (i * 0.045) + 's';
+    wave.appendChild(b);
+  }
+
+  /* ---- speech (browser voice; captions always shown) ---- */
+  const synth = window.speechSynthesis;
+  let voices = [];
+  const loadVoices = () => { voices = synth ? synth.getVoices() : []; };
+  if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
+  function speak(text, lang = 'hi-IN') {
+    return new Promise(resolve => {
+      if (!synth) return setTimeout(resolve, 2600);
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = lang;
+      const v = voices.find(v => v.lang === lang) || voices.find(v => v.lang.startsWith(lang.slice(0, 2)));
+      if (v) u.voice = v;
+      u.rate = 0.95;
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      u.onend = finish; u.onerror = finish;
+      setTimeout(finish, 9000);
+      synth.speak(u);
+    });
+  }
+  const stopSpeech = () => synth && synth.cancel();
+
+  document.getElementById('hear').addEventListener('click', async () => {
+    stopSpeech();
+    await speak('राहुल को एक रुपया भेजो।');
+    await speak('एक रुपया राहुल शर्मा को भेज रहे हैं। कन्फर्म?');
+    await speak('हाँ।');
+  });
+
+  /* ---- listen to page ---- */
+  const listen = document.getElementById('listen');
+  listen.addEventListener('click', () => {
+    if (listen.getAttribute('aria-pressed') === 'true') {
+      stopSpeech(); listen.setAttribute('aria-pressed', 'false'); return;
+    }
+    listen.setAttribute('aria-pressed', 'true');
+    const text = [...document.querySelectorAll('main h1, main h2, main .lede')].map(n => n.textContent.trim()).join('. ');
+    speak(text, 'en-IN').then(() => listen.setAttribute('aria-pressed', 'false'));
+  });
+
+  /* ---- demo steps ---- */
+  const steps = [
+    { who: 'You', user: true, hi: 'राहुल को एक रुपया भेजो', en: 'Send Rahul one rupee.', v: 0,
+      tree: '[0] TextView "Home"\n[3] Button "GPay" (180,940)' },
+    { who: 'Saathi', act: 'open_app gpay', verdict: ['allow', 'ALLOW'], hi: 'GPay खोल रहा हूँ', en: 'Opening GPay.', v: 1,
+      tree: '[4] EditText "Pay by name or phone number" <b>editable</b> (540,320)' },
+    { who: 'Saathi', act: 'type "Rahul" → [4]', verdict: ['allow', 'ALLOW'], hi: 'दो राहुल मिले। शर्मा या वर्मा?', en: 'Found two Rahuls. Sharma or Verma? It asks instead of guessing.', v: 2,
+      tree: '[7] Button "Rahul Sharma" desc="rahul.s@okbank"\n[8] Button "Rahul Verma" desc="rv88@okbank"' },
+    { who: 'You', user: true, hi: 'शर्मा', en: 'Sharma.', v: 3,
+      tree: '[7] Button "<b>Rahul Sharma</b>" desc="rahul.s@okbank"' },
+    { who: 'Saathi', act: 'type "1" → amount', verdict: ['allow', 'ALLOW'], hi: 'एक रुपया डाल दिया', en: 'Entered one rupee.', v: 4,
+      tree: '[2] TextView "₹1"\n[3] TextView "rahul.s@okbank"\n[9] Button "Pay" (540,1820)' },
+    { who: 'Saathi', act: 'tap [9] "Pay"', verdict: ['hold', 'HOLD · R1'], hi: '₹1 राहुल शर्मा को भेज रहे हैं। Confirm?', en: 'Every word checked against the screen. Name matches. ₹1 is under the cap.', v: 5,
+      tree: 'R4 grounded: "<b>₹1</b>" ✓  "<b>Rahul Sharma</b>" ✓\nR5 name match: 100 ≥ 80 ✓\nR6 ₹1 ≤ MAX_AMOUNT_INR ✓' },
+    { who: 'You', user: true, hi: 'हाँ', en: 'Yes. Saathi taps Pay.', v: 5,
+      tree: 'confirm("हाँ") → yes\nexecute tap [9]' },
+    { who: 'Saathi', act: 'PIN screen detected', verdict: ['stop', 'HAND OVER · R8'], hi: 'अपना UPI PIN डालिए', en: 'Enter your UPI PIN. Saathi stops and turns TalkBack back on.', v: 6,
+      tree: '[1] TextView "<b>Enter UPI PIN</b>"\n→ handoff · talkback.restore()' },
+    { who: 'Saathi', act: 'read result', verdict: ['allow', 'DONE'], hi: '₹1 राहुल शर्मा को भेज दिए। Payment successful.', en: 'Sent ₹1 to Rahul Sharma. Payment successful.', v: 7,
+      tree: '[1] TextView "₹1 paid to Rahul Sharma"\n[2] TextView "Payment successful"' },
+  ];
+
+  const log = document.getElementById('log');
+  const tree = document.getElementById('tree');
+  const views = [...document.querySelectorAll('.screen .view')];
+  const caption = document.getElementById('caption');
+  const live = document.getElementById('live');
+  const phone = document.getElementById('phone');
+  const play = document.getElementById('play');
+
+  steps.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.tabIndex = 0;
+    li.innerHTML = `
+      <div class="who"><span>${s.who}</span>${s.act ? `<span class="mono">${s.act}</span>` : ''}${s.verdict ? `<span class="verdict v-${s.verdict[0]}">${s.verdict[1]}</span>` : ''}</div>
+      <p class="said ${s.user ? 'user' : ''}" lang="hi">${s.hi}</p>
+      <p class="en">${s.en}</p>`;
+    li.addEventListener('click', () => { stopPlay(); go(i); });
+    li.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stopPlay(); go(i); } });
+    log.appendChild(li);
+  });
+  const items = [...log.children];
+
+  let cur = 0;
+  function go(i) {
+    cur = Math.max(0, Math.min(steps.length - 1, i));
+    const s = steps[cur];
+    items.forEach((li, j) => li.classList.toggle('on', j <= cur));
+    views.forEach(v => v.classList.toggle('on', +v.dataset.v === s.v));
+    tree.innerHTML = s.tree;
+    caption.textContent = s.hi;
+    live.textContent = `${s.who}: ${s.hi}. ${s.en}`;
+  }
+  go(0);
+
+  document.getElementById('prev').addEventListener('click', () => { stopPlay(); go(cur - 1); });
+  document.getElementById('next').addEventListener('click', () => { stopPlay(); go(cur + 1); });
+
+  let playing = false;
+  function stopPlay() {
+    playing = false; stopSpeech();
+    phone.classList.remove('eyes-closed');
+    play.setAttribute('aria-pressed', 'false');
+    play.querySelector('span').textContent = 'Play with eyes closed';
+  }
+  play.addEventListener('click', async () => {
+    if (playing) return stopPlay();
+    playing = true;
+    play.setAttribute('aria-pressed', 'true');
+    play.querySelector('span').textContent = 'Stop';
+    phone.classList.add('eyes-closed');
+    for (let i = 0; i < steps.length && playing; i++) {
+      go(i);
+      await speak(steps[i].hi.replace('₹1', 'एक रुपया'));
+      if (playing) await new Promise(r => setTimeout(r, 500));
+    }
+    if (playing) setTimeout(stopPlay, 800);
+  });
+
+  /* ---- reveals + bars ---- */
+  const fillBars = () => document.querySelectorAll('.fill').forEach(f => f.style.transform = `scaleX(${f.dataset.w / 100})`);
+  if (reduce || !('IntersectionObserver' in window)) {
+    document.querySelectorAll('.reveal').forEach(n => n.classList.add('in'));
+    fillBars();
+  } else {
+    const io = new IntersectionObserver(es => es.forEach(e => {
+      if (!e.isIntersecting) return;
+      e.target.classList.add('in');
+      if (e.target.id === 'bars') fillBars();
+      io.unobserve(e.target);
+    }), { threshold: 0.15 });
+    document.querySelectorAll('.reveal, #bars').forEach(n => io.observe(n));
+  }
+})();
+</script>
+</body>
+</html>
