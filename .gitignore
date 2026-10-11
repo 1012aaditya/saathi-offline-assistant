@@ -1,0 +1,23 @@
+# secrets
+.env
+
+# traces contain screenshots of personal apps
+traces/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# local audio from experiments
+*.wav
+
+.DS_Store
+
+# raw screen dumps contain personal chats / payment screens
+tests/fixtures/raw/
+
+# local experiment output (audio)
+scratch/
