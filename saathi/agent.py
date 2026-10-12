@@ -23,7 +23,7 @@ from openai import (
     RateLimitError,
 )
 
-from saathi import blinkit, controls, device, safety, talkback
+from saathi import blinkit, controls, device, safety, talkback, whatsapp
 from saathi.actions import (
     MODEL_SCHEMA,
     AskUser,
@@ -235,6 +235,8 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
     settings = get_settings()
     cap = settings.max_amount_inr
     summary_mode = is_screen_summary(command)
+    unread_mode = not summary_mode and whatsapp.is_unread_query(command)
+    inbox = whatsapp.UnreadState()
 
     async def _confirm(readback: str) -> bool:
         return await (confirm(readback) if confirm else spoken_confirm(ask, readback))
@@ -276,7 +278,11 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
             await asyncio.wait_for(device.reconnect(), DEVICE_TIMEOUT_S)
             return await asyncio.wait_for(fn(*args, **kwargs), DEVICE_TIMEOUT_S)
 
-    await asyncio.wait_for(device.connect(portal_mode="required"), DEVICE_TIMEOUT_S)
+    try:
+        await asyncio.wait_for(device.connect(portal_mode="required"), DEVICE_TIMEOUT_S)
+    except DEVICE_ERRORS:
+        # No phone: say it plainly instead of crashing (Wireless debugging often turns off).
+        return await finish("halt", "फ़ोन से कनेक्शन नहीं है। फ़ोन में Wireless debugging चालू कीजिए।", 0)
     ctx = await build_context(command)
     trace.step(0, {"context": ctx.__dict__, "summary_mode": summary_mode})
     await talkback.suspend()
@@ -303,7 +309,10 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
             if answers:
                 task += " (user already chose: " + "; ".join(answers) + ")"
             plan = blinkit.Plan(None)
-            if screen.package == BLINKIT and not summary_mode:
+            if unread_mode:
+                # "Kiske message aaye hain?" is fully scripted: no model call at all.
+                plan = blinkit.Plan(whatsapp.unread_next(screen, inbox), "unread summary")
+            elif screen.package == BLINKIT and not summary_mode:
                 shop.observe_cart(screen)
                 ctx.items_added = shop.added
                 plan = blinkit.next_action(screen, shop, ctx.quantity, ctx.items_added)

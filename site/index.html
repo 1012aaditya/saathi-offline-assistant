@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%234338f2%22/%3E%3Ctext x=%2232%22 y=%2244%22 font-size=%2234%22 text-anchor=%22middle%22 fill=%22%23ffb627%22 font-family=%22sans-serif%22 font-weight=%22700%22%3E%E0%A4%B8%3C/text%3E%3C/svg%3E">
+<meta property="og:title" content="Saathi Voice Agent">
+<meta property="og:description" content="Saathi is a voice agent that operates everyday Android apps for blind and low-vision users, in Hindi, English or a mix, with a hard safety layer for money.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#4338f2">
 <title>Saathi Voice Agent</title>
 <meta name="description" content="Saathi is a voice agent that operates everyday Android apps for blind and low-vision users, in Hindi, English or a mix, with a hard safety layer for money.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,6 +25,8 @@
     --pink: #ff5c93;
     --mint: #19c99a;
     --coral: #f0473c;
+    --pink-ink: #c2185b;   /* pink for backgrounds behind white text (contrast 5.9) */
+    --coral-ink: #c62828;  /* coral for backgrounds behind white text (contrast 5.6) */
 
     --f-display: "Anek Devanagari", "Mukta", system-ui, sans-serif;
     --f-body: "Mukta", system-ui, sans-serif;
@@ -110,7 +117,7 @@
   .bubbles { display: grid; gap: 10px; }
   .bub { max-width: 86%; padding: 11px 15px; border-radius: 18px; font-size: 0.98rem; line-height: 1.35; }
   .bub small { display: block; margin-top: 4px; font-size: 0.78rem; opacity: .85; }
-  .bub.you { justify-self: end; background: var(--pink); color: #fff; border-bottom-right-radius: 6px; }
+  .bub.you { justify-self: end; background: var(--pink-ink); color: #fff; border-bottom-right-radius: 6px; }
   .bub.saathi { justify-self: start; background: var(--lilac); border-bottom-left-radius: 6px; }
   .bub.hold { background: #fff4d9; box-shadow: inset 0 0 0 2px var(--marigold); }
   .bub.pin { background: var(--ink); color: #fff; }
@@ -144,7 +151,7 @@
   .photo { position: relative; display: block; width: 100%; height: auto; aspect-ratio: 866 / 1300; object-fit: cover; border-radius: 34px; box-shadow: var(--shadow); }
   .float { position: absolute; z-index: 2; background: #fff; border-radius: 18px; padding: 11px 15px; font-size: 0.9rem; line-height: 1.3; box-shadow: 0 18px 36px -18px rgba(23,21,59,.45); max-width: 74%; }
   .float b { display: block; font-size: 0.72rem; font-family: var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--blue); margin-bottom: 3px; }
-  .f-say { top: 30%; right: -6%; background: var(--pink); color: #fff; border-bottom-right-radius: 6px; display: flex; align-items: center; gap: 10px; }
+  .f-say { top: 30%; right: -6%; background: var(--pink-ink); color: #fff; border-bottom-right-radius: 6px; display: flex; align-items: center; gap: 10px; }
   .f-say .mic { width: 10px; height: 10px; border-radius: 50%; background: #fff; flex: none; box-shadow: 0 0 0 4px rgba(255,255,255,.35); }
   .f-reply { top: 47%; left: -7%; border-bottom-left-radius: 6px; }
   .f-hold { bottom: 18%; right: -4%; background: #fff4d9; box-shadow: inset 0 0 0 2px var(--marigold), 0 18px 36px -18px rgba(23,21,59,.45); }
@@ -198,14 +205,14 @@
   .blackout .cap-hi { margin-top: 10px; font-size: 0.95rem; color: rgba(255,255,255,.7); }
 
   .reads { margin-top: 14px; background: rgba(255,255,255,.1); border-radius: 14px; padding: 12px 14px; }
-  .reads h3 { margin: 0 0 6px; font: 500 0.68rem/1 var(--f-mono); color: rgba(255,255,255,.75); letter-spacing: .08em; text-transform: uppercase; }
+  .reads h3 { margin: 0 0 6px; font: 500 0.68rem/1 var(--f-mono); color: #fff; letter-spacing: .08em; text-transform: uppercase; }
   .reads pre { margin: 0; font: 400 0.72rem/1.55 var(--f-mono); color: #fff; white-space: pre-wrap; word-break: break-word; min-height: 3.1em; }
   .reads pre b { color: var(--marigold); font-weight: 500; }
 
   .stage { min-height: 300px; }
   .stage .who-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
   .who { font: 600 0.8rem/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; padding: 7px 11px; border-radius: 8px; background: #fff; color: var(--blue-deep); }
-  .who.you { background: var(--pink); color: #fff; }
+  .who.you { background: var(--pink-ink); color: #fff; }
   .act { font: 400 0.8rem/1 var(--f-mono); color: rgba(255,255,255,.78); }
   .verdict { font: 500 0.72rem/1 var(--f-mono); padding: 6px 9px; border-radius: 7px; letter-spacing: .06em; }
   .v-allow { background: var(--mint); color: var(--ink); }
@@ -234,7 +241,7 @@
   .lane span { font-size: 0.85rem; }
   .l-allow { top: 18%; background: var(--mint); }
   .l-hold { top: 50%; background: var(--marigold); }
-  .l-stop { top: 82%; background: var(--coral); color: #fff; }
+  .l-stop { top: 82%; background: var(--coral-ink); color: #fff; }
   .chip { position: absolute; left: 4%; top: 50%; transform: translateY(-50%); padding: 9px 14px; border-radius: 999px; background: #fff; font-weight: 500; font-size: 0.88rem; white-space: nowrap; box-shadow: 0 6px 16px -8px rgba(23,21,59,.4); opacity: 0; z-index: 3; }
 
   .try { margin: -8px 0 32px; }
@@ -725,7 +732,7 @@
           <p class="then">One sentence about the screen, plus the three most useful things you can do there.</p>
         </article>
       </div>
-      <p class="more-apps rv"><b>New, in beta: Walk mode.</b> Point the phone’s camera ahead and hear Hindi warnings with a rough distance, like <span lang="hi">“सामने दरवाज़ा, लगभग 3 मीटर”</span> (door ahead, about 3 metres). It runs entirely on the phone, works offline, and only ever warns: it never says the way is safe. An aid alongside a cane, not a replacement.</p>
+      <p class="more-apps rv"><b>New, in beta: Walk mode.</b> Point the phone’s camera ahead and hear Hindi warnings with a rough distance, like <span lang="hi">“सामने दरवाज़ा, लगभग 3 मीटर”</span> (door ahead, about 3 metres). It runs entirely on the phone, works offline, and only ever warns: it never says the way is safe. An aid alongside a cane, not a replacement. <a href="../walk/index.html">Try walk mode →</a></p>
       <p class="more-apps rv">Coming later: PhonePe, BHIM, calls, SMS, cabs, trains, medicines, food delivery and more. <a href="settings.html#apps">See every app and choose what Saathi can do →</a></p>
     </div>
   </section>

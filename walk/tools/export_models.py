@@ -13,7 +13,10 @@ from pathlib import Path
 from ultralytics import YOLO
 
 OUT = Path(__file__).resolve().parent.parent / "models"
-MODELS = {"yolov8n.pt": "coco", "yolov8n-oiv7.pt": "oiv7"}  # COCO 80 classes · Open Images V7 601 classes
+MODELS = {
+    "yolov8n.pt": "coco",
+    "yolov8n-oiv7.pt": "oiv7",
+}  # COCO 80 classes · Open Images V7 601 classes
 
 OUT.mkdir(exist_ok=True)
 for weights, tag in MODELS.items():

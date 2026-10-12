@@ -13,6 +13,7 @@ import base64
 import hashlib
 import io
 import json
+import sys
 import threading
 import wave
 from pathlib import Path
@@ -39,6 +40,11 @@ PHRASES = {
     "stopped": "रुक गया। आप आगे खुद कर सकते हैं।",
     "bye": "ठीक है, फिर मिलते हैं।",
     "net_error": "इंटरनेट में दिक्कत है, फिर से कोशिश कीजिए।",
+    "anything_else": "और कुछ?",
+    "stop_hint": "काम के बीच रोकने के लिए Enter दबाइए।",
+    "slower": "ठीक है, धीरे बोलूँगा।",
+    "faster": "ठीक है, थोड़ा तेज़ बोलूँगा।",
+    "nothing_to_repeat": "अभी दोहराने के लिए कुछ नहीं है।",
 }
 
 
@@ -147,6 +153,10 @@ class Voice:
         self.keys = Keys() if _space_mode_available() else None
         self.dedup = narrator.Dedup()
         self._play_lock = asyncio.Lock()
+        self.pace = 1.0
+        self.agent_running = False  # Enter while a task runs = stop (Enter mode)
+        self._lines: asyncio.Queue[str] | None = None
+        self._waiter: asyncio.Future[str] | None = None
         CACHE.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -173,14 +183,17 @@ class Voice:
             return text  # speak it anyway rather than stay silent
 
     async def _tts(self, text: str) -> Path:
-        path = (
-            CACHE
-            / f"{hashlib.sha1(f'{TTS_MODEL}|{self.lang}|{text}'.encode()).hexdigest()[:16]}.wav"
-        )
+        key = f"{TTS_MODEL}|{self.lang}|{self.pace}|{text}"
+        path = CACHE / f"{hashlib.sha1(key.encode()).hexdigest()[:16]}.wav"
         if not path.exists():
             r = await self.http.post(
                 "/text-to-speech",
-                json={"text": text, "language_code": self.lang, "model": TTS_MODEL},
+                json={
+                    "text": text,
+                    "language_code": self.lang,
+                    "model": TTS_MODEL,
+                    "pace": self.pace,
+                },
             )
             r.raise_for_status()
             path.write_bytes(base64.b64decode(r.json()["audios"][0]))
@@ -213,6 +226,35 @@ class Voice:
 
     # -- listening -----------------------------------------------------------------------
 
+    # -- Enter key: one stdin reader, shared by push-to-talk and stop-while-running ----------
+
+    def _start_stdin(self) -> None:
+        if self._lines is not None:
+            return
+        loop = asyncio.get_running_loop()
+        self._lines = asyncio.Queue()
+
+        def reader() -> None:
+            for line in sys.stdin:
+                loop.call_soon_threadsafe(self._dispatch, line.rstrip("\n"))
+
+        threading.Thread(target=reader, daemon=True).start()
+
+    def _dispatch(self, line: str) -> None:
+        if self._waiter is not None and not self._waiter.done():
+            self._waiter.set_result(line)
+        elif self.agent_running:
+            print("  ⏹  stopping…", flush=True)
+            controls.interrupt()
+
+    async def _next_line(self) -> str:
+        self._start_stdin()
+        self._waiter = asyncio.get_running_loop().create_future()
+        try:
+            return await self._waiter
+        finally:
+            self._waiter = None
+
     async def record(self) -> bytes | None:
         """One push-to-talk utterance. None if the user asked to quit (ESC / 'q')."""
         rec = Recorder()
@@ -227,13 +269,12 @@ class Voice:
             print("  ● recording…", flush=True)
             await asyncio.to_thread(self.keys.space_up.wait)
         else:
-            cmd = await asyncio.to_thread(
-                input, "  🎙  Press Enter, then speak (q + Enter to quit): "
-            )
-            if cmd.strip().lower() == "q":
+            print("  🎙  Press Enter, then speak (q + Enter to quit): ", end="", flush=True)
+            if (await self._next_line()).strip().lower() == "q":
                 return None
             rec.start()
-            await asyncio.to_thread(input, "  ● recording… press Enter when done ")
+            print("  ● recording… press Enter when done ", end="", flush=True)
+            await self._next_line()
         await asyncio.sleep(0.25)  # keep the tail of the last word
         return rec.stop()
 

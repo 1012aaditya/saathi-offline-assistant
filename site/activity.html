@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%234338f2%22/%3E%3Ctext x=%2232%22 y=%2244%22 font-size=%2234%22 text-anchor=%22middle%22 fill=%22%23ffb627%22 font-family=%22sans-serif%22 font-weight=%22700%22%3E%E0%A4%B8%3C/text%3E%3C/svg%3E">
+<meta property="og:title" content="Saathi Activity">
+<meta property="og:description" content="Everything Saathi did for you: tasks, payments, safety checks and time taken, with charts you can read, hear and explore by keyboard.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#4338f2">
 <title>Saathi Activity</title>
 <meta name="description" content="Everything Saathi did for you: tasks, payments, safety checks and time taken, with charts you can read, hear and explore by keyboard.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -331,7 +336,8 @@
     }
     return out.sort((a, b) => b.ts - a.ts);
   }
-  const ALL_TASKS = makeTasks();
+  let ALL_TASKS = makeTasks();
+  let REAL = false;
 
   /* ================= state, filters ================= */
   const KEY = 'saathi-settings-v1';
@@ -529,7 +535,7 @@
     const asked = tasks.reduce((s, t) => s + t.holds, 0);
     const scope = appSel === 'all' ? '' : ` in ${appSel}`;
     document.getElementById('summary').textContent = tasks.length
-      ? `${rangeWords()[0].toUpperCase() + rangeWords().slice(1)}, Saathi did ${plural(tasks.length, 'task')} for you${scope}. ${ok} finished, ${cancelled} you cancelled, and ${failed} didn’t work.` + (pays.length ? ` It sent ₹${money} in ${plural(pays.length, 'payment')}, each after your yes.` : '') + (asked ? ` It asked before acting ${plural(asked, 'time')}.` : '')
+      ? `${rangeWords()[0].toUpperCase() + rangeWords().slice(1)}, Saathi did ${plural(tasks.length, 'task')} for you${scope}. ${ok} finished, ${cancelled} ${REAL ? 'stopped at the read-back (test runs never send or order)' : 'you cancelled'}, and ${failed} didn’t work.` + (pays.length ? ` It sent ₹${money} in ${plural(pays.length, 'payment')}, each after your yes.` : '') + (asked ? ` It asked before acting ${plural(asked, 'time')}.` : '')
       : `No activity ${rangeWords()}${scope}.`;
     const pct = tasks.length ? Math.round((ok / tasks.length) * 100) : 0;
     const delta = prev ? (() => { const d = tasks.length - prev.length; return d === 0 ? 'Same as the 7 days before' : `${d > 0 ? '+' : '−'}${Math.abs(d)} vs the 7 days before`; })() : 'Over the whole range';
@@ -661,6 +667,25 @@
   });
 
   render();
+
+  /* Real, anonymised test runs (scripts/export_activity.py → data/activity.json) replace the
+     sample data when present. No names, messages or screens are in that file. */
+  fetch('data/activity.json', { cache: 'no-store' })
+    .then(r => (r.ok ? r.json() : null))
+    .then(d => {
+      if (!d || !Array.isArray(d.tasks) || !d.tasks.length) return;
+      ALL_TASKS = d.tasks.map(t => ({ ...t, ts: new Date(t.ts) })).sort((a, b) => b.ts - a.ts);
+      REAL = true;
+      const first = ALL_TASKS[ALL_TASKS.length - 1].ts;
+      const ageDays = Math.ceil((today - dayStart(first)) / 864e5) + 1;
+      if (ageDays > range) { range = ageDays <= 7 ? 7 : 30; const r = document.getElementById('r' + range); if (r) r.checked = true; }
+      const note = document.querySelector('.proto');
+      if (note) note.textContent = `Real test runs on our Android test device (${ALL_TASKS.length} tasks since ${fmtDay(first)}), anonymised: no names, messages or screens. Test runs stop before sending or ordering, so those show as “Cancelled”.`;
+      const restore = document.getElementById('restore');
+      if (restore) restore.closest('p').hidden = true;
+      render();
+    })
+    .catch(() => {});
 
   /* ================= voice commands (see voice.js) ================= */
   const V = window.SaathiVoice;

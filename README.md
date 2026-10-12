@@ -16,6 +16,8 @@ Built for HACK47: OFFGRID (Oct 2026).
 | "Mummy ko reply karo: …" | Types the reply, reads back recipient + text from the screen, sends only on a clear "haan" | 3/3 to the read-back |
 | "Screen pe kya hai?" | One sentence about the screen + the top 3 things you can do. Read-only | 3/3 |
 | "Blinkit se Amul doodh 1 litre mangao" | Searches, picks the best match (asks if two tie), adds one, opens the cart, reads back the cart items and stops before ordering | 10/10 to the read-back |
+| "Kiske message aaye hain?" | Opens WhatsApp, uses the Unread filter, reads names + unread counts, turns the filter back off | Unit-tested; device test pending |
+| Voice controls | "phir se bolo", "dheere / tez bolo", "madad", "bas"; follow-ups like "reply karo: …" reuse the last contact; Enter stops a running task; "और कुछ?" after each task | Unit-tested |
 | Walk mode (beta, separate page) | Phone camera → spoken Hindi obstacle warnings with rough distance, on-device | Unit-tested; not yet field-tested |
 
 Measured on 12 Oct 2026 on a Samsung Galaxy Tab S6 Lite (Android 13), model `gpt-5-nano`, about ₹0.05 per task. Details: [`eval/results.md`](eval/results.md). Samples are small (3–10 runs).
@@ -80,7 +82,7 @@ uv run python eval/run_flows.py --flow all --n 10             # success table �
 `.env` keys: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-5-nano`), `SARVAM_API_KEY`, `ADB_SERIAL`, `MAX_AMOUNT_INR` (10), `ALLOW_ORDERS` (false), `SAATHI_LANG` (hi-IN), optional `OPENAI_BASE_URL` (e.g. Ollama).
 
 **Walk mode:** `python3 -m http.server 8790 -d walk`. See [`walk/README.md`](walk/README.md) (the camera needs https on a real phone).
-**Website:** `python3 -m http.server 8765 -d site`.
+**Website:** from the repo root, `python3 -m http.server 8765`, then open `/site/` (the walk-mode link needs `/walk/` next to it). Refresh the Activity page's real data with `uv run python scripts/export_activity.py` (anonymised: no names, messages or screens). Lighthouse accessibility: 100 on all three pages.
 
 ---
 
