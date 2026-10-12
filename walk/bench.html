@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saathi depth benchmark</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 16px; background: #111; color: #eee; }
+  button { font-size: 1.2rem; padding: 14px 20px; border-radius: 12px; border: 0; background: #ffb627; color: #111; font-weight: 700; }
+  table { border-collapse: collapse; margin-top: 16px; width: 100%; }
+  td, th { border-bottom: 1px solid #333; padding: 6px 8px; text-align: left; font-size: 0.95rem; }
+  .ok { color: #19c99a; } .slow { color: #ffb627; } .bad { color: #ff6b6b; }
+  #log { white-space: pre-wrap; font: 12px ui-monospace, monospace; color: #aaa; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>Depth model benchmark</h1>
+<p id="env">…</p>
+<button id="go" type="button">Run benchmark (about 1–3 min)</button>
+<table aria-live="polite"><thead><tr><th>Model</th><th>Size</th><th>Backend</th><th>ms / frame</th></tr></thead><tbody id="rows"></tbody></table>
+<p id="done"></p>
+<div id="log"></div>
+<script type="module" src="bench.js"></script>
+</body>
+</html>

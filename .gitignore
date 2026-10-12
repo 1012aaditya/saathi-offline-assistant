@@ -24,3 +24,6 @@ scratch/
 
 # TTS phrase cache
 cache/
+
+# depth-model benchmark downloads (not shipped)
+walk/models/bench/

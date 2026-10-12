@@ -107,6 +107,8 @@ Next: **Expo phone app** — owner will design it first (not started). Still ope
 | 12 Oct | Order read-back lists the cart items verbatim and flags "Shipment of N items" when some are off-screen | Old fallback could read a recommended item's price as the total |
 | 13 Oct | Skip payments for now; focus on autonomy + user control for blind users, on the phone | Owner choice: bank-SIM setup + privacy trade-offs vs. ~1 day to feature freeze; WhatsApp send-hold + Blinkit order-hold already demo the confirm-before-irreversible design |
 | 13 Oct | One working session from here (`3-days-43`); website and walk-mode sessions stopped editing | Three sessions shared one folder; `git add -A` had swept `site/` into agent commits |
+| 13 Oct | **Android-first native app**; the agent runs on the phone via an AccessibilityService (no laptop); API keys behind a small proxy; walk mode native + on-device depth. Spec: `ANDROID_APP.md`; screens to be designed in Google Stitch (MCP `stitch`, project-local config) | Laptop tether, browser latency and iOS limits; Android is ~92% of Indian phones and the only platform that allows operating other apps |
+| 13 Oct | Walk mode: depth candidate = Depth Anything V2 Small int8 (Apache-2.0, 27 MB): 324 ms on iPhone with 1 thread, MiDaS small (64 MB) failed to load in Safari | Benchmark `walk/bench.html`; multi-thread result pending (Safari needs real COOP/COEP headers: `scripts/serve_walk.py`) |
 | 12 Oct | Rename `.env` `LANG` → `SAATHI_LANG` (when voice.py lands) | macOS shell already sets `LANG` (e.g. `en_US.UTF-8`), which overrides `.env` in pydantic-settings |
 
 ---
