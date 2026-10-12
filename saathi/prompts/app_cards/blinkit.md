@@ -1,4 +1,5 @@
-Blinkit (com.grofers.customerapp) — hints from real screens:
+Blinkit (com.grofers.customerapp):
+- Start with the `search` action (English query, e.g. "amul milk 1 litre"); it opens the results directly. Saathi then picks the best-matching product, adds it, opens the cart and stops at checkout by itself — you are only asked when something unexpected is on screen.
 - On launch Blinkit may ask for location. Never tap "Use current location" and never allow a permission (it is blocked anyway; choose "Don't allow" if a system dialog appears). Tap "Select location manually" (or "Not now"/"Skip"), then close any offer pop-up ("Close" / ✕). The saved address is used.
 - Search: tap the search bar (rid=qd_search_bar, desc "Search for atta, dal, coke and more"), then `type` the product in simple English (e.g. "amul milk 1 litre") with the search field's index, even if the user spoke Hindi. The search is submitted automatically after typing, so the NEXT screen shows product results — do not type the query again; pick a product from the results.
 - Blinkit hides its real search text field from accessibility; it appears in the list as `EditText ... desc="focused field" rid=edittext` while you are typing. Its text shows what is in the search box.

@@ -25,6 +25,13 @@ class Scroll(BaseModel):
     direction: Literal["up", "down"]
 
 
+class Search(BaseModel):
+    """App product search via a deep link (Blinkit): lands directly on the results."""
+
+    type: Literal["search"] = "search"
+    query: str = Field(min_length=1, max_length=80)
+
+
 class Back(BaseModel):
     type: Literal["back"] = "back"
 
@@ -58,7 +65,7 @@ class Fail(BaseModel):
 
 
 Action = Annotated[
-    Tap | TypeText | Scroll | Back | Home | OpenApp | Look | AskUser | Done | Fail,
+    Tap | TypeText | Scroll | Search | Back | Home | OpenApp | Look | AskUser | Done | Fail,
     Field(discriminator="type"),
 ]
 _action_adapter: TypeAdapter[Action] = TypeAdapter(Action)
@@ -74,6 +81,7 @@ ACTION_TYPES = [
     "tap",
     "type",
     "scroll",
+    "search",
     "back",
     "home",
     "open_app",
@@ -100,7 +108,10 @@ MODEL_SCHEMA = {
                 "index": {"type": ["integer", "null"]},
                 "text": {
                     "type": ["string", "null"],
-                    "description": "type: text to enter; ask_user: question; done: summary; fail: reason",
+                    "description": (
+                        "type: text to enter; search: product query; ask_user: question; "
+                        "done: summary; fail: reason"
+                    ),
                 },
                 "direction": {"type": ["string", "null"], "enum": ["up", "down", None]},
                 "app": {"type": ["string", "null"]},
@@ -123,6 +134,8 @@ def parse_decision(raw: dict) -> Decision:
             fields |= {"text": text, "index": a.get("index")}
         elif kind == "scroll":
             fields["direction"] = a.get("direction")
+        elif kind == "search":
+            fields["query"] = text
         elif kind == "open_app":
             fields["app"] = a.get("app") or text
         elif kind == "ask_user":

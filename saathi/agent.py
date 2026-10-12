@@ -23,7 +23,7 @@ from openai import (
     RateLimitError,
 )
 
-from saathi import controls, device, safety, talkback
+from saathi import blinkit, controls, device, safety, talkback
 from saathi.actions import (
     MODEL_SCHEMA,
     AskUser,
@@ -33,6 +33,7 @@ from saathi.actions import (
     Fail,
     Look,
     OpenApp,
+    Search,
     Tap,
     parse_decision,
 )
@@ -245,6 +246,8 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
     recent: list[str] = []  # signatures of executed actions, for loop detection
     unanswered = 0
     answers: list[str] = []  # user's replies to ask_user, folded into the task text
+    shop = blinkit.BlinkitState()
+    settled = False
 
     async def finish(status: str, message: str, steps: int, reached: str = "") -> Result:
         await _say(say, message)
@@ -299,7 +302,25 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
             task = (SUMMARY_TASK + command) if summary_mode else command
             if answers:
                 task += " (user already chose: " + "; ".join(answers) + ")"
-            decision, meta = await brain.decide(task, screen, history, send_image)
+            plan = blinkit.Plan(None)
+            if screen.package == BLINKIT and not summary_mode:
+                shop.observe_cart(screen)
+                ctx.items_added = shop.added
+                plan = blinkit.next_action(screen, shop, ctx.quantity, ctx.items_added)
+                if plan.action is None and shop.query and not settled:
+                    # Blinkit screens load in stages; look once more before asking the model.
+                    settled = True
+                    await asyncio.sleep(1.5)
+                    screen = await device_call(device.observe, vision=send_image)
+                    shop.observe_cart(screen)
+                    ctx.items_added = shop.added
+                    plan = blinkit.next_action(screen, shop, ctx.quantity, ctx.items_added)
+            settled = False if plan.action is not None else settled
+            if plan.action is not None:
+                # Predictable Blinkit step done by code (no model call); still gated below.
+                decision, meta = Decision(thought=f"scripted: {plan.why}", action=plan.action), {}
+            else:
+                decision, meta = await brain.decide(task, screen, history, send_image)
             action = decision.action
 
             if controls.interrupted():
@@ -418,6 +439,7 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 answer = (await ask(action.question)).strip()
                 if answer:
                     answers.append(answer)
+                    shop.answer = answer
                 history.append(f"{step}: asked user {action.question!r} -> answered {answer!r}")
                 trace.step(step, record, screen.screenshot)
                 unanswered = 0 if answer else unanswered + 1
@@ -436,7 +458,7 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 ok = False
                 record["execute_error"] = f"{type(e).__name__}: {e}"[:200]
             # Cold-starting an app took ~3.5 s on the tablet; taps settle well within 3 s.
-            wait_s = 8 if isinstance(action, OpenApp) else 3
+            wait_s = 8 if isinstance(action, (OpenApp, Search)) else 3
             changed = await device_call(device.wait_for_change, screen.hash, timeout_s=wait_s)
             record |= {"executed": ok, "changed": changed, "act_s": round(time.time() - t1, 2)}
             trace.step(step, record, screen.screenshot)
@@ -450,14 +472,15 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 f"{step}: {action.type} {action.model_dump_json(exclude={'type'})}{target}"
                 f" -> {'screen changed' if changed else 'NO CHANGE'}"
             )
+            if ok and isinstance(action, Search):
+                shop.query = action.query
             if (
                 ok
                 and changed
                 and idx_target is not None
                 and safety.is_add_button(idx_target, screen.package)
             ):
-                ctx.items_added += 1
-                history.append(f"{step}: cart now has {ctx.items_added} added item(s) — go to cart")
+                history.append(f"{step}: tapped ADD (cart had {shop.cart_now} items)")
             sig = action.model_dump_json()
             recent = (recent + [sig])[-LOOP_WINDOW:]
             looping = recent.count(sig) >= LOOP_REPEATS

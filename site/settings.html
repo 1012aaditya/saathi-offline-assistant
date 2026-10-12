@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Saathi Settings</title>
 <meta name="description" content="Choose which apps Saathi can use, set money limits, manage trusted people and voice, and see what Saathi did.">
+<script src="config.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Anek+Devanagari:wdth,wght@75..125,300..800&family=Mukta:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -349,7 +350,7 @@
       { id: 'gmail', name: 'Gmail', kind: 'msg', status: 'later', eg: '“Any new email from office?”' },
     ]},
     { id: 'money', title: 'Money & banking', ic: '₹', bg: '#c9c4ff', apps: [
-      { id: 'gpay', name: 'Google Pay', kind: 'money', status: 'now', eg: '“Send Rahul ₹1”' },
+      { id: 'gpay', name: 'Google Pay', kind: 'money', status: (window.SAATHI_CONFIG && window.SAATHI_CONFIG.paymentsLive) ? 'now' : 'soon', eg: '“Send Rahul ₹1”' },
       { id: 'phonepe', name: 'PhonePe', kind: 'money', status: 'next', eg: '“PhonePe se bijli ka bill bharo”' },
       { id: 'bhim', name: 'BHIM UPI', kind: 'money', status: 'next', eg: '“Check my balance”' },
       { id: 'paytm', name: 'Paytm', kind: 'money', status: 'later', eg: '“Recharge my phone”' },
@@ -389,7 +390,7 @@
     ]},
   ];
   const ALL = GROUPS.flatMap(g => g.apps);
-  const STATUS = { now: ['b-now', 'Works now'], next: ['b-next', 'Next up'], later: ['b-later', 'Not yet'] };
+  const STATUS = { now: ['b-now', 'Works now'], soon: ['b-next', 'In progress'], next: ['b-next', 'Next up'], later: ['b-later', 'Not yet'] };
   const PER_PAY = [10, 50, 100, 200, 500, 1000, 2000];
   const SPEEDS = ['Much slower', 'Slower', 'Normal', 'Faster', 'Much faster'];
   const RATES = [0.7, 0.85, 1, 1.2, 1.4];

@@ -377,7 +377,25 @@
     .track .dup { display: none; }
     *, *::before, *::after { transition: none !important; }
   }
+  [data-payments="soon"] .if-pay-live, [data-payments="live"] .if-pay-soon { display: none !important; }
+  .tagx.ok { background: var(--mint); color: var(--ink); }
+  .flow-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin: -16px 0 30px; }
+  .ftab { font: 600 0.95rem/1 var(--f-body); padding: 13px 18px; border-radius: 999px; border: 2px solid rgba(255,255,255,.45); background: transparent; color: #fff; cursor: pointer; display: inline-flex; gap: 10px; align-items: center; }
+  .ftab[aria-pressed="true"] { background: #fff; color: var(--blue-deep); border-color: #fff; }
+  .soon-tag { font: 500 0.66rem/1 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; padding: 4px 7px; border-radius: 6px; background: var(--marigold); color: var(--ink); }
+  .flow-note { margin: -14px 0 26px; padding: 12px 16px; border-radius: 14px; background: rgba(255,255,255,.12); max-width: 70ch; font-size: 0.95rem; }
+  .chatbg { background: #efedf8; }
+  .cin, .cout { border-radius: 12px; padding: 8px 10px; max-width: 82%; margin: 8px 0; font-size: 13px; line-height: 1.35; box-shadow: 0 1px 1px rgba(0,0,0,.06); }
+  .cin { background: #fff; }
+  .cout { background: #d9d5ff; margin-left: auto; }
+  .cin small, .cout small { display: block; text-align: right; color: #777; font-size: 10px; margin-top: 2px; }
+  .chatbar { position: absolute; left: 12px; right: 12px; bottom: 16px; display: flex; gap: 8px; align-items: center; }
+  .chatbar .field { flex: 1; }
+  .sendb { width: 38px; height: 38px; border-radius: 50%; background: var(--blue); color: #fff; display: grid; place-items: center; flex: none; font-size: 15px; }
+  .sendb.held { box-shadow: 0 0 0 4px var(--marigold); }
+  .unread { margin-left: auto; min-width: 20px; height: 20px; border-radius: 10px; background: var(--blue); color: #fff; font-size: 11px; display: grid; place-items: center; padding: 0 6px; }
 </style>
+<script src="config.js"></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -410,7 +428,7 @@
           <span class="line"><span class="w">Talk</span> <span class="w">to</span> <span class="w">your</span> <span class="w">phone.</span></span>
           <span class="line"><span class="w">Saathi</span> <span class="w">does</span> <span class="w">the</span> <span class="w tap">tapping.<svg viewBox="0 0 300 30" preserveAspectRatio="none" aria-hidden="true"><path id="swash" d="M5 22 C 80 6, 200 4, 295 16"/></svg></span></span>
         </h1>
-        <p class="sub">Saathi operates everyday Android apps like WhatsApp, Google Pay and Blinkit for people who can’t see the screen. Speak in Hindi, English or a mix of both. It checks with you before anything important and never touches your PIN.</p>
+        <p class="sub">Saathi operates everyday Android apps like <span class="if-pay-live">WhatsApp, Google Pay and Blinkit</span><span class="if-pay-soon">WhatsApp and Blinkit, with UPI payments coming next,</span> for people who can’t see the screen. Speak in Hindi, English or a mix of both. It checks with you before anything important and never touches your PIN.</p>
         <div class="ctas">
           <a class="btn" href="#demo">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
@@ -423,19 +441,19 @@
         </div>
       </div>
 
-      <div class="convo hero-card" role="img" aria-label="Example conversation: you ask Saathi to send Rahul one rupee. Saathi asks which Rahul, reads the payment back for your yes, then hands over for your PIN.">
+      <div class="convo hero-card" role="img" aria-label="Example conversation: you ask Saathi to read Mummy's last WhatsApp message, then reply. Saathi reads back your reply and waits for your yes before sending.">
         <div class="convo-head">
           <div class="orb" aria-hidden="true"><i class="halo"></i><i class="core"></i></div>
           <div><b>Saathi</b><small id="status">Listening…</small></div>
           <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
         </div>
         <div class="bubbles" aria-hidden="true">
-          <div class="bub you">Send Rahul ₹1<small lang="hi">“राहुल को एक रुपया भेजो”</small></div>
-          <div class="bub saathi">I found two Rahuls. Sharma or Verma?</div>
-          <div class="bub you">Sharma</div>
-          <div class="bub saathi hold"><span class="tagx hold">WAITING FOR YES</span><br>Sending ₹1 to Rahul Sharma. Confirm?</div>
-          <div class="bub you">Yes</div>
-          <div class="bub saathi pin"><span class="tagx stop">HANDED TO YOU</span><br>Please enter your UPI PIN. Your screen reader is back on.</div>
+          <div class="bub you">Read Mummy’s last message<small lang="hi">“मम्मी का last message पढ़ो”</small></div>
+          <div class="bub saathi">Mummy wrote: “Khana kha liya? Kab aaoge?”</div>
+          <div class="bub you">Reply: main 7 baje aaunga</div>
+          <div class="bub saathi hold"><span class="tagx hold">WAITING FOR YES</span><br>Sending to Mummy: “main 7 baje aaunga”. Confirm?</div>
+          <div class="bub you">Haan</div>
+          <div class="bub saathi pin"><span class="tagx ok">SENT</span><br>Sent to Mummy. Anything else?</div>
         </div>
       </div>
     </div>
@@ -520,23 +538,20 @@
   <section class="band demo-band" id="demo" aria-labelledby="demo-h">
     <div class="wrap">
       <div class="head-row">
-        <div><p class="kicker">Live walkthrough</p><h2 id="demo-h" class="rv">Send ₹1 with your eyes closed.</h2></div>
-        <p class="lede rv">Follow a real payment step by step. Press play and the phone goes dark, so you hear it the way a blind user does, with captions on screen.</p>
+        <div><p class="kicker">Live walkthrough</p><h2 id="demo-h" class="rv">Try it with your eyes closed.</h2></div>
+        <p class="lede rv">Follow a real task step by step. Press play and the phone goes dark, so you hear it the way a blind user does, with captions on screen.</p>
       </div>
+      <div class="flow-tabs" role="group" aria-label="Choose a task to follow">
+        <button type="button" class="ftab" data-flow="wa" aria-pressed="true">WhatsApp: read &amp; reply</button>
+        <button type="button" class="ftab" data-flow="pay" aria-pressed="false">Send ₹1 on Google Pay <span class="soon-tag if-pay-soon">In progress</span></button>
+      </div>
+      <p class="flow-note if-pay-soon" id="payNote" hidden>This shows how payments will work. The payment flow is still being built and tested on the phone.</p>
 
       <div class="demo" id="demoPin">
         <div class="phone-col">
           <div class="phone" id="phone">
             <div class="screen" aria-hidden="true">
               <div class="sb"><span>9:41</span><span>●●● 4G</span></div>
-              <div class="view" data-v="0"><div class="app-title">Home</div><div class="grid4"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
-              <div class="view" data-v="1"><div class="app-title">UPI app</div><div class="field">Pay by name or phone number</div><div class="grid4"><span></span><span></span><span></span><span></span></div></div>
-              <div class="view" data-v="2"><div class="app-title">Search</div><div class="field typed">Rahul</div><div class="row"><span class="av">RS</span><div>Rahul Sharma<br><small>rahul.s@okbank</small></div></div><div class="row"><span class="av">RV</span><div>Rahul Verma<br><small>rv88@okbank</small></div></div></div>
-              <div class="view" data-v="3"><div class="app-title">Search</div><div class="field typed">Rahul</div><div class="row pick"><span class="av">RS</span><div>Rahul Sharma<br><small>rahul.s@okbank</small></div></div><div class="row"><span class="av">RV</span><div>Rahul Verma<br><small>rv88@okbank</small></div></div></div>
-              <div class="view" data-v="4"><div class="app-title">Rahul Sharma</div><div class="amount">₹1</div><div style="text-align:center;color:#666;font-size:12px">rahul.s@okbank</div><div class="paybtn">Pay</div></div>
-              <div class="view" data-v="5"><div class="app-title">Rahul Sharma</div><div class="amount">₹1</div><div style="text-align:center;color:#666;font-size:12px">rahul.s@okbank</div><div class="paybtn held">Pay</div></div>
-              <div class="view" data-v="6"><div class="pinv"><div style="font-weight:700">Enter UPI PIN</div><div class="dots6"><i></i><i></i><i></i><i></i><i></i><i></i></div><small style="color:#666">Saathi has stopped.<br>TalkBack is back on.</small></div></div>
-              <div class="view" data-v="7"><div class="tick">✓</div><div style="text-align:center;font-weight:700;font-size:17px">₹1 paid to Rahul Sharma</div><div style="text-align:center;color:#666;font-size:12px;margin-top:6px">Payment successful</div></div>
             </div>
             <div class="blackout" aria-hidden="true"><div><div class="cap-en" id="capEn"></div><div class="cap-hi" id="capHi" lang="hi"></div></div></div>
           </div>
@@ -689,7 +704,7 @@
           <p class="then">Reply by voice. It reads back who it’s going to and the exact words before sending.</p>
         </article>
         <article class="flow f2 rv-card">
-          <span class="badge">Core</span>
+          <span class="badge"><span class="if-pay-live">Core</span><span class="if-pay-soon">In progress</span></span>
           <span class="app">Google Pay</span>
           <p class="say">“Send Rahul ₹1.”</p>
           <p class="hi">Or in Hindi: <span lang="hi">“राहुल को एक रुपया भेजो”</span></p>
@@ -789,58 +804,89 @@
 
   document.getElementById('hear').addEventListener('click', async () => {
     stopSpeech();
-    await speak('राहुल को एक रुपया भेजो।');
-    await speak('एक रुपया राहुल शर्मा को भेज रहे हैं। कन्फर्म?');
+    await speak('मम्मी का लास्ट मैसेज पढ़ो।');
+    await speak('मम्मी ने लिखा: खाना खा लिया? कब आओगे?');
   });
 
   const listen = document.getElementById('listen');
   listen.addEventListener('click', () => {
     if (listen.getAttribute('aria-pressed') === 'true') { stopSpeech(); listen.setAttribute('aria-pressed', 'false'); return; }
     listen.setAttribute('aria-pressed', 'true');
-    const text = [...document.querySelectorAll('main h1, main .sub, main h2, main .lede')].map(n => n.textContent.trim()).join('. ');
+    const text = [...document.querySelectorAll('main h1, main .sub, main h2, main .lede')].map(n => n.innerText.trim()).join('. ');
     speak(text, 'en-IN').then(() => listen.setAttribute('aria-pressed', 'false'));
   });
 
   /* ================= demo ================= */
-  const steps = [
-    { who: 'You', en: 'Send Rahul ₹1.', hi: 'राहुल को एक रुपया भेजो', why: 'You hold a key and speak. Hindi, English or a mix all work.', v: 0,
-      tree: '[0] TextView "Home"\n[3] Button "GPay" (180,940)' },
-    { who: 'Saathi', act: 'open_app gpay', verdict: ['allow', 'ALLOW'], en: 'Opening Google Pay.', hi: 'GPay खोल रहा हूँ', why: 'Opening an app is harmless, so the safety gate lets it through.', v: 1,
-      tree: '[4] EditText "Pay by name or phone number" <b>editable</b>' },
-    { who: 'Saathi', act: 'type "Rahul"', verdict: ['allow', 'ALLOW'], en: 'Two Rahuls. Sharma or Verma?', hi: 'दो राहुल मिले। शर्मा या वर्मा?', why: 'When there’s more than one match, Saathi asks instead of guessing.', v: 2,
-      tree: '[7] Button "Rahul Sharma" desc="rahul.s@okbank"\n[8] Button "Rahul Verma" desc="rv88@okbank"' },
-    { who: 'You', en: 'Sharma.', hi: 'शर्मा', why: 'Saathi picks the contact you named.', v: 3,
-      tree: '[7] Button "<b>Rahul Sharma</b>" desc="rahul.s@okbank"' },
-    { who: 'Saathi', act: 'type "1"', verdict: ['allow', 'ALLOW'], en: 'Entered ₹1.', hi: 'एक रुपया डाल दिया', why: 'Typing the amount is allowed. Nothing has been paid yet.', v: 4,
-      tree: '[2] TextView "₹1"\n[3] TextView "rahul.s@okbank"\n[9] Button "Pay"' },
-    { who: 'Saathi', act: 'tap "Pay"', verdict: ['hold', 'HOLD'], en: 'Sending ₹1 to Rahul Sharma. Confirm?', hi: '₹1 राहुल शर्मा को भेज रहे हैं। Confirm?', why: 'Paying needs your yes. Every word it reads back was checked against the screen, and ₹1 is under the limit.', v: 5,
-      tree: 'on screen: "<b>₹1</b>" ✓  "<b>Rahul Sharma</b>" ✓\nname match 100/100 ✓   limit ₹10 ✓' },
-    { who: 'You', en: 'Yes.', hi: 'हाँ', why: 'A clear yes. Only now does Saathi tap Pay.', v: 5,
-      tree: 'confirm("हाँ") → yes\ntap [9] "Pay"' },
-    { who: 'Saathi', act: 'PIN screen', verdict: ['stop', 'HAND OVER'], en: 'Please enter your UPI PIN.', hi: 'अपना UPI PIN डालिए', why: 'Saathi stops completely and turns the screen reader back on. Your PIN is yours alone.', v: 6,
-      tree: '[1] TextView "<b>Enter UPI PIN</b>"\n→ stop · screen reader restored' },
-    { who: 'Saathi', act: 'read result', verdict: ['allow', 'DONE'], en: 'Sent ₹1 to Rahul Sharma.', hi: '₹1 राहुल शर्मा को भेज दिए।', why: 'After you enter the PIN, Saathi reads the result screen back to you.', v: 7,
-      tree: '[1] TextView "₹1 paid to Rahul Sharma"\n[2] TextView "Payment successful"' },
-  ];
+  const FLOWS = {
+    wa: { steps: [
+    { who: 'You', en: 'Read Mummy’s last message.', hi: 'मम्मी का last message पढ़ो', why: 'You hold a key and speak. Hindi, English or a mix all work.', v: 0,
+      tree: '[0] TextView "Home"\n[5] Button "WhatsApp" (540,940)' },
+    { who: 'Saathi', act: 'open_app whatsapp', verdict: ['allow', 'ALLOW'], en: 'Opening WhatsApp.', hi: 'WhatsApp खोल रहा हूँ', why: 'Opening an app is harmless, so the safety gate lets it through.', v: 1,
+      tree: '[3] Button "Mummy" desc="Khana kha liya? Kab aaoge?"\n[4] Button "Rahul" desc="Kal milte hain"' },
+    { who: 'Saathi', act: 'tap "Mummy"', verdict: ['allow', 'ALLOW'], en: 'Opening Mummy’s chat.', hi: 'मम्मी की चैट खोल रहा हूँ', why: 'Saathi finds the chat by the name you said.', v: 2,
+      tree: '[6] TextView "Khana kha liya? Kab aaoge?"\n[9] EditText "Message" <b>editable</b>' },
+    { who: 'Saathi', act: 'read message', verdict: ['allow', 'READ'], en: 'Mummy wrote: “Khana kha liya? Kab aaoge?”', hi: 'मम्मी ने लिखा: खाना खा लिया? कब आओगे?', why: 'Saathi reads the message word for word from the screen. It never makes up what someone said.', v: 2,
+      tree: '[6] TextView "<b>Khana kha liya? Kab aaoge?</b>"\n→ read aloud, word for word' },
+    { who: 'You', en: 'Reply: main 7 baje aaunga.', hi: 'जवाब दो: मैं 7 बजे आऊँगा', why: 'You reply by voice, in your own words.', v: 2,
+      tree: '[9] EditText "Message" <b>editable</b>' },
+    { who: 'Saathi', act: 'type reply', verdict: ['allow', 'ALLOW'], en: 'Typing your reply.', hi: 'जवाब लिख रहा हूँ', why: 'Typing is allowed. Nothing has been sent yet.', v: 3,
+      tree: '[9] EditText "main 7 baje aaunga"\n[10] Button "Send"' },
+    { who: 'Saathi', act: 'tap "Send"', verdict: ['hold', 'HOLD'], en: 'Sending to Mummy: “main 7 baje aaunga”. Confirm?', hi: 'मम्मी को भेज रहे हैं: मैं 7 बजे आऊँगा। Confirm?', why: 'Sending needs your yes. The name and the words it reads back were checked against the screen.', v: 4,
+      tree: 'on screen: "<b>Mummy</b>" ✓  "<b>main 7 baje aaunga</b>" ✓\nrule R2: hold for your yes' },
+    { who: 'You', en: 'Yes.', hi: 'हाँ', why: 'A clear yes. Only now does Saathi tap Send. A no, or anything unclear, would cancel.', v: 4,
+      tree: 'confirm("हाँ") → yes\ntap [10] "Send"' },
+    { who: 'Saathi', act: 'check chat', verdict: ['allow', 'DONE'], en: 'Sent to Mummy.', hi: 'मम्मी को भेज दिया।', why: 'Saathi checks the message really appears in the chat, then tells you.', v: 5,
+      tree: '[11] TextView "main 7 baje aaunga" (sent)' },
+  ],
+      views: `<div class="view" data-v="0"><div class="app-title">Home</div><div class="grid4"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+<div class="view" data-v="1"><div class="app-title">Chats</div><div class="row"><span class="av">M</span><div><b>Mummy</b><br><small>Khana kha liya? Kab aaoge?</small></div><span class="unread">1</span></div><div class="row"><span class="av">R</span><div>Rahul<br><small>Kal milte hain</small></div></div><div class="row"><span class="av">O</span><div>Office group<br><small>Meeting at 4</small></div></div></div>
+<div class="view chatbg" data-v="2"><div class="app-title">Mummy</div><div class="cin">Khana kha liya? Kab aaoge?<small>2:14 pm</small></div><div class="chatbar"><div class="field">Message</div><span class="sendb">➤</span></div></div>
+<div class="view chatbg" data-v="3"><div class="app-title">Mummy</div><div class="cin">Khana kha liya? Kab aaoge?<small>2:14 pm</small></div><div class="chatbar"><div class="field typed">main 7 baje aaunga</div><span class="sendb">➤</span></div></div>
+<div class="view chatbg" data-v="4"><div class="app-title">Mummy</div><div class="cin">Khana kha liya? Kab aaoge?<small>2:14 pm</small></div><div class="chatbar"><div class="field typed">main 7 baje aaunga</div><span class="sendb held">➤</span></div></div>
+<div class="view chatbg" data-v="5"><div class="app-title">Mummy</div><div class="cin">Khana kha liya? Kab aaoge?<small>2:14 pm</small></div><div class="cout">main 7 baje aaunga<small>2:16 pm ✓✓</small></div><div class="chatbar"><div class="field">Message</div><span class="sendb">➤</span></div></div>` },
+    pay: { steps: [
+      { who: 'You', en: 'Send Rahul ₹1.', hi: 'राहुल को एक रुपया भेजो', why: 'You hold a key and speak. Hindi, English or a mix all work.', v: 0,
+        tree: '[0] TextView "Home"\n[3] Button "GPay" (180,940)' },
+      { who: 'Saathi', act: 'open_app gpay', verdict: ['allow', 'ALLOW'], en: 'Opening Google Pay.', hi: 'GPay खोल रहा हूँ', why: 'Opening an app is harmless, so the safety gate lets it through.', v: 1,
+        tree: '[4] EditText "Pay by name or phone number" <b>editable</b>' },
+      { who: 'Saathi', act: 'type "Rahul"', verdict: ['allow', 'ALLOW'], en: 'Two Rahuls. Sharma or Verma?', hi: 'दो राहुल मिले। शर्मा या वर्मा?', why: 'When there’s more than one match, Saathi asks instead of guessing.', v: 2,
+        tree: '[7] Button "Rahul Sharma" desc="rahul.s@okbank"\n[8] Button "Rahul Verma" desc="rv88@okbank"' },
+      { who: 'You', en: 'Sharma.', hi: 'शर्मा', why: 'Saathi picks the contact you named.', v: 3,
+        tree: '[7] Button "<b>Rahul Sharma</b>" desc="rahul.s@okbank"' },
+      { who: 'Saathi', act: 'type "1"', verdict: ['allow', 'ALLOW'], en: 'Entered ₹1.', hi: 'एक रुपया डाल दिया', why: 'Typing the amount is allowed. Nothing has been paid yet.', v: 4,
+        tree: '[2] TextView "₹1"\n[3] TextView "rahul.s@okbank"\n[9] Button "Pay"' },
+      { who: 'Saathi', act: 'tap "Pay"', verdict: ['hold', 'HOLD'], en: 'Sending ₹1 to Rahul Sharma. Confirm?', hi: '₹1 राहुल शर्मा को भेज रहे हैं। Confirm?', why: 'Paying needs your yes. Every word it reads back was checked against the screen, and ₹1 is under the limit.', v: 5,
+        tree: 'on screen: "<b>₹1</b>" ✓  "<b>Rahul Sharma</b>" ✓\nname match 100/100 ✓   limit ₹10 ✓' },
+      { who: 'You', en: 'Yes.', hi: 'हाँ', why: 'A clear yes. Only now does Saathi tap Pay.', v: 5,
+        tree: 'confirm("हाँ") → yes\ntap [9] "Pay"' },
+      { who: 'Saathi', act: 'PIN screen', verdict: ['stop', 'HAND OVER'], en: 'Please enter your UPI PIN.', hi: 'अपना UPI PIN डालिए', why: 'Saathi stops completely and turns the screen reader back on. Your PIN is yours alone.', v: 6,
+        tree: '[1] TextView "<b>Enter UPI PIN</b>"\n→ stop · screen reader restored' },
+      { who: 'Saathi', act: 'read result', verdict: ['allow', 'DONE'], en: 'Sent ₹1 to Rahul Sharma.', hi: '₹1 राहुल शर्मा को भेज दिए।', why: 'After you enter the PIN, Saathi reads the result screen back to you.', v: 7,
+        tree: '[1] TextView "₹1 paid to Rahul Sharma"\n[2] TextView "Payment successful"' },
+    ],
+      views: `<div class="view" data-v="0"><div class="app-title">Home</div><div class="grid4"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+              <div class="view" data-v="1"><div class="app-title">UPI app</div><div class="field">Pay by name or phone number</div><div class="grid4"><span></span><span></span><span></span><span></span></div></div>
+              <div class="view" data-v="2"><div class="app-title">Search</div><div class="field typed">Rahul</div><div class="row"><span class="av">RS</span><div>Rahul Sharma<br><small>rahul.s@okbank</small></div></div><div class="row"><span class="av">RV</span><div>Rahul Verma<br><small>rv88@okbank</small></div></div></div>
+              <div class="view" data-v="3"><div class="app-title">Search</div><div class="field typed">Rahul</div><div class="row pick"><span class="av">RS</span><div>Rahul Sharma<br><small>rahul.s@okbank</small></div></div><div class="row"><span class="av">RV</span><div>Rahul Verma<br><small>rv88@okbank</small></div></div></div>
+              <div class="view" data-v="4"><div class="app-title">Rahul Sharma</div><div class="amount">₹1</div><div style="text-align:center;color:#666;font-size:12px">rahul.s@okbank</div><div class="paybtn">Pay</div></div>
+              <div class="view" data-v="5"><div class="app-title">Rahul Sharma</div><div class="amount">₹1</div><div style="text-align:center;color:#666;font-size:12px">rahul.s@okbank</div><div class="paybtn held">Pay</div></div>
+              <div class="view" data-v="6"><div class="pinv"><div style="font-weight:700">Enter UPI PIN</div><div class="dots6"><i></i><i></i><i></i><i></i><i></i><i></i></div><small style="color:#666">Saathi has stopped.<br>TalkBack is back on.</small></div></div>
+              <div class="view" data-v="7"><div class="tick">✓</div><div style="text-align:center;font-weight:700;font-size:17px">₹1 paid to Rahul Sharma</div><div style="text-align:center;color:#666;font-size:12px;margin-top:6px">Payment successful</div></div>` },
+  };
+  let steps = FLOWS.wa.steps;
 
   const stage = document.getElementById('stage');
   const progress = document.getElementById('progress');
   const tree = document.getElementById('tree');
-  const views = [...document.querySelectorAll('.screen .view')];
+  const screenEl = document.querySelector('#phone .screen');
+  let views = [];
   const phone = document.getElementById('phone');
   const play = document.getElementById('play');
   const hasGsap = typeof window.gsap !== 'undefined';
   const motionOK = !matchMedia('(prefers-reduced-motion: reduce)').matches;
   const animate = hasGsap && motionOK;
 
-  steps.forEach((s, i) => {
-    const b = document.createElement('button');
-    b.textContent = i + 1;
-    b.setAttribute('aria-label', `Step ${i + 1}: ${s.en}`);
-    b.addEventListener('click', () => { stopPlay(); go(i); });
-    progress.appendChild(b);
-  });
-  const dots = [...progress.children];
+  let dots = [];
 
   let cur = -1;
   function go(i) {
@@ -864,8 +910,6 @@
     });
     if (animate) gsap.from(stage.children, { y: 22, opacity: 0, duration: 0.5, stagger: 0.07, ease: 'power3.out' });
   }
-  go(0);
-
   document.getElementById('prev').addEventListener('click', () => { stopPlay(); go(cur - 1); });
   document.getElementById('next').addEventListener('click', () => { stopPlay(); go(cur + 1); });
 
@@ -890,6 +934,32 @@
     }
     if (playing) setTimeout(stopPlay, 800);
   });
+
+  /* switch between the WhatsApp and payment walkthroughs */
+  const payLive = !!(window.SAATHI_CONFIG && window.SAATHI_CONFIG.paymentsLive);
+  function loadFlow(key) {
+    stopPlay();
+    steps = FLOWS[key].steps;
+    screenEl.querySelectorAll('.view').forEach(v => v.remove());
+    screenEl.insertAdjacentHTML('beforeend', FLOWS[key].views);
+    views = [...screenEl.querySelectorAll('.view')];
+    views.forEach(v => { v.style.opacity = 0; });
+    progress.innerHTML = '';
+    steps.forEach((st, i) => {
+      const b = document.createElement('button');
+      b.textContent = i + 1;
+      b.setAttribute('aria-label', `Step ${i + 1}: ${st.en}`);
+      b.addEventListener('click', () => { stopPlay(); go(i); });
+      progress.appendChild(b);
+    });
+    dots = [...progress.children];
+    document.querySelectorAll('.ftab').forEach(t => t.setAttribute('aria-pressed', String(t.dataset.flow === key)));
+    document.getElementById('payNote').hidden = !(key === 'pay' && !payLive);
+    cur = -1;
+    go(0);
+  }
+  document.querySelectorAll('.ftab').forEach(t => t.addEventListener('click', () => loadFlow(t.dataset.flow)));
+  loadFlow('wa');
 
   /* ================= motion ================= */
   const hint = document.getElementById('hint');
@@ -1127,6 +1197,8 @@
       run: () => { document.getElementById('prev').click(); return stageText(); } },
     { match: t => { if (!has(t, ['try', 'what if', 'what happens', 'kya hoga', 'क्या होगा', 'agar'])) return 0; for (const [w, i] of TRY) if (t.includes(w)) return i + 1; return 0; },
       run: async n => { goTo('safety-h'); await wait(700); document.querySelectorAll('.try-btns button[data-i]')[n - 1].click(); const res = document.getElementById('tryResult'); for (let i = 0; i < 24 && res.hidden; i++) await wait(250); return res.hidden ? 'Look at the safety gate on screen to see the result.' : res.innerText.replace(/\s*\n+\s*/g, '. '); } },
+    { match: t => has(t, ['payment demo', 'payment flow', 'send money demo', 'paise wala']), run: () => { goTo('demo-h'); document.querySelector('.ftab[data-flow="pay"]').click(); return 'Showing the payment walkthrough.' + (window.SAATHI_CONFIG.paymentsLive ? '' : ' Payments are still being built.') + ' Say play to start.'; } },
+    { match: t => has(t, ['whatsapp demo', 'whatsapp flow', 'message demo']), run: () => { goTo('demo-h'); document.querySelector('.ftab[data-flow="wa"]').click(); return 'Showing the WhatsApp walkthrough. Say play to start.'; } },
     { match: t => has(t, ['hear it', 'hear it in hindi', 'hindi mein suno', 'sunao', 'सुनाओ']),
       run: () => { document.getElementById('hear').click(); return null; } },
     { match: t => has(t, ['read the page', 'read this page', 'read page', 'page padho', 'padho', 'पढ़ो']),

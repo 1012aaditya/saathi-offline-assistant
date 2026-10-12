@@ -23,8 +23,8 @@ from typing import Any
 from mobilerun_core_local import AndroidDriver
 from pydantic import BaseModel
 
-from saathi.actions import Action, Back, Home, OpenApp, Scroll, Tap, TypeText
-from saathi.config import APP_ALIASES, ORDER_APPS, get_settings
+from saathi.actions import Action, Back, Home, OpenApp, Scroll, Search, Tap, TypeText
+from saathi.config import APP_ALIASES, BLINKIT, ORDER_APPS, get_settings
 
 MAX_ELEMENTS = 150
 
@@ -256,6 +256,15 @@ async def connect(serial: str | None = None, portal_mode: str = "auto") -> Andro
     return _driver
 
 
+async def wake() -> None:
+    """KEYCODE_WAKEUP: turns the screen on / resets the sleep timer. Never unlocks."""
+    await (await connect()).press_key_code(224)
+
+
+async def is_locked() -> bool:
+    return "isKeyguardShowing=true" in await shell("dumpsys window | grep isKeyguardShowing")
+
+
 async def reconnect() -> AndroidDriver:
     """Drop the cached driver and connect again (after Wi-Fi / ADB hiccups)."""
     global _driver
@@ -340,6 +349,16 @@ async def execute(action: Action, screen: Screen) -> bool:
         top, bottom = int(h * 0.3), int(h * 0.75)
         y1, y2 = (bottom, top) if action.direction == "down" else (top, bottom)
         await d.swipe(x, y1, x, y2, duration_ms=400)
+    elif isinstance(action, Search):
+        from saathi.blinkit import search_url
+
+        url = search_url(action.query).replace("'", "")
+        await d.device.shell(f"am start -a android.intent.action.VIEW -d '{url}' {BLINKIT}")
+        for _ in range(16):  # results load in stages; wait for product cards (max ~8 s)
+            await asyncio.sleep(0.5)
+            tree = json.dumps((await get_raw_tree()).get("a11y_tree"), ensure_ascii=False)
+            if "is available for" in tree:
+                break
     elif isinstance(action, Back):
         await d.press_button("back")
     elif isinstance(action, Home):

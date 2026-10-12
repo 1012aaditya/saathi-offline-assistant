@@ -16,7 +16,7 @@ from typing import Literal
 
 from rapidfuzz import fuzz
 
-from saathi.actions import Action, OpenApp, Tap, TypeText
+from saathi.actions import Action, OpenApp, Search, Tap, TypeText
 from saathi.config import APP_ALIASES, ORDER_APPS, PAYMENT_APPS, WHATSAPP
 from saathi.device import Element, Screen
 
@@ -259,6 +259,19 @@ ITEM_COUNT_REGEX = re.compile(r"(?i)\b\d+\s+items?\b")
 
 
 def _order(screen: Screen) -> Verdict:
+    """R3: prefer the itemised Blinkit cart read-back; fall back to the on-screen total."""
+    from saathi.blinkit import order_readback
+
+    cart = order_readback(screen)
+    if cart is not None:
+        text, parts = cart
+        if not grounded(parts, screen):
+            return Verdict("block", "R4", "पढ़कर सुनाने वाली बात स्क्रीन पर नहीं मिली।")
+        return Verdict("hold", "R3", readback=text)
+    return _order_total(screen)
+
+
+def _order_total(screen: Screen) -> Verdict:
     """R3 (+R4): read back the order total, verbatim from the screen. Prefers a text labelled
     total / to pay; otherwise the largest ₹ amount on screen (never a single item price)."""
     texts = [t for t in _screen_texts(screen) if AMOUNT_REGEX.search(t)]
@@ -295,6 +308,8 @@ def check(
             return Verdict("block", "index", "यह बटन स्क्रीन पर नहीं मिला।")
         target = screen.elements[action.index]
 
+    if isinstance(action, Search):
+        return ALLOW  # only opens search results; nothing is bought or sent
     if isinstance(action, OpenApp) and action.app.lower().strip() not in APP_ALIASES:
         return Verdict("block", "app", "यह ऐप मेरी सूची में नहीं है।")
 

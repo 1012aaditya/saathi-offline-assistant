@@ -27,7 +27,7 @@ from saathi.config import get_settings
 
 ROOT = Path(__file__).parent
 TRACES = Path("traces")
-SETUP_TIMEOUT_S = 60
+SETUP_TIMEOUT_S = 120
 # USD per 1M tokens (developers.openai.com pricing, checked 12 Oct 2026). Unknown model -> 0.
 PRICES = {"gpt-5-nano": (0.05, 0.40), "gpt-6-luna": (0.10, 0.50), "gpt-5.4-nano": (0.20, 1.25)}
 
@@ -52,7 +52,15 @@ class FlowReport:
 # -- device setup between runs ---------------------------------------------------------------
 
 
+class TabletLocked(Exception):
+    pass
+
+
 async def setup(kind: str) -> None:
+    await device.wake()
+    await asyncio.sleep(0.5)
+    if await device.is_locked():
+        raise TabletLocked("the tablet is locked — unlock it and rerun")
     s = await device.observe()
     await device.execute(Home(), s)
     await asyncio.sleep(1.5)
@@ -65,6 +73,22 @@ async def setup(kind: str) -> None:
                 break
             await device.execute(Back(), s)
             await asyncio.sleep(1.2)
+    elif kind == "blinkit_empty_cart":
+        # Each run starts with an empty cart, so "already in cart" never inflates results.
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "blinkit_empty_cart", Path(__file__).parents[1] / "scripts" / "blinkit_empty_cart.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        try:
+            await mod.main()
+        except SystemExit as e:  # its safety stops must not end the whole eval
+            raise RuntimeError(f"cart cleanup stopped: {e}") from None
+        s = await device.observe()
+        await device.execute(Home(), s)
+        await asyncio.sleep(1)
     await device.restore_keyboard()
 
 
@@ -148,10 +172,17 @@ async def run_flow(flow: dict, n: int) -> FlowReport:
         answers[:] = list(flow.get("answers") or [])
         try:
             await asyncio.wait_for(setup(flow.get("setup", "home")), SETUP_TIMEOUT_S)
-        except (TimeoutError, ConnectionError, OSError):
-            print(f"  {flow['id']} #{i}: setup timed out, reconnecting", flush=True)
+        except TabletLocked as e:
+            print(f"  STOPPED: {e}", flush=True)
+            break
+        except (TimeoutError, ConnectionError, OSError, RuntimeError) as e:
+            print(f"  {flow['id']} #{i}: setup problem ({e}); retrying once", flush=True)
             await device.reconnect()
-            await asyncio.wait_for(setup(flow.get("setup", "home")), SETUP_TIMEOUT_S)
+            try:
+                await asyncio.wait_for(setup(flow.get("setup", "home")), SETUP_TIMEOUT_S)
+            except (TabletLocked, TimeoutError, ConnectionError, OSError, RuntimeError) as e2:
+                print(f"  STOPPED: setup failed twice ({e2})", flush=True)
+                break
         t = time.time()
         result = await run_command(
             flow["command"], say=quiet_say, ask=no_answer, confirm=auto_confirm

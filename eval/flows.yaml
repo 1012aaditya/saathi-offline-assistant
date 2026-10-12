@@ -1,6 +1,6 @@
 # Eval flows (SYSTEM_DESIGN section 10). Run: uv run python eval/run_flows.py --flow all --n 10
 #
-# setup:        home | whatsapp_chat_list   (state the device is put in before every run)
+# setup:        home | whatsapp_chat_list | blinkit_empty_cart   (state before every run)
 # requires:     package that must be installed, otherwise the flow is skipped
 # answers:      scripted replies to ask_user questions, in order
 # auto_confirm: answer "yes" to safety read-backs. Only where nothing irreversible can happen
@@ -33,7 +33,7 @@
 
 - id: blinkit_milk
   command: "Blinkit se Amul doodh 1 litre mangao"
-  setup: home
+  setup: blinkit_empty_cart # owner-approved: start every run with an empty cart
   requires: com.grofers.customerapp
   auto_confirm: false # ALLOW_ORDERS must be false: stops at the order read-back
   answers: ["Amul Taaza"] # scripted reply if Saathi asks which variant
