@@ -48,10 +48,13 @@ class Element(BaseModel):
     password: bool
     bounds: tuple[int, int, int, int]
     center: tuple[int, int]
+    sender: str = ""  # chat messages only: "me" (sent by the user) or "them" (received)
 
     def to_line(self) -> str:
         """One line per element for the model: [12] Button "Pay" desc="" rid=pay_btn (540,1820)"""
         flags = "".join(f for f, on in ((" edit", self.editable), (" pwd", self.password)) if on)
+        if self.sender:
+            flags += f" from={self.sender}"
         return (
             f'[{self.index}] {self.cls} "{self.text}" desc="{self.desc}" rid={self.rid}'
             f" ({self.center[0]},{self.center[1]}){flags}"
@@ -79,6 +82,18 @@ def _descendant_text(node: dict[str, Any], limit: int = 80) -> str:
     return " · ".join(parts)[:limit]
 
 
+# WhatsApp message rows: a row containing a delivery-status tick (rid=status: Sent / Delivered /
+# Read) is the user's own message; rows without one were received. Verified on real chats.
+_MESSAGE_ROW_RIDS = {"conversation_row_text"}
+_MESSAGE_RIDS = {"message_text"}
+
+
+def _has_rid(node: dict[str, Any], rid: str) -> bool:
+    return (node.get("resourceId") or "").rsplit("/", 1)[-1] == rid or any(
+        _has_rid(c, rid) for c in node.get("children", [])
+    )
+
+
 def _has_clickable_descendant(node: dict[str, Any]) -> bool:
     return any(
         _flag(c, "isClickable", "clickable") or _has_clickable_descendant(c)
@@ -90,9 +105,12 @@ def normalize(raw: dict[str, Any], max_elements: int = MAX_ELEMENTS) -> list[Ele
     """Flatten the raw tree into visible, useful elements in screen-reading (pre-)order."""
     out: list[Element] = []
 
-    def walk(node: dict[str, Any]) -> None:
+    def walk(node: dict[str, Any], sender: str = "") -> None:
         if len(out) >= max_elements:
             return
+        rid = (node.get("resourceId") or "").rsplit("/", 1)[-1]
+        if rid in _MESSAGE_ROW_RIDS:
+            sender = "me" if _has_rid(node, "status") else "them"
         b = node.get("boundsInScreen") or {}
         bounds = (b.get("left", 0), b.get("top", 0), b.get("right", 0), b.get("bottom", 0))
         visible = (
@@ -121,16 +139,17 @@ def normalize(raw: dict[str, Any], max_elements: int = MAX_ELEMENTS) -> list[Ele
                         cls=cls,
                         text=text,
                         desc=desc,
-                        rid=(node.get("resourceId") or "").rsplit("/", 1)[-1],
+                        rid=rid,
                         clickable=clickable,
                         editable=editable,
                         password=_flag(node, "isPassword", "password"),
                         bounds=bounds,
                         center=((x1 + x2) // 2, (y1 + y2) // 2),
+                        sender=sender if rid in _MESSAGE_RIDS else "",
                     )
                 )
         for child in node.get("children", []):
-            walk(child)
+            walk(child, sender)
 
     tree = raw.get("a11y_tree")
     for root in tree if isinstance(tree, list) else [tree] if tree else []:

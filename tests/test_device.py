@@ -134,3 +134,28 @@ def test_real_dumps(name, pkg):
     assert 0 < len(els) <= 150
     assert all(e.bounds[2] > e.bounds[0] for e in els)
     assert not any("" <= ch <= "" for e in els for ch in e.text + e.desc)
+
+
+def _row(msg: str, sent: bool, y: int) -> dict:
+    children = [node(text=msg, rid="com.whatsapp:id/message_text", bounds=(100, y, 900, y + 40))]
+    if sent:
+        children.append(
+            node(desc="Delivered", rid="com.whatsapp:id/status", bounds=(950, y, 990, y + 40))
+        )
+    return node(
+        "ViewGroup",
+        rid="com.whatsapp:id/conversation_row_text",
+        bounds=(0, y, 1200, y + 50),
+        children=children,
+    )
+
+
+def test_whatsapp_messages_tagged_by_sender():
+    els = normalize(
+        tree(_row("khana kha liya?", sent=False, y=100), _row("achaa", sent=True, y=200))
+    )
+    msgs = {e.text: e.sender for e in els if e.rid == "message_text"}
+    assert msgs == {"khana kha liya?": "them", "achaa": "me"}
+    line = next(e for e in els if e.text == "achaa").to_line()
+    assert line.endswith("from=me")
+    assert all(e.sender == "" for e in els if e.rid != "message_text")

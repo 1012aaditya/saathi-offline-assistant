@@ -13,7 +13,7 @@ from pathlib import Path
 
 from openai import AsyncOpenAI, OpenAIError
 
-from saathi import device, safety, talkback
+from saathi import controls, device, safety, talkback
 from saathi.actions import (
     MODEL_SCHEMA,
     AskUser,
@@ -34,7 +34,7 @@ HISTORY = 6
 PROMPTS = Path(__file__).parent / "prompts"
 APP_CARDS = {WHATSAPP: "whatsapp", GPAY: "gpay", BLINKIT: "blinkit"}
 
-Say = Callable[[str], Awaitable[None] | None]
+Say = Callable[..., Awaitable[None] | None]  # say(line, progress=False)
 Ask = Callable[[str], Awaitable[str]]
 
 
@@ -119,9 +119,9 @@ class Brain:
         return Decision(action=Fail(reason="मॉडल का जवाब समझ नहीं आया।")), meta
 
 
-async def _say(say: Say, line: str) -> None:
+async def _say(say: Say, line: str, progress: bool = False) -> None:
     if line:
-        out = say(line)
+        out = say(line, progress=progress)
         if out is not None:
             await out
 
@@ -143,6 +143,8 @@ async def run_command(command: str, say: Say, ask: Ask) -> Result:
     await talkback.suspend()
     try:
         for step in range(1, MAX_STEPS + 1):
+            if controls.interrupted():
+                return await finish("halt", "रुक गया। आप आगे खुद कर सकते हैं।", step)
             t0 = time.time()
             screen = await device.observe(vision=needs_vision(screen, last_changed, look_requested))
             observe_s = round(time.time() - t0, 2)
@@ -153,8 +155,10 @@ async def run_command(command: str, say: Say, ask: Ask) -> Result:
 
             decision, meta = await brain.decide(command, screen, history)
             action = decision.action
-            await _say(say, decision.say)
+            await _say(say, decision.say, progress=True)
 
+            if controls.interrupted():
+                return await finish("halt", "रुक गया। आप आगे खुद कर सकते हैं।", step)
             verdict = safety.check(action, screen)
             record = {
                 "step": step,

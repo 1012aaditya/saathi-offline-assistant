@@ -34,7 +34,7 @@
 
 - [ ] M0 Setup + experiments (12 Oct AM) — **done except GPay dumps (Q5)**: Portal ping OK over Wi-Fi · WhatsApp + Blinkit trees dumped · TalkBack behavior known · Sarvam STT/TTS works
 - [x] M1 Text agent — F1 in text mode (12 Oct PM) — **3/3 from WhatsApp chat list, 12–15 s, ~₹0.06/run (gpt-5-nano)**
-- [ ] M2 Voice in/out (12 Oct night)
+- [x] M2 Voice in/out (12 Oct night) — **owner tested by voice: reads Mummy's last message aloud**
 - [ ] M3 Safety gate + GPay ₹1 to PIN handoff (13 Oct AM)
 - [ ] M4 Blinkit + screen summary (13 Oct PM)
 - [ ] M5 Eval + hardening (13 Oct night)
@@ -70,6 +70,10 @@
 | 12 Oct | Saathi restores the user's keyboard on exit (`device.restore_keyboard()` in `finally`) | `AndroidDriver.connect()` silently switches the IME to Portal's keyboard, which has no visible keys — left the tablet without a usable keyboard during M0 |
 | 12 Oct | Safety R10 also blocks calls and "Payments on WhatsApp"; R2 blocks newlines typed into WhatsApp | Calls are outward actions; "Enter is send" can turn a newline into a send that bypasses the R2 hold |
 | 12 Oct | `open_app` waits up to 8 s for a screen change (taps 3 s) | WhatsApp cold start took ~3.5 s and was miscounted as a failed step |
+| 12 Oct | Push-to-talk defaults to Enter (press / press); SPACE-hold only if macOS Input Monitoring is already granted | Input Monitoring would let the editor read every keystroke system-wide; not worth it for a prototype (security first) |
+| 12 Oct | Narrator transliterates Roman-only lines to Devanagari (Sarvam `/transliterate`) before TTS | Bulbul docs: romanized Hindi "significantly reduces output quality"; gpt-5-nano ignores the Devanagari rule ~50% of the time |
+| 12 Oct | WhatsApp messages tagged `from=me` / `from=them` in the normalizer (row has a `status` tick = sent by user) | First voice run read the user's own reply as "Mummy's last message" |
+| 12 Oct | `.env` uses `SAATHI_LANG` (not `LANG`) | macOS `LANG` overrides `.env` in pydantic-settings |
 | 12 Oct | Rename `.env` `LANG` → `SAATHI_LANG` (when voice.py lands) | macOS shell already sets `LANG` (e.g. `en_US.UTF-8`), which overrides `.env` in pydantic-settings |
 
 ---
@@ -104,7 +108,7 @@
 - TalkBack: taps click with it on; suspend/restore verified. Sarvam STT + TTS hello-world works.
 - Model: gpt-5-nano chosen (paid, no data sharing); local Ollama too slow on the 8 GB Mac.
 - M1 done: actions + safety (R1–R4, R7–R10, 60 tests) + agent loop + traces. "WhatsApp kholo aur Mummy ka last message padho" 3/3 from the chat list (open_app → tap chat → done), answer verified against the lowest message_text on screen.
-- Open issue for M2: gpt-5-nano writes `say` in Roman Hinglish about half the time despite the prompt — handle in narrator (validate / fall back) before TTS.
+- M2 done: voice.py (Enter push-to-talk, saaras:v4 STT, bulbul:v4-flash TTS, phrase cache, transliteration), narrator.py, controls.py (interrupt). Bug found by owner: read the user's own "achaa" as Mummy's message → fixed with sender tagging; verified she gets her last received message.
 
 ### 13 Oct
 - 

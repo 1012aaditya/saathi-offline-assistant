@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     talkback_service: str = ""
     max_amount_inr: int = 10
     vision_apps: str = "com.phonepe.app"
+    # Not LANG: macOS already sets LANG (e.g. en_US.UTF-8), which would override .env.
+    saathi_lang: str = "hi-IN"
 
     @property
     def vision_app_set(self) -> set[str]:
