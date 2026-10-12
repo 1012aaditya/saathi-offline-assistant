@@ -44,6 +44,18 @@
 
 ---
 
+## Workstreams (synced 13 Oct from 3 parallel Claude sessions)
+
+| Workstream | Where | State | Owner decisions |
+|------------|-------|-------|-----------------|
+| **Saathi agent** (voice agent, safety gate, eval) | `saathi/`, `eval/`, `tests/`, `scripts/` on `main` | M0–M2, M4 done; M3 gate done (no payments); 155 tests | **Payments skipped for now** (13 Oct) — payment rules stay in code, not demoed; next: make it more autonomous + user-controlled, on the phone |
+| **Website** | `site/` on `main` (static HTML/JS, GSAP) | Landing page, settings + activity prototypes (sample data, not connected), shared Web Speech voice commands; `config.js paymentsLive=false` | International audience, English-first; bright/colorful + heavy motion; settings/activity are previews of the future app; braille = roadmap only |
+| **Walk mode** (on-device obstacle warnings) | worktree `../3-days-walk`, branch `feature/walk-mode`, `walk/` (uncommitted) | Phone web page, 2× YOLOv8n via onnxruntime-web, Hindi spoken warnings + vibration + rough distance; 21 node tests; not yet tested on a real phone | Extra feature, not the main demo; free + on-device; warnings only, never "safe to cross". ⚠ YOLOv8 weights are AGPL-3.0 |
+
+Open from the sync: merge walk mode into `main` (needs owner OK + PRD non-goal update); replace site target bars with real eval numbers; deploy site for Devpost; Expo phone app (owner request 13 Oct) — not started in any session.
+
+---
+
 ## Decision log
 
 | Date | Decision | Why |
@@ -91,6 +103,8 @@
 | 12 Oct | Blinkit flow is mostly deterministic (`saathi/blinkit.py`): search deep link, card ranking, ask once on a close call, size picker, cart, checkout; the model only handles unknown screens | Model-driven Blinkit was 0–2/3; scripted path 10/10 |
 | 12 Oct | Safety R11: block a tap whose point is covered by an order/pay/send control; a target inside such a control gets that control's hold | In landscape, Blinkit's floating "Place Order" bar covered a "−" button; the gated tap landed on the bar (no order placed) |
 | 12 Oct | Order read-back lists the cart items verbatim and flags "Shipment of N items" when some are off-screen | Old fallback could read a recommended item's price as the total |
+| 13 Oct | Skip payments for now; focus on autonomy + user control for blind users, on the phone | Owner choice: bank-SIM setup + privacy trade-offs vs. ~1 day to feature freeze; WhatsApp send-hold + Blinkit order-hold already demo the confirm-before-irreversible design |
+| 13 Oct | One working session from here (`3-days-43`); website and walk-mode sessions stopped editing | Three sessions shared one folder; `git add -A` had swept `site/` into agent commits |
 | 12 Oct | Rename `.env` `LANG` → `SAATHI_LANG` (when voice.py lands) | macOS shell already sets `LANG` (e.g. `en_US.UTF-8`), which overrides `.env` in pydantic-settings |
 
 ---
