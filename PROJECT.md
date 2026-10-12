@@ -36,8 +36,8 @@
 - [x] M1 Text agent — F1 in text mode (12 Oct PM) — **3/3 from WhatsApp chat list, 12–15 s, ~₹0.06/run (gpt-5-nano)**
 - [x] M2 Voice in/out (12 Oct night) — **owner tested by voice: reads Mummy's last message aloud**
 - [ ] M3 Safety gate + GPay ₹1 to PIN handoff (13 Oct AM) — **gate + confirmation done and dry-run on WhatsApp ("nahi" → cancelled, draft cleared); real send untested; GPay deferred by owner**
-- [ ] M4 Blinkit + screen summary (13 Oct PM) — **code built, not yet run on the device**
-- [ ] M5 Eval + hardening (13 Oct night) — **eval harness + hardening built, not yet run on the device**
+- [ ] M4 Blinkit + screen summary (13 Oct PM) — **screen summary 3/3 on device; Blinkit reaches order read-back ~2/3 (flaky: cart state, upsell sheets); never orders**
+- [ ] M5 Eval + hardening (13 Oct night) — **eval run on device (3/flow); 10-run eval still to do**
 - [ ] M6 Blind / low-vision tester session (14 Oct AM)
 - [ ] Feature freeze (14 Oct 12:00)
 - [ ] M7 Demo video + README + Devpost submitted (14 Oct night)
@@ -83,6 +83,11 @@
 | 12 Oct | Narrate `say` only for actions the gate allows | Model said "Send button dabaya" before the user had confirmed |
 | 12 Oct | One automatic reconnect on ADB/Portal errors, then halt | SYSTEM_DESIGN §11; Wi-Fi hotspot link dropped Portal probes during M0 |
 | 12 Oct | eval/results.md holds no message text and no device serial | It is committed to a public repo |
+| 12 Oct | Never grant Android permissions on the user's behalf (R10) | Model tapped "While using the app" for Blinkit location despite the prompt; permission revoked |
+| 12 Oct | Blinkit search: surface the hidden focused EditText, verify typed text, submit with Enter (Blinkit only) | Blinkit hides its search field from accessibility — a real-world example of the problem Saathi solves |
+| 12 Oct | Cart guard: no ADD/+ beyond the asked quantity; auto-open cart after a blocked extra ADD | Model kept adding upsell items; one run built a 2-product cart |
+| 12 Oct | Read-outs must quote on-screen text verbatim (R4 extended to `done`) | One run paraphrased Mummy's message |
+| 12 Oct | Bounded device calls (30 s) + network retries for the model | Eval froze 16 min on one device call; hotspot internet dropped mid-run |
 | 12 Oct | Rename `.env` `LANG` → `SAATHI_LANG` (when voice.py lands) | macOS shell already sets `LANG` (e.g. `en_US.UTF-8`), which overrides `.env` in pydantic-settings |
 
 ---
@@ -117,6 +122,8 @@
 - TalkBack: taps click with it on; suspend/restore verified. Sarvam STT + TTS hello-world works.
 - Model: gpt-5-nano chosen (paid, no data sharing); local Ollama too slow on the 8 GB Mac.
 - M1 done: actions + safety (R1–R4, R7–R10, 60 tests) + agent loop + traces. "WhatsApp kholo aur Mummy ka last message padho" 3/3 from the chat list (open_app → tap chat → done), answer verified against the lowest message_text on screen.
+- First device eval (3 runs/flow): whatsapp_read 3/3 (after verbatim-quote fix), whatsapp_reply_hold 3/3, screen_summary 3/3, blinkit_milk ~2/3. GPay skipped (not installed).
+- Cut-line check due 13 Oct 20:00: Blinkit needs >= 5/10 or F3 is cut.
 - M3–M5 built (owner asked to build first, test later): confirmation + R5/R6/R8 + draft cleanup; Blinkit card + order hold; F4 read-only summary; reconnect; eval harness (flows.yaml, run_flows.py, results.md). 112 unit tests. **Device test pending** for M4/M5 and the real WhatsApp send.
 - M2 done: voice.py (Enter push-to-talk, saaras:v4 STT, bulbul:v4-flash TTS, phrase cache, transliteration), narrator.py, controls.py (interrupt). Bug found by owner: read the user's own "achaa" as Mummy's message → fixed with sender tagging; verified she gets her last received message.
 

@@ -15,7 +15,13 @@ from pathlib import Path
 
 import httpx
 from async_adbutils.errors import AdbError
-from openai import AsyncOpenAI, OpenAIError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    OpenAIError,
+    RateLimitError,
+)
 
 from saathi import controls, device, safety, talkback
 from saathi.actions import (
@@ -39,6 +45,7 @@ MAX_FAILURES = 3
 MAX_UNANSWERED = 2  # ask_user with no answer twice -> stop
 LOOP_WINDOW, LOOP_REPEATS = 6, 3  # same action 3x within 6 executed steps = stuck
 HISTORY = 6
+NET_RETRIES = 3
 PROMPTS = Path(__file__).parent / "prompts"
 APP_CARDS = {WHATSAPP: "whatsapp", GPAY: "gpay", BLINKIT: "blinkit"}
 
@@ -121,7 +128,12 @@ class Brain:
     def __init__(self) -> None:
         s = get_settings()
         self.model = s.openai_model
-        self.client = AsyncOpenAI(api_key=s.openai_api_key or "ollama", base_url=s.openai_base_url)
+        self.client = AsyncOpenAI(
+            api_key=s.openai_api_key or "ollama",
+            base_url=s.openai_base_url,
+            timeout=30,
+            max_retries=0,
+        )
         self.system = (PROMPTS / "system_hi.md").read_text()
 
     async def decide(
@@ -145,7 +157,10 @@ class Brain:
         if self.model.startswith(("gpt-5", "o")):
             kwargs["reasoning_effort"] = "low"
         meta: dict = {"model": self.model, "tokens_in": 0, "tokens_out": 0, "attempts": 0}
-        for _attempt in range(2):
+        invalid = 0
+        for attempt in range(1 + 1 + NET_RETRIES):  # 1 try + 1 retry on bad output + net retries
+            if invalid >= 2:
+                break
             meta["attempts"] += 1
             t = time.time()
             try:
@@ -168,8 +183,15 @@ class Brain:
                 raw = json.loads(r.choices[0].message.content or "")
                 meta["raw"] = raw
                 return parse_decision(raw), meta
+            except (APIConnectionError, APITimeoutError, RateLimitError) as e:
+                # Network blips on a phone hotspot: wait and retry rather than give up.
+                meta["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+                await asyncio.sleep(2 * (attempt + 1))
             except (OpenAIError, ValueError) as e:
                 meta["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+                invalid += 1  # bad output: retry once (hard rule 10)
+        if meta.get("error", "").startswith(("APIConnectionError", "APITimeoutError", "RateLimit")):
+            return Decision(action=Fail(reason="इंटरनेट में दिक्कत है, थोड़ी देर बाद कोशिश कीजिए।")), meta
         return Decision(action=Fail(reason="मॉडल का जवाब समझ नहीं आया।")), meta
 
 
