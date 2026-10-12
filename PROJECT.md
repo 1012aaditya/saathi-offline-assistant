@@ -36,7 +36,7 @@
 - [x] M1 Text agent — F1 in text mode (12 Oct PM) — **3/3 from WhatsApp chat list, 12–15 s, ~₹0.06/run (gpt-5-nano)**
 - [x] M2 Voice in/out (12 Oct night) — **owner tested by voice: reads Mummy's last message aloud**
 - [ ] M3 Safety gate + GPay ₹1 to PIN handoff (13 Oct AM) — **gate + confirmation done and dry-run on WhatsApp ("nahi" → cancelled, draft cleared); real send untested; GPay deferred by owner**
-- [ ] M4 Blinkit + screen summary (13 Oct PM) — **screen summary 3/3 on device; Blinkit reaches order read-back ~2/3 (flaky: cart state, upsell sheets); never orders**
+- [x] M4 Blinkit + screen summary (13 Oct PM) — **screen summary 3/3; Blinkit 10/10 to order read-back (7/7 from an empty cart), median 33 s; never orders**
 - [ ] M5 Eval + hardening (13 Oct night) — **eval run on device (3/flow); 10-run eval still to do**
 - [ ] M6 Blind / low-vision tester session (14 Oct AM)
 - [ ] Feature freeze (14 Oct 12:00)
@@ -88,6 +88,9 @@
 | 12 Oct | Cart guard: no ADD/+ beyond the asked quantity; auto-open cart after a blocked extra ADD | Model kept adding upsell items; one run built a 2-product cart |
 | 12 Oct | Read-outs must quote on-screen text verbatim (R4 extended to `done`) | One run paraphrased Mummy's message |
 | 12 Oct | Bounded device calls (30 s) + network retries for the model | Eval froze 16 min on one device call; hotspot internet dropped mid-run |
+| 12 Oct | Blinkit flow is mostly deterministic (`saathi/blinkit.py`): search deep link, card ranking, ask once on a close call, size picker, cart, checkout; the model only handles unknown screens | Model-driven Blinkit was 0–2/3; scripted path 10/10 |
+| 12 Oct | Safety R11: block a tap whose point is covered by an order/pay/send control; a target inside such a control gets that control's hold | In landscape, Blinkit's floating "Place Order" bar covered a "−" button; the gated tap landed on the bar (no order placed) |
+| 12 Oct | Order read-back lists the cart items verbatim and flags "Shipment of N items" when some are off-screen | Old fallback could read a recommended item's price as the total |
 | 12 Oct | Rename `.env` `LANG` → `SAATHI_LANG` (when voice.py lands) | macOS shell already sets `LANG` (e.g. `en_US.UTF-8`), which overrides `.env` in pydantic-settings |
 
 ---
@@ -123,7 +126,7 @@
 - Model: gpt-5-nano chosen (paid, no data sharing); local Ollama too slow on the 8 GB Mac.
 - M1 done: actions + safety (R1–R4, R7–R10, 60 tests) + agent loop + traces. "WhatsApp kholo aur Mummy ka last message padho" 3/3 from the chat list (open_app → tap chat → done), answer verified against the lowest message_text on screen.
 - First device eval (3 runs/flow): whatsapp_read 3/3 (after verbatim-quote fix), whatsapp_reply_hold 3/3, screen_summary 3/3, blinkit_milk ~2/3. GPay skipped (not installed).
-- Cut-line check due 13 Oct 20:00: Blinkit needs >= 5/10 or F3 is cut.
+- Blinkit cut-line check (needs >= 5/10): passed early with 10/10 (7/7 from an empty cart). F3 stays.
 - M3–M5 built (owner asked to build first, test later): confirmation + R5/R6/R8 + draft cleanup; Blinkit card + order hold; F4 read-only summary; reconnect; eval harness (flows.yaml, run_flows.py, results.md). 112 unit tests. **Device test pending** for M4/M5 and the real WhatsApp send.
 - M2 done: voice.py (Enter push-to-talk, saaras:v4 STT, bulbul:v4-flash TTS, phrase cache, transliteration), narrator.py, controls.py (interrupt). Bug found by owner: read the user's own "achaa" as Mummy's message → fixed with sender tagging; verified she gets her last received message.
 
