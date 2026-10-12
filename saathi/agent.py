@@ -24,7 +24,7 @@ from saathi.actions import (
     OpenApp,
     parse_decision,
 )
-from saathi.config import BLINKIT, GPAY, WHATSAPP, get_settings
+from saathi.config import BLINKIT, GPAY, PAYMENT_APPS, WHATSAPP, get_settings
 from saathi.device import Screen
 from saathi.trace import Trace
 
@@ -36,6 +36,10 @@ APP_CARDS = {WHATSAPP: "whatsapp", GPAY: "gpay", BLINKIT: "blinkit"}
 
 Say = Callable[..., Awaitable[None] | None]  # say(line, progress=False)
 Ask = Callable[[str], Awaitable[str]]
+Confirm = Callable[[str], Awaitable[bool]]
+
+STOPPED = "रुक गया। आप आगे खुद कर सकते हैं।"
+ASK_AGAIN = "साफ़ बताइए: हाँ या नहीं?"
 
 
 @dataclass
@@ -71,7 +75,7 @@ class Brain:
         self.system = (PROMPTS / "system_hi.md").read_text()
 
     async def decide(
-        self, command: str, screen: Screen, history: list[str]
+        self, command: str, screen: Screen, history: list[str], send_image: bool
     ) -> tuple[Decision, dict]:
         text = (
             f"Command: {command}\n"
@@ -82,7 +86,7 @@ class Brain:
             f"Screen:\n{device.to_prompt(screen.elements)}"
         )
         content: list[dict] = [{"type": "text", "text": text}]
-        if screen.screenshot:
+        if send_image and screen.screenshot:
             b64 = base64.b64encode(screen.screenshot).decode()
             content.append(
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
@@ -126,9 +130,40 @@ async def _say(say: Say, line: str, progress: bool = False) -> None:
             await out
 
 
-async def run_command(command: str, say: Say, ask: Ask) -> Result:
+async def spoken_confirm(ask: Ask, readback: str) -> bool:
+    """Read back, take a spoken yes/no. Unclear -> ask once more -> still unclear -> cancel.
+    Only a clear yes returns True (CLAUDE.md hard rule 5)."""
+    answer = safety.parse_yes_no(await ask(readback))
+    if answer == "unclear":
+        answer = safety.parse_yes_no(await ask(ASK_AGAIN))
+    return answer == "yes"
+
+
+async def build_context(command: str) -> safety.CommandContext:
+    """Extract payee/amount, then add the other script's spelling of the name (Sarvam
+    transliteration) so a spoken "राहुल" can match an on-screen "Rahul". Network failure
+    just leaves the original spelling."""
+    ctx = safety.CommandContext.from_utterance(command)
+    if ctx.names:
+        from saathi.voice import transliterate
+
+        name = ctx.names[0]
+        devanagari = any("\u0900" <= ch <= "\u097f" for ch in name)
+        src, dst = ("hi-IN", "en-IN") if devanagari else ("en-IN", "hi-IN")
+        other = await transliterate(name, src, dst)
+        if other and other.lower() != name.lower():
+            ctx.names.append(other)
+    return ctx
+
+
+async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None = None) -> Result:
     trace = Trace(command)
     brain = Brain()
+    cap = get_settings().max_amount_inr
+
+    async def _confirm(readback: str) -> bool:
+        return await (confirm(readback) if confirm else spoken_confirm(ask, readback))
+
     talkback.install_guards()
     history: list[str] = []
     screen: Screen | None = None
@@ -140,26 +175,33 @@ async def run_command(command: str, say: Say, ask: Ask) -> Result:
         return Result(status, message, steps, trace.run_id, history)
 
     await device.connect(portal_mode="required")
+    ctx = await build_context(command)
+    trace.step(0, {"context": ctx.__dict__})
     await talkback.suspend()
     try:
         for step in range(1, MAX_STEPS + 1):
             if controls.interrupted():
-                return await finish("halt", "रुक गया। आप आगे खुद कर सकते हैं।", step)
+                return await finish("halt", STOPPED, step)
             t0 = time.time()
-            screen = await device.observe(vision=needs_vision(screen, last_changed, look_requested))
+            send_image = needs_vision(screen, last_changed, look_requested)
+            screen = await device.observe(vision=send_image)
+            if screen.package in PAYMENT_APPS and screen.screenshot is None:
+                # Always capture in payment apps so R8 can spot a black (secure) PIN screen;
+                # it is only sent to the model when the vision policy asks for it.
+                screen.screenshot = await device.capture_jpeg()
             observe_s = round(time.time() - t0, 2)
             look_requested = False
 
             if safety.is_pin_screen(screen):
                 return await finish("handoff", "अपना पिन खुद डालिए, मैं रुक रहा हूँ।", step)
 
-            decision, meta = await brain.decide(command, screen, history)
+            decision, meta = await brain.decide(command, screen, history, send_image)
             action = decision.action
             await _say(say, decision.say, progress=True)
 
             if controls.interrupted():
-                return await finish("halt", "रुक गया। आप आगे खुद कर सकते हैं।", step)
-            verdict = safety.check(action, screen)
+                return await finish("halt", STOPPED, step)
+            verdict = safety.check(action, screen, ctx, cap)
             record = {
                 "step": step,
                 "package": screen.package,
@@ -186,10 +228,19 @@ async def run_command(command: str, say: Say, ask: Ask) -> Result:
                     )
                 continue
             if verdict.kind == "hold":
-                # M1 has no spoken confirmation yet; confirmation defaults to cancel (hard rule 5).
-                trace.step(step, record, screen.screenshot)
-                await _say(say, verdict.readback)
-                return await finish("cancelled", "पुष्टि अभी उपलब्ध नहीं है, कैंसल कर दिया।", step)
+                confirmed = await _confirm(verdict.readback)
+                record["confirmed"] = confirmed
+                if not confirmed:
+                    trace.step(step, record, screen.screenshot)
+                    entry = next((e for e in screen.elements if e.rid == "entry"), None)
+                    if verdict.rule == "R2" and entry and entry.text:
+                        # Don't leave an unsent draft a blind user doesn't know about.
+                        await device.clear_field(entry)
+                    return await finish("cancelled", "कैंसल कर दिया।", step)
+                if controls.interrupted():
+                    trace.step(step, record, screen.screenshot)
+                    return await finish("halt", STOPPED, step)
+                history.append(f"{step}: user CONFIRMED the {verdict.rule} read-back")
 
             if isinstance(action, Done):
                 trace.step(step, record, screen.screenshot)

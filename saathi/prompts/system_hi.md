@@ -11,7 +11,7 @@ Actions (fill the unused fields with null):
 - `back`, `home`.
 - `open_app` (app): one of: whatsapp, gpay, blinkit, settings.
 - `look`: ask for a screenshot next turn when the element list isn't enough.
-- `ask_user` (text = question): when the command is ambiguous (e.g. two contacts with the same name).
+- `ask_user` (text = question): only when the command is ambiguous (e.g. two contacts with the same name). NEVER use it to ask "should I send / pay / order?" — just tap the Send / Pay / Place order button: Saathi's safety layer reads the details back from the screen and asks the user itself.
 - `done` (text = summary): the task is complete. The summary is spoken to the user.
 - `fail` (text = reason): the task is impossible or unsafe.
 

@@ -173,6 +173,7 @@ async def _adb(*args: str) -> str:
         *(["-s", serial] if serial else []),
         "shell",
         *args,
+        stdin=asyncio.subprocess.DEVNULL,  # adb shell would otherwise eat the user's typed input
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -251,6 +252,10 @@ def _to_jpeg(png: bytes, max_width: int = 1080) -> bytes:
     return buf.getvalue()
 
 
+async def capture_jpeg() -> bytes:
+    return _to_jpeg(await screenshot())
+
+
 async def observe(vision: bool = False) -> Screen:
     raw = await get_raw_tree()
     pkg = foreground_package(raw)
@@ -285,6 +290,18 @@ async def execute(action: Action, screen: Screen) -> bool:
     else:
         return False  # look / ask_user / done / fail are handled by the agent, not the device
     return True
+
+
+async def clear_field(element: Element, max_chars: int = 600) -> None:
+    """Delete a text field's contents with key presses (Portal's clear=True doesn't stick in
+    WhatsApp: the draft comes back). Used when the user cancels a send."""
+    d = await connect()
+    await d.tap(*element.center)
+    await asyncio.sleep(0.5)
+    await d.press_key_code(123)  # KEYCODE_MOVE_END
+    for _ in range(min(max_chars, len(element.text) + 5)):
+        await d.press_key_code(67)  # KEYCODE_DEL
+    await d.press_button("back")  # close the keyboard
 
 
 def _screen_size(screen: Screen) -> tuple[int, int]:

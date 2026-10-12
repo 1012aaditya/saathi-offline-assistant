@@ -21,7 +21,10 @@ def _adb_args(*args: str) -> list[str]:
 
 async def _shell(*args: str) -> str:
     proc = await asyncio.create_subprocess_exec(
-        *_adb_args(*args), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *_adb_args(*args),
+        stdin=asyncio.subprocess.DEVNULL,  # adb shell would otherwise eat the user's typed input
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
     out, err = await proc.communicate()
     if proc.returncode != 0:
@@ -75,7 +78,7 @@ def _restore_sync() -> None:
         ("settings", "put", "secure", "enabled_accessibility_services", _saved),
         ("settings", "put", "secure", "accessibility_enabled", "1"),
     ):
-        subprocess.run(_adb_args(*args), check=False, timeout=15)
+        subprocess.run(_adb_args(*args), check=False, timeout=15, stdin=subprocess.DEVNULL)
     _saved = None
 
 

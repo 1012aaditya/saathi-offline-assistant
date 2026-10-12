@@ -42,6 +42,28 @@ PHRASES = {
 }
 
 
+async def transliterate(text: str, source: str, target: str) -> str:
+    """Sarvam /transliterate (e.g. "राहुल" hi-IN -> en-IN "Rahul"). '' on any failure."""
+    key = get_settings().sarvam_api_key
+    if not key:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.post(
+                f"{API}/transliterate",
+                headers={"api-subscription-key": key},
+                json={
+                    "input": text,
+                    "source_language_code": source,
+                    "target_language_code": target,
+                },
+            )
+            r.raise_for_status()
+            return r.json().get("transliterated_text", "")
+    except httpx.HTTPError:
+        return ""
+
+
 class Recorder:
     """Collects 16 kHz mono int16 audio between start() and stop()."""
 
