@@ -32,6 +32,15 @@ RISKY_REGEX = re.compile(
 )
 AMOUNT_REGEX = re.compile(r"₹\s?([\d,]+(?:\.\d{1,2})?)")
 UPI_HANDLE_REGEX = re.compile(r"[\w.\-]{2,}@[a-zA-Z]{2,}")
+# R10: never grant Android runtime permissions (location, contacts, mic...) on the user's behalf.
+PERMISSION_PACKAGES = {
+    "com.google.android.permissioncontroller",
+    "com.android.permissioncontroller",
+}
+PERMISSION_ALLOW_REGEX = re.compile(
+    r"(?i)^(allow|while using the app|only this time|allow all the time|allow only while using)"
+    r"|अनुमति दें"
+)
 WHATSAPP_SEND_RIDS = {"send", "send_btn"}
 WHATSAPP_SEND_LABELS = {"send", "भेजें"}
 PAYEE_MATCH_MIN = 80  # rapidfuzz token_set_ratio (R5)
@@ -272,6 +281,10 @@ def check(
             return _payment(screen, ctx, cap)
         if screen.package in ORDER_APPS and ORDER_REGEX.search(label):
             return _order(screen)
+        if (
+            screen.package in PERMISSION_PACKAGES or target.rid.startswith("permission_allow")
+        ) and PERMISSION_ALLOW_REGEX.search(label):
+            return Verdict("block", "R10", "मैं आपकी तरफ़ से कोई अनुमति नहीं दूँगा।")
         if RISKY_REGEX.search(label):
             return Verdict("block", "R10", "यह काम आपकी बात का हिस्सा नहीं है, मैं नहीं करूँगा।")
     return ALLOW

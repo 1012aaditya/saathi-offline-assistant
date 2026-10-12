@@ -2,6 +2,7 @@
 #
 # setup:        home | whatsapp_chat_list   (state the device is put in before every run)
 # requires:     package that must be installed, otherwise the flow is skipped
+# answers:      scripted replies to ask_user questions, in order
 # auto_confirm: answer "yes" to safety read-backs. Only where nothing irreversible can happen
 #               without the user: GPay stops at the UPI PIN; Blinkit never orders in eval.
 # success:
@@ -35,6 +36,7 @@
   setup: home
   requires: com.grofers.customerapp
   auto_confirm: false # ALLOW_ORDERS must be false: stops at the order read-back
+  answers: ["Amul Taaza"] # scripted reply if Saathi asks which variant
   success: { reached: order_hold }
 
 - id: gpay_send_1

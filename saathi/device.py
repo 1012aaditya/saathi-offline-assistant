@@ -24,12 +24,23 @@ from mobilerun_core_local import AndroidDriver
 from pydantic import BaseModel
 
 from saathi.actions import Action, Back, Home, OpenApp, Scroll, Tap, TypeText
-from saathi.config import APP_ALIASES, get_settings
+from saathi.config import APP_ALIASES, ORDER_APPS, get_settings
 
 MAX_ELEMENTS = 150
 
 # Icon fonts put glyphs in the Unicode private use area (e.g. Blinkit's "").
 _PRIVATE_USE = re.compile("[-]")
+
+# Apps whose search box is submitted with Enter after typing. Never WhatsApp: Enter can send.
+SEARCH_SUBMIT_APPS = ORDER_APPS
+_SEARCH_LABEL = re.compile(r"(?i)search|खोज")
+
+
+def _is_search_field(e: "Element") -> bool:
+    return bool(_SEARCH_LABEL.search(f"{e.text} {e.desc} {e.rid}")) or (
+        e.editable and e.desc == "focused field"
+    )
+
 
 PORTAL_IME = "com.mobilerun.portal/.input.MobilerunKeyboardIME"
 
@@ -154,7 +165,34 @@ def normalize(raw: dict[str, Any], max_elements: int = MAX_ELEMENTS) -> list[Ele
     tree = raw.get("a11y_tree")
     for root in tree if isinstance(tree, list) else [tree] if tree else []:
         walk(root)
+    hidden = _hidden_focused_field(raw, out)
+    if hidden is not None and len(out) < max_elements:
+        out.append(hidden.model_copy(update={"index": len(out)}))
     return out
+
+
+def _hidden_focused_field(raw: dict[str, Any], elements: list[Element]) -> Element | None:
+    """Some apps hide their text field from accessibility (Blinkit's search box) even though
+    Android reports it as focused. Surface it so the model can see what is typed. Zero bounds:
+    its position is unknown, so it is never tapped (execute() types into the focus instead)."""
+    focused = (raw.get("phone_state") or {}).get("focusedElement") or {}
+    if "EditText" not in (focused.get("className") or ""):
+        return None
+    rid = (focused.get("resourceId") or "").rsplit("/", 1)[-1]
+    if any(e.editable and (not rid or e.rid == rid) for e in elements):
+        return None
+    return Element(
+        index=0,
+        cls="EditText",
+        text=_clean(focused.get("text")),
+        desc="focused field",
+        rid=rid,
+        clickable=False,
+        editable=True,
+        password=False,
+        bounds=(0, 0, 0, 0),
+        center=(0, 0),
+    )
 
 
 def foreground_package(raw: dict[str, Any]) -> str:
@@ -278,10 +316,24 @@ async def execute(action: Action, screen: Screen) -> bool:
     if isinstance(action, Tap):
         await d.tap(*screen.elements[action.index].center)
     elif isinstance(action, TypeText):
-        if action.index is not None:
-            await d.tap(*screen.elements[action.index].center)
+        target = screen.elements[action.index] if action.index is not None else None
+        if target is not None and target.bounds[2] > target.bounds[0]:
+            await d.tap(*target.center)
             await asyncio.sleep(0.6)
-        return bool(await d.input_text(action.text, clear=True))
+        ok = bool(await d.input_text(action.text, clear=True))
+        if not await _focused_text_contains(action.text):
+            # Portal types via accessibility, which can't reach fields an app hides from it
+            # (Blinkit search). Fall back to ordinary key input into whatever has focus.
+            try:
+                ok = bool(await d._input_text_adb(action.text, clear=True))
+            except RuntimeError:  # its clear can't reach hidden fields: delete by keys instead
+                await _delete_focused_text(d)
+                ok = bool(await d._input_text_adb(action.text, clear=False))
+        if ok and target and screen.package in SEARCH_SUBMIT_APPS and _is_search_field(target):
+            # Blinkit only shows results after Enter; the model kept retyping instead.
+            await asyncio.sleep(0.3)
+            await d.press_button("enter")
+        return ok
     elif isinstance(action, Scroll):
         w, h = _screen_size(screen)
         x = w // 2
@@ -309,6 +361,20 @@ async def clear_field(element: Element, max_chars: int = 600) -> None:
     for _ in range(min(max_chars, len(element.text) + 5)):
         await d.press_key_code(67)  # KEYCODE_DEL
     await d.press_button("back")  # close the keyboard
+
+
+async def _delete_focused_text(d: AndroidDriver, max_chars: int = 120) -> None:
+    focused = ((await get_raw_tree()).get("phone_state") or {}).get("focusedElement") or {}
+    n = min(max_chars, len(focused.get("text") or "") + 3)
+    await d.press_key_code(123)  # KEYCODE_MOVE_END
+    for _ in range(n):
+        await d.press_key_code(67)  # KEYCODE_DEL
+
+
+async def _focused_text_contains(text: str) -> bool:
+    await asyncio.sleep(0.4)
+    focused = ((await get_raw_tree()).get("phone_state") or {}).get("focusedElement") or {}
+    return text.strip().lower() in (focused.get("text") or "").lower()
 
 
 def _screen_size(screen: Screen) -> tuple[int, int]:

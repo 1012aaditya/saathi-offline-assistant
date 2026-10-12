@@ -4,6 +4,7 @@ SYSTEM_DESIGN section 4. Every action passes safety.check() before device.execut
 TalkBack and the user's keyboard are always restored in `finally`.
 """
 
+import asyncio
 import base64
 import json
 import re
@@ -33,6 +34,8 @@ from saathi.trace import Trace
 
 MAX_STEPS = 25
 MAX_FAILURES = 3
+MAX_UNANSWERED = 2  # ask_user with no answer twice -> stop
+LOOP_WINDOW, LOOP_REPEATS = 6, 3  # same action 3x within 6 executed steps = stuck
 HISTORY = 6
 PROMPTS = Path(__file__).parent / "prompts"
 APP_CARDS = {WHATSAPP: "whatsapp", GPAY: "gpay", BLINKIT: "blinkit"}
@@ -43,6 +46,8 @@ Confirm = Callable[[str], Awaitable[bool]]
 
 STOPPED = "रुक गया। आप आगे खुद कर सकते हैं।"
 DEVICE_ERRORS = (AdbError, ConnectionError, OSError, TimeoutError, httpx.TransportError)
+# No single device call may hang the loop: an eval run once froze 16 min on one call.
+DEVICE_TIMEOUT_S = 30
 
 # F4 "Screen pe kya hai?" — read-only: describe, never act.
 _SUMMARY_REGEX = re.compile(
@@ -194,6 +199,8 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
     history: list[str] = []
     screen: Screen | None = None
     last_changed, look_requested, failures, reconnected = True, summary_mode, 0, False
+    recent: list[str] = []  # signatures of executed actions, for loop detection
+    unanswered = 0
 
     async def finish(status: str, message: str, steps: int, reached: str = "") -> Result:
         await _say(say, message)
@@ -213,16 +220,16 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
         """One reconnect attempt on a dropped ADB / Portal link (SYSTEM_DESIGN section 11)."""
         nonlocal reconnected
         try:
-            return await fn(*args, **kwargs)
+            return await asyncio.wait_for(fn(*args, **kwargs), DEVICE_TIMEOUT_S)
         except DEVICE_ERRORS:
             if reconnected:
                 raise
             reconnected = True
             await _say(say, "फ़ोन से कनेक्शन टूट गया, फिर से जोड़ रहा हूँ।")
-            await device.reconnect()
-            return await fn(*args, **kwargs)
+            await asyncio.wait_for(device.reconnect(), DEVICE_TIMEOUT_S)
+            return await asyncio.wait_for(fn(*args, **kwargs), DEVICE_TIMEOUT_S)
 
-    await device.connect(portal_mode="required")
+    await asyncio.wait_for(device.connect(portal_mode="required"), DEVICE_TIMEOUT_S)
     ctx = await build_context(command)
     trace.step(0, {"context": ctx.__dict__, "summary_mode": summary_mode})
     await talkback.suspend()
@@ -326,13 +333,20 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 trace.step(step, record, screen.screenshot)
                 continue
             if isinstance(action, AskUser):
-                answer = await ask(action.question)
+                answer = (await ask(action.question)).strip()
                 history.append(f"{step}: asked user {action.question!r} -> answered {answer!r}")
                 trace.step(step, record, screen.screenshot)
+                unanswered = 0 if answer else unanswered + 1
+                if unanswered >= MAX_UNANSWERED:
+                    return await finish("fail", "मुझे जवाब नहीं मिला, मैं रुक रहा हूँ।", step)
                 continue
 
             t1 = time.time()
-            ok = await device_call(device.execute, action, screen)
+            try:
+                ok = await device_call(device.execute, action, screen)
+            except (RuntimeError, ValueError) as e:  # an action that can't run is a failed step
+                ok = False
+                record["execute_error"] = f"{type(e).__name__}: {e}"[:200]
             # Cold-starting an app took ~3.5 s on the tablet; taps settle well within 3 s.
             wait_s = 8 if isinstance(action, OpenApp) else 3
             changed = await device_call(device.wait_for_change, screen.hash, timeout_s=wait_s)
@@ -348,7 +362,14 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 f"{step}: {action.type} {action.model_dump_json(exclude={'type'})}{target}"
                 f" -> {'screen changed' if changed else 'NO CHANGE'}"
             )
-            last_changed = ok and changed
+            sig = action.model_dump_json()
+            recent = (recent + [sig])[-LOOP_WINDOW:]
+            looping = recent.count(sig) >= LOOP_REPEATS
+            if looping:
+                # Screens with rotating content (Blinkit's search hint) look "changed" even when
+                # nothing progressed; repeating the same action is the reliable signal.
+                history.append(f"{step}: WARNING you repeated this exact action; it isn't working")
+            last_changed = ok and changed and not looping
             failures = 0 if last_changed else failures + 1
             if failures >= MAX_FAILURES:
                 return await finish("halt", "यह स्टेप नहीं हो पा रहा। मैं रुक रहा हूँ।", step)
@@ -356,5 +377,10 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
     except DEVICE_ERRORS:
         return await finish("halt", "फ़ोन से कनेक्शन नहीं जुड़ पा रहा। मैं रुक रहा हूँ।", 0)
     finally:
-        await talkback.restore()
-        await device.restore_keyboard()
+        # Bounded so a dead link can't hang the exit; talkback's atexit/signal guard is the
+        # backstop if this times out (hard rule 7).
+        for cleanup in (talkback.restore, device.restore_keyboard):
+            try:
+                await asyncio.wait_for(cleanup(), DEVICE_TIMEOUT_S)
+            except (*DEVICE_ERRORS, RuntimeError):
+                pass

@@ -135,6 +135,27 @@
   .head-row { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: end; margin-bottom: 48px; }
   .head-row .lede { margin: 0; }
 
+  /* who it's for */
+  .who-band { padding-bottom: clamp(40px, 6vw, 80px); }
+  .who-grid { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: clamp(36px, 6vw, 96px); align-items: center; }
+  .photo-wrap { margin: 0; }
+  .photo-box { position: relative; }
+  .photo-shape { position: absolute; inset: 7% -6% 3% 9%; border-radius: 40px; background: var(--marigold); transform: rotate(4deg); }
+  .photo { position: relative; display: block; width: 100%; height: auto; aspect-ratio: 866 / 1300; object-fit: cover; border-radius: 34px; box-shadow: var(--shadow); }
+  .float { position: absolute; z-index: 2; background: #fff; border-radius: 18px; padding: 11px 15px; font-size: 0.9rem; line-height: 1.3; box-shadow: 0 18px 36px -18px rgba(23,21,59,.45); max-width: 74%; }
+  .float b { display: block; font-size: 0.72rem; font-family: var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--blue); margin-bottom: 3px; }
+  .f-say { top: 30%; right: -6%; background: var(--pink); color: #fff; border-bottom-right-radius: 6px; display: flex; align-items: center; gap: 10px; }
+  .f-say .mic { width: 10px; height: 10px; border-radius: 50%; background: #fff; flex: none; box-shadow: 0 0 0 4px rgba(255,255,255,.35); }
+  .f-reply { top: 47%; left: -7%; border-bottom-left-radius: 6px; }
+  .f-hold { bottom: 18%; right: -4%; background: #fff4d9; box-shadow: inset 0 0 0 2px var(--marigold), 0 18px 36px -18px rgba(23,21,59,.45); }
+  .f-hold .tagx { display: block; width: max-content; }
+  .photo-wrap figcaption, .detail figcaption { position: relative; margin-top: 22px; font-size: 0.78rem; color: var(--ink-2); }
+  .who-points { list-style: none; margin: 0 0 28px; padding: 0; display: grid; gap: 12px; }
+  .who-points li { background: #fff; border-radius: 18px; padding: 16px 20px; box-shadow: 0 18px 40px -32px rgba(23,21,59,.4); color: var(--ink-2); font-size: 0.98rem; }
+  .who-points b { color: var(--ink); }
+  .detail { margin: 0; max-width: 420px; }
+  .detail img { display: block; width: 100%; height: auto; border-radius: 22px; }
+
   /* problem */
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
   .stat { border-radius: var(--r); padding: 30px 28px 26px; min-height: 260px; display: flex; flex-direction: column; justify-content: space-between; }
@@ -215,6 +236,19 @@
   .l-hold { top: 50%; background: var(--marigold); }
   .l-stop { top: 82%; background: var(--coral); color: #fff; }
   .chip { position: absolute; left: 4%; top: 50%; transform: translateY(-50%); padding: 9px 14px; border-radius: 999px; background: #fff; font-weight: 500; font-size: 0.88rem; white-space: nowrap; box-shadow: 0 6px 16px -8px rgba(23,21,59,.4); opacity: 0; z-index: 3; }
+
+  .try { margin: -8px 0 32px; }
+  .try-label { margin: 0 0 12px; font-weight: 600; }
+  .try-btns { display: flex; flex-wrap: wrap; gap: 10px; }
+  .try-btns button { font: 500 0.92rem/1 var(--f-body); padding: 12px 16px; border-radius: 999px; border: 2px solid var(--lilac); background: #fff; color: var(--ink); cursor: pointer; transition: border-color .2s ease, transform .2s ease, background .2s ease; }
+  .try-btns button:hover { border-color: var(--blue); transform: translateY(-1px); }
+  .try-btns button[aria-pressed="true"] { border-color: var(--blue); background: var(--blue); color: #fff; }
+  .try-btns .loop-btn { border-style: dashed; color: var(--ink-2); }
+  .verdict-card { margin-top: 16px; display: flex; gap: 16px; align-items: flex-start; padding: 18px 22px; border-radius: 18px; background: #fff; box-shadow: 0 18px 40px -30px rgba(23,21,59,.4); max-width: 760px; }
+  .verdict-card[hidden] { display: none; }
+  .verdict-card .verdict { flex: none; margin-top: 3px; }
+  .verdict-card p { margin: 0; }
+  .verdict-card small { display: block; margin-top: 4px; color: var(--ink-2); font: 400 0.78rem/1.4 var(--f-mono); }
 
   .lines { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 28px; }
   .hl { background: #fff; border-radius: var(--r); padding: 28px; box-shadow: 0 2px 0 rgba(23,21,59,.04), 0 18px 40px -30px rgba(23,21,59,.35); }
@@ -315,6 +349,8 @@
     .demo { grid-template-columns: 1fr; }
     .phone-col { max-width: 280px; margin: 0 auto; width: 100%; }
     .how-grid { grid-template-columns: 1fr; }
+    .who-grid { grid-template-columns: 1fr; }
+    .photo-wrap { max-width: 420px; margin: 0 auto; width: 88%; }
     .flows { grid-template-columns: 1fr; }
   }
   @media (max-width: 640px) {
@@ -420,6 +456,37 @@
     </div>
   </div>
 
+  <!-- WHO IT'S FOR -->
+  <section class="band who-band" aria-labelledby="who-h">
+    <div class="wrap who-grid">
+      <figure class="photo-wrap">
+        <div class="photo-box">
+        <span class="photo-shape" aria-hidden="true"></span>
+        <img class="photo" src="img/voice-user.jpg" width="866" height="1300" loading="lazy"
+             alt="A smiling blind man in sunglasses speaks into a smartphone held near his mouth while his other hand reads a braille book on a wooden table.">
+        <div class="float f-say" aria-hidden="true"><span class="mic"></span>“Mummy ka last message padho”</div>
+        <div class="float f-reply" aria-hidden="true"><b>Saathi</b>Mummy: “Khana kha liya?” 2:14 pm</div>
+        <div class="float f-hold" aria-hidden="true"><span class="tagx hold">WAITING FOR YES</span>Reply “main 7 baje aaunga”?</div>
+        </div>
+        <figcaption>Stock photo for illustration · <a href="https://www.pexels.com/photo/photo-of-man-talking-to-the-phone-while-studying-using-braille-7188903/">Eren Li on Pexels</a></figcaption>
+      </figure>
+      <div>
+        <p class="kicker">Who it’s for</p>
+        <h2 id="who-h" class="rv">For people who use their phone by ear.</h2>
+        <p class="lede rv">Many blind people already use their phones every day, with a screen reader and voice notes. Where they get stuck is the app that wasn’t built for them: an unlabeled button, a gesture menu, a payment screen. Saathi steps in for exactly those moments, then gives control back.</p>
+        <ul class="who-points">
+          <li class="rv-card"><b>Nothing new to learn.</b> Hold a key and speak, the way you’d ask a friend.</li>
+          <li class="rv-card"><b>Works with the phone you already have.</b> Android, the apps you already use, and your own screen reader.</li>
+          <li class="rv-card"><b>You stay in charge.</b> It reads back before anything important and never touches your PIN.</li>
+        </ul>
+        <figure class="detail rv-card">
+          <img src="img/braille-phone.jpg" width="1000" height="666" loading="lazy" alt="Close-up of hands reading a braille page, with a smartphone and earphone cable lying on the bed beside them.">
+          <figcaption>Photo: <a href="https://www.pexels.com/photo/person-learning-braille-7188577/">Eren Li on Pexels</a></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
   <!-- PROBLEM -->
   <section class="band" aria-labelledby="problem-h">
     <div class="wrap">
@@ -511,6 +578,20 @@
         <div class="chip" data-lane="stop">Type in PIN box</div>
         <div class="chip" data-lane="hold">Send message</div>
         <div class="chip" data-lane="stop">Delete chat</div>
+      </div>
+
+      <div class="try" id="try">
+        <p class="try-label">Try it yourself. Pick what the AI wants to do:</p>
+        <div class="try-btns">
+          <button type="button" data-i="0">Open Google Pay</button>
+          <button type="button" data-i="1">Search “Rahul”</button>
+          <button type="button" data-i="2">Tap Pay · ₹1</button>
+          <button type="button" data-i="3">Type in PIN box</button>
+          <button type="button" data-i="4">Send message</button>
+          <button type="button" data-i="5">Delete chat</button>
+          <button type="button" class="loop-btn" id="tryLoop" hidden>↻ Play all again</button>
+        </div>
+        <div class="verdict-card" id="tryResult" aria-live="polite" hidden></div>
       </div>
 
       <div class="lines">
@@ -851,6 +932,17 @@
     });
     convo.to({}, { duration: 2.2 }).to(bubs, { opacity: 0, y: -10, duration: 0.4, stagger: 0.04 }).call(setStatus('Listening…', false));
 
+    /* photo: parallax + looping speech bubbles */
+    gsap.from('.photo', { scale: 1.08, opacity: 0, duration: 1.2, ease: 'expo.out', scrollTrigger: { trigger: '.photo-box', start: 'top 85%' } });
+    gsap.fromTo('.photo-shape', { rotate: -2 }, { rotate: 7, ease: 'none', scrollTrigger: { trigger: '.photo-wrap', start: 'top bottom', end: 'bottom top', scrub: true } });
+    gsap.to('.f-say .mic', { scale: 1.5, opacity: 0.6, duration: 0.6, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+    const floats = gsap.utils.toArray('.float');
+    const floatTl = gsap.timeline({ repeat: -1, repeatDelay: 0.8, paused: true });
+    floatTl.set(floats, { opacity: 0, y: 14, scale: 0.9 });
+    floats.forEach(f => floatTl.to(f, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: 'back.out(1.8)' }, '+=0.7'));
+    floatTl.to({}, { duration: 2.4 }).to(floats, { opacity: 0, y: -8, duration: 0.4, stagger: 0.08 });
+    ScrollTrigger.create({ trigger: '.photo-wrap', start: 'top 80%', end: 'bottom top', onToggle: s => s.isActive ? floatTl.play() : floatTl.pause() });
+
     /* generic reveals */
     gsap.utils.toArray('.rv').forEach(el => gsap.from(el, { y: 40, opacity: 0, duration: 0.9, ease: 'power3.out', scrollTrigger: { trigger: el, start: 'top 88%' } }));
     gsap.set('.rv-card', { y: 60, opacity: 0, rotate: 2 });
@@ -872,32 +964,6 @@
     gsap.utils.toArray('.fill').forEach((f, i) => gsap.fromTo(f, { scaleX: 0 }, { scaleX: f.dataset.w / 100, duration: 1.4, ease: 'expo.out', delay: i * 0.12, scrollTrigger: { trigger: '#bars', start: 'top 85%' } }));
     gsap.from('.zero b', { scale: 0.3, opacity: 0, duration: 0.8, ease: 'back.out(2)', scrollTrigger: { trigger: '.zero', start: 'top 90%' } });
 
-    /* safety sorter */
-    const sorter = document.getElementById('sorter');
-    const gate = document.getElementById('gate');
-    const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-    const laneInfo = {
-      allow: { top: '18%', bg: css('--mint'), fg: '#17153b' },
-      hold:  { top: '50%', bg: css('--marigold'), fg: '#17153b' },
-      stop:  { top: '82%', bg: css('--coral'), fg: '#ffffff' },
-    };
-    const sortTl = gsap.timeline({ repeat: -1, paused: true });
-    gsap.utils.toArray('.chip', sorter).forEach((chip, i) => {
-      const L = laneInfo[chip.dataset.lane];
-      const lane = sorter.querySelector('.l-' + chip.dataset.lane);
-      const t = i * 1.5;
-      sortTl.set(chip, { left: '0%', top: '50%', x: 0, opacity: 0, backgroundColor: '#ffffff', color: '#17153b', scale: 1 }, t)
-        .to(chip, { left: '20%', opacity: 1, duration: 0.8, ease: 'power2.out' }, t)
-        .to(chip, { left: '32%', scale: 0.85, duration: 0.3, ease: 'power1.in' }, t + 0.8)
-        .to(gate, { backgroundColor: L.bg, color: L.fg, scale: 1.06, duration: 0.18 }, t + 1.0)
-        .to(chip, { backgroundColor: L.bg, color: L.fg, scale: 1, duration: 0.2 }, t + 1.05)
-        .to(chip, { left: '56%', top: L.top, duration: 0.7, ease: 'power2.inOut' }, t + 1.15)
-        .to(gate, { backgroundColor: '#ffffff', color: '#17153b', scale: 1, duration: 0.35 }, t + 1.3)
-        .to(lane, { scale: 1.05, duration: 0.15, yoyo: true, repeat: 1 }, t + 1.75)
-        .to(chip, { opacity: 0, x: 20, duration: 0.3 }, t + 2.0);
-    });
-    ScrollTrigger.create({ trigger: sorter, start: 'top bottom', end: 'bottom top', onToggle: s => s.isActive ? sortTl.play() : sortTl.pause() });
-
     /* how-it-works ring */
     const nodes = gsap.utils.toArray('.node');
     const items = gsap.utils.toArray('#stepsList li');
@@ -913,15 +979,106 @@
     gsap.from('.big-name span', { yPercent: 60, opacity: 0, duration: 1.1, stagger: 0.15, ease: 'expo.out', scrollTrigger: { trigger: 'footer', start: 'top 85%' } });
   });
 
-  /* pinned, scroll-driven walkthrough on large screens */
+  /* pinned, scroll-driven walkthrough on large screens.
+     refreshPriority makes ScrollTrigger measure this pin first, so every trigger
+     further down the page accounts for the extra scroll length it adds. */
   mm.add('(prefers-reduced-motion: no-preference) and (min-width: 961px) and (min-height: 760px)', () => {
     hint.hidden = false;
     ScrollTrigger.create({
-      trigger: '#demoPin', start: 'center center', end: '+=' + steps.length * 260, pin: true, anticipatePin: 1,
+      trigger: '#demoPin', start: 'center center', end: '+=' + steps.length * 260, pin: true, anticipatePin: 1, refreshPriority: 1,
       onUpdate: self => { if (!playing) go(Math.round(self.progress * (steps.length - 1))); },
     });
   });
   mm.add('(max-width: 960px), (max-height: 759px)', () => { hint.hidden = true; });
+
+  /* ================= safety gate: looping demo + "try it yourself" ================= */
+  const verdicts = [
+    { kind: 'allow', label: 'ALLOW', rule: 'No rule triggered', why: 'Opening an app can’t spend money or send anything, so it goes ahead.' },
+    { kind: 'allow', label: 'ALLOW', rule: 'No rule triggered', why: 'Typing in a search box is harmless and easy to undo.' },
+    { kind: 'hold', label: 'HOLD', rule: 'R1 payment · R4 read-back · R5 name match · R6 limit', why: 'Payments wait for your spoken yes. First Saathi reads back “₹1 to Rahul Sharma”, using only words found on the screen.' },
+    { kind: 'stop', label: 'STOP', rule: 'R7 secret field · R8 PIN screen', why: 'Saathi never types into PIN, OTP or password boxes. It stops and hands the phone back to you.' },
+    { kind: 'hold', label: 'HOLD', rule: 'R2 message · R4 read-back', why: 'Before sending, Saathi reads back who it’s going to and the exact words, then waits for yes.' },
+    { kind: 'stop', label: 'STOP', rule: 'R10 risky tap', why: 'You didn’t ask to delete anything, so the tap is blocked and Saathi asks you first.' },
+  ];
+  const sorter = document.getElementById('sorter');
+  const gate = document.getElementById('gate');
+  const chips = [...sorter.querySelectorAll('.chip')];
+  const tryBtns = [...document.querySelectorAll('.try-btns button[data-i]')];
+  const tryLoop = document.getElementById('tryLoop');
+  const tryResult = document.getElementById('tryResult');
+
+  function showVerdict(i) {
+    const v = verdicts[i];
+    tryResult.hidden = false;
+    tryResult.innerHTML = `<span class="verdict v-${v.kind}">${v.label}</span><p><b>${chips[i].textContent}.</b> ${v.why}<small>${v.rule}</small></p>`;
+    tryBtns.forEach((b, j) => b.setAttribute('aria-pressed', j === i ? 'true' : 'false'));
+  }
+
+  if (!hasGsap || !motionOK) {
+    tryBtns.forEach((b, i) => b.addEventListener('click', () => showVerdict(i)));
+    return;
+  }
+
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const laneInfo = {
+    allow: { top: '18%', bg: css('--mint'), fg: '#17153b' },
+    hold:  { top: '50%', bg: css('--marigold'), fg: '#17153b' },
+    stop:  { top: '82%', bg: css('--coral'), fg: '#ffffff' },
+  };
+  function chipRun(chip) {
+    const L = laneInfo[chip.dataset.lane];
+    const lane = sorter.querySelector('.l-' + chip.dataset.lane);
+    return gsap.timeline()
+      .set(chip, { left: '0%', top: '50%', x: 0, opacity: 0, backgroundColor: '#ffffff', color: '#17153b', scale: 1 })
+      .to(chip, { left: '20%', opacity: 1, duration: 0.8, ease: 'power2.out' }, 0)
+      .to(chip, { left: '32%', scale: 0.85, duration: 0.3, ease: 'power1.in' }, 0.8)
+      .to(gate, { backgroundColor: L.bg, color: L.fg, scale: 1.06, duration: 0.18 }, 1.0)
+      .to(chip, { backgroundColor: L.bg, color: L.fg, scale: 1, duration: 0.2 }, 1.05)
+      .to(chip, { left: '56%', top: L.top, duration: 0.7, ease: 'power2.inOut' }, 1.15)
+      .to(gate, { backgroundColor: '#ffffff', color: '#17153b', scale: 1, duration: 0.35 }, 1.3)
+      .to(lane, { scale: 1.05, duration: 0.15, yoyo: true, repeat: 1 }, 1.75)
+      .to(chip, { opacity: 0, x: 20, duration: 0.3 }, 2.0);
+  }
+  const sortTl = gsap.timeline({ repeat: -1, paused: true });
+  chips.forEach((chip, i) => sortTl.add(chipRun(chip), i * 1.5));
+
+  let manual = false, manualTl = null;
+  const sortST = ScrollTrigger.create({
+    trigger: sorter, start: 'top bottom', end: 'bottom top',
+    onToggle: s => { if (!manual) s.isActive ? sortTl.play() : sortTl.pause(); },
+  });
+
+  tryBtns.forEach((b, i) => b.addEventListener('click', () => {
+    manual = true;
+    sortTl.pause();
+    if (manualTl) manualTl.kill();
+    gsap.set(chips, { opacity: 0 });
+    gsap.set(gate, { backgroundColor: '#ffffff', color: '#17153b', scale: 1 });
+    tryResult.hidden = true;
+    tryLoop.hidden = false;
+    tryBtns.forEach((x, j) => x.setAttribute('aria-pressed', j === i ? 'true' : 'false'));
+    manualTl = chipRun(chips[i]);
+    manualTl.remove(manualTl.getChildren().pop());       // keep the chip visible in its lane
+    manualTl.call(() => {
+      showVerdict(i);
+      gsap.from(tryResult, { y: 14, opacity: 0, duration: 0.4, ease: 'power3.out' });
+    }, null, 1.6);
+  }));
+  tryLoop.addEventListener('click', () => {
+    manual = false;
+    if (manualTl) manualTl.kill();
+    gsap.set(chips, { opacity: 0 });
+    tryResult.hidden = true;
+    tryLoop.hidden = true;
+    tryBtns.forEach(x => x.setAttribute('aria-pressed', 'false'));
+    sortTl.restart();
+    if (!sortST.isActive) sortTl.pause();
+  });
+
+  /* make every trigger re-measure once fonts and images have loaded */
+  ScrollTrigger.sort();
+  ScrollTrigger.refresh();
+  window.addEventListener('load', () => ScrollTrigger.refresh());
 })();
 </script>
 </body>

@@ -159,3 +159,31 @@ def test_whatsapp_messages_tagged_by_sender():
     line = next(e for e in els if e.text == "achaa").to_line()
     assert line.endswith("from=me")
     assert all(e.sender == "" for e in els if e.rid != "message_text")
+
+
+def test_hidden_focused_field_is_surfaced_untappable():
+    raw = tree(node("LinearLayout", desc="Search for atta, dal, coke and more", clickable=True))
+    raw["phone_state"]["focusedElement"] = {
+        "text": "milk",
+        "className": "android.widget.EditText",
+        "resourceId": "com.grofers.customerapp:id/edittext",
+    }
+    els = normalize(raw)
+    hidden = els[-1]
+    assert (hidden.cls, hidden.text, hidden.rid, hidden.editable) == (
+        "EditText",
+        "milk",
+        "edittext",
+        True,
+    )
+    assert hidden.bounds == (0, 0, 0, 0) and hidden.index == len(els) - 1
+
+
+def test_visible_focused_field_not_duplicated():
+    raw = tree(node("EditText", text="hi", rid="com.whatsapp:id/entry", isEditable=True))
+    raw["phone_state"]["focusedElement"] = {
+        "text": "hi",
+        "className": "android.widget.EditText",
+        "resourceId": "com.whatsapp:id/entry",
+    }
+    assert sum(e.editable for e in normalize(raw)) == 1

@@ -27,6 +27,7 @@ from saathi.config import get_settings
 
 ROOT = Path(__file__).parent
 TRACES = Path("traces")
+SETUP_TIMEOUT_S = 60
 # USD per 1M tokens (developers.openai.com pricing, checked 12 Oct 2026). Unknown model -> 0.
 PRICES = {"gpt-5-nano": (0.05, 0.40), "gpt-6-luna": (0.10, 0.50), "gpt-5.4-nano": (0.20, 1.25)}
 
@@ -68,7 +69,9 @@ async def setup(kind: str) -> None:
 
 
 async def installed(package: str) -> bool:
-    return f"package:{package}" in await device.shell(f"pm path {package}")
+    # `pm path` prints the APK path, e.g. "package:/data/app/~~x/com.whatsapp-y/base.apk".
+    out = await device.shell(f"pm path {package}")
+    return out.strip().startswith("package:") and package in out
 
 
 # -- scoring ---------------------------------------------------------------------------------
@@ -132,14 +135,23 @@ async def run_flow(flow: dict, n: int) -> FlowReport:
     async def quiet_say(line: str, progress: bool = False) -> None:
         pass
 
+    answers = list(flow.get("answers") or [])
+
     async def no_answer(question: str) -> str:
-        return ""  # eval can't answer questions; the agent must cope or fail
+        # Scripted replies from flows.yaml (in order); "" once they run out.
+        return answers.pop(0) if answers else ""
 
     async def auto_confirm(readback: str) -> bool:
         return bool(flow.get("auto_confirm"))
 
     for i in range(1, n + 1):
-        await setup(flow.get("setup", "home"))
+        answers[:] = list(flow.get("answers") or [])
+        try:
+            await asyncio.wait_for(setup(flow.get("setup", "home")), SETUP_TIMEOUT_S)
+        except (TimeoutError, ConnectionError, OSError):
+            print(f"  {flow['id']} #{i}: setup timed out, reconnecting", flush=True)
+            await device.reconnect()
+            await asyncio.wait_for(setup(flow.get("setup", "home")), SETUP_TIMEOUT_S)
         t = time.time()
         result = await run_command(
             flow["command"], say=quiet_say, ask=no_answer, confirm=auto_confirm

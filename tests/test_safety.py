@@ -348,3 +348,24 @@ def test_r3_readback_prefers_labelled_total_over_item_price():
 def test_r3_readback_falls_back_to_largest_amount():
     s = screen(BLINKIT, el("₹28"), el("₹43"), el("Place order", cls="Button"))
     assert "₹43" in check(Tap(index=2), s).readback
+
+
+# --- R10: never grant Android permissions -------------------------------------------------
+
+PERM = "com.google.android.permissioncontroller"
+
+
+@pytest.mark.parametrize("label", ["While using the app", "Only this time", "Allow", "अनुमति दें"])
+def test_r10_permission_allow_blocked(label):
+    s = screen(PERM, el("Allow Blinkit to access this device's location?"), el(label, cls="Button"))
+    assert check(Tap(index=1), s).rule == "R10"
+
+
+def test_r10_permission_deny_allowed():
+    s = screen(PERM, el("Allow Blinkit to access location?"), el("Don't allow", cls="Button"))
+    assert check(Tap(index=1), s).kind == "allow"
+
+
+def test_r10_in_app_permission_allow_rid_blocked():
+    s = screen(BLINKIT, el("While using the app", rid="permission_allow_foreground_only_button"))
+    assert check(Tap(index=0), s).rule == "R10"
