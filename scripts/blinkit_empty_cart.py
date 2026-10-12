@@ -11,20 +11,24 @@ import asyncio
 import sys
 
 from saathi import blinkit, device, safety
-from saathi.actions import Back, Search, Tap
+from saathi.actions import Back, Scroll, Search, Tap
 from saathi.config import BLINKIT
 
 MAX_TAPS = 30
 
 
-async def gated_tap(screen: device.Screen, index: int) -> None:
+async def gated_tap(screen: device.Screen, index: int) -> bool:
+    """Tap if safety allows. False if the button is covered (R11): caller scrolls and retries."""
     action = Tap(index=index)
     verdict = safety.check(action, screen)
+    if verdict.rule == "R11":
+        return False
     if verdict.kind != "allow":
         sys.exit(
             f"safety said {verdict.kind}/{verdict.rule} for {screen.elements[index].to_line()}"
         )
     await device.execute(action, screen)
+    return True
 
 
 async def main() -> None:
@@ -47,14 +51,25 @@ async def main() -> None:
             )  # fmt: skip
             if dec is None:
                 sys.exit(f"no − button for {items[0].name}; stopping")
+            if not await gated_tap(s, dec.index):
+                # Under the floating checkout bar: scroll the list up and look again.
+                await device.execute(Scroll(direction="down"), s)
+                await asyncio.sleep(1)
+                taps += 1
+                continue
             print(f"  − {items[0].name} (qty {items[0].qty})")
-            await gated_tap(s, dec.index)
             taps += 1
             await asyncio.sleep(1.2)
             continue
         n = blinkit.cart_count(s)
+        for _ in range(8):  # the cart bar renders ~1 s after the products: don't conclude early
+            if n:
+                break
+            await asyncio.sleep(0.5)
+            s = await device.observe()
+            n = blinkit.cart_count(s)
         if not n:
-            break  # no cart bar on the results screen = empty cart
+            break  # still no cart bar after waiting = empty cart
         bar = next(e for e in s.elements if "View cart" in f"{e.text} {e.desc}")
         await gated_tap(s, bar.index)
         await asyncio.sleep(2)

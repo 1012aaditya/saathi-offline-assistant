@@ -65,6 +65,7 @@ class BlinkitState:
         return max(0, self.cart_now - (self.cart_start or 0))
 
 
+_SHIPMENT = re.compile(r"Shipment of (\d+) items?", re.IGNORECASE)
 _CART_COUNT = re.compile(r"view cart\s*·?\s*(\d+)\s+items?", re.IGNORECASE)
 
 
@@ -228,5 +229,15 @@ def order_readback(screen: Screen) -> tuple[str, list[str]] | None:
     total = cart_total(screen)
     if total:
         parts.append(total)
+    shipment = next(
+        (m.group(0) for e in screen.elements for m in [_SHIPMENT.search(e.desc or e.text)] if m),
+        "",
+    )
+    shown = sum(c.qty for c in items)
+    more = ""
+    if shipment and int(_SHIPMENT.search(shipment).group(1)) > shown:
+        # Never let a total cover items the user didn't hear about.
+        parts.append(shipment)
+        more = f" ({shipment}, बाकी आइटम स्क्रीन के नीचे हैं)"
     tail = f" कुल {total}." if total else " कुल रकम इस स्क्रीन पर नहीं दिख रही।"
-    return f"कार्ट में: {', '.join(lines)}.{tail} ऑर्डर कर दूँ?", parts
+    return f"कार्ट में: {', '.join(lines)}{more}.{tail} ऑर्डर कर दूँ?", parts

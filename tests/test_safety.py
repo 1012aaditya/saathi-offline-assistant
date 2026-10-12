@@ -432,3 +432,61 @@ def test_r4_readout_quotes_must_be_verbatim():
 def test_r3_generic_proceed_without_amount_is_not_checkout():
     s = screen(BLINKIT, el("Confirm delivery location"), el("Proceed", cls="Button"))
     assert check(Tap(index=1), s).kind == "allow"
+
+
+# --- R11: tap point covered by an irreversible control ------------------------------------
+
+
+def _el(i, text="", desc="", rid="", box=(0, 0, 10, 10)):
+    x1, y1, x2, y2 = box
+    return Element(index=i, cls="View", text=text, desc=desc, rid=rid, clickable=True,
+                   editable=False, password=False, bounds=box,
+                   center=((x1 + x2) // 2, (y1 + y2) // 2))  # fmt: skip
+
+
+def test_r11_minus_under_floating_place_order_bar_blocked():
+    # Real landscape layout: "Decrease quantity" at y=1054 under the checkout bar (y 1050-1100)
+    s = Screen(BLINKIT, [
+        _el(0, desc="Decrease quantity", rid="icon_decrement", box=(1870, 1035, 1912, 1073)),
+        _el(1, text="₹165 · TOTAL · Place Order", rid="cv_checkout_container",
+            box=(730, 1048, 1982, 1104)),
+    ], "h")  # fmt: skip
+    v = check(Tap(index=0), s)
+    assert (v.kind, v.rule) == ("block", "R11")
+
+
+def test_r11_same_minus_clear_of_the_bar_allowed():
+    s = Screen(BLINKIT, [
+        _el(0, desc="Decrease quantity", rid="icon_decrement", box=(1870, 600, 1912, 640)),
+        _el(1, text="₹165 · TOTAL · Place Order", rid="cv_checkout_container",
+            box=(730, 1048, 1982, 1104)),
+    ], "h")  # fmt: skip
+    assert check(Tap(index=0), s).kind == "allow"
+
+
+def test_r11_child_of_checkout_bar_is_not_covered():
+    # "Place Order" text inside its own container: that's the R3 hold, not R11
+    s = Screen(BLINKIT, [
+        _el(0, text="₹165 · TOTAL · Place Order", rid="cv_checkout_container",
+            box=(730, 1048, 1982, 1104)),
+        _el(1, text="Place Order", rid="tv_action_text", box=(1300, 1060, 1440, 1092)),
+        _el(2, text="Amul Gold Milk ₹83"),
+    ], "h")  # fmt: skip
+    assert check(Tap(index=1), s).rule == "R3"
+
+
+def test_r11_whatsapp_tap_inside_send_area_is_treated_as_send():
+    s = Screen(WHATSAPP, [
+        _el(0, desc="Attach", rid="input_attach_button", box=(1080, 1860, 1130, 1910)),
+        _el(1, desc="Send", rid="send", box=(1060, 1850, 1180, 1920)),
+    ], "h")  # fmt: skip
+    assert check(Tap(index=0), s).rule == "R2"  # R2 hold/block path, never a silent allow
+
+
+def test_r11_text_inside_checkout_bar_gets_order_hold():
+    s = Screen(BLINKIT, [
+        _el(0, text="₹165 · TOTAL · Place Order", rid="cv_checkout_container",
+            box=(730, 1048, 1982, 1104)),
+        _el(1, text="TOTAL", rid="tv_checkout_subtitle", box=(740, 1080, 790, 1100)),
+    ], "h")  # fmt: skip
+    assert check(Tap(index=1), s).rule == "R3"

@@ -212,3 +212,13 @@ def test_sheet_with_item_in_cart_closes_sheet():
     ], "h")  # fmt: skip
     st = BlinkitState(query="amul milk 1 litre", answer="Amul Taaza", asked=True)
     assert next_action(sheet, st, 1, 0).action == Back()
+
+
+def test_readback_flags_items_not_on_screen():
+    s = checkout_screen()
+    s.elements.append(E(11, "Shipment of 2 items", rid="subtitle", box=(100, 520, 300, 550)))
+    text, parts = order_readback(s)
+    assert "Shipment of 2 items" in text and "Shipment of 2 items" in parts
+    s1 = checkout_screen()
+    s1.elements.append(E(11, "Shipment of 1 item", rid="subtitle", box=(100, 520, 300, 550)))
+    assert "Shipment" not in order_readback(s1)[0]

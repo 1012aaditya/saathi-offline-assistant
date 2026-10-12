@@ -196,6 +196,34 @@ def ungrounded_quotes(summary: str, screen: Screen) -> list[str]:
     return [q for q in _QUOTED.findall(summary) if not any(q.strip() in t for t in texts)]
 
 
+def _is_irreversible_control(e: Element, package: str) -> bool:
+    label = _label(e)
+    if package == WHATSAPP:
+        return e.rid in WHATSAPP_SEND_RIDS or e.desc.lower() in WHATSAPP_SEND_LABELS
+    if package in PAYMENT_APPS:
+        return bool(re.search(r"(?i)\b(pay|send|proceed to pay)\b|भेजें|पे करें", label))
+    if package in ORDER_APPS:
+        return bool(ORDER_REGEX.search(label))
+    return False
+
+
+def covered_by_irreversible(target: Element, screen: Screen) -> tuple[Element, bool] | None:
+    """R11: an irreversible control (order / pay / send) other than the target that contains
+    the tap point. Returns (control, encloses_target): a fully enclosed target is part of that
+    control (e.g. the "TOTAL" text in the checkout bar), so the tap IS a tap on the control."""
+    if _is_irreversible_control(target, screen.package):
+        return None  # tapping the control itself is handled by R1-R3 holds
+    x, y = target.center
+    tx1, ty1, tx2, ty2 = target.bounds
+    for e in screen.elements:
+        if e is target or not _is_irreversible_control(e, screen.package):
+            continue
+        x1, y1, x2, y2 = e.bounds
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            return e, (x1 <= tx1 and y1 <= ty1 and tx2 <= x2 and ty2 <= y2)
+    return None
+
+
 def grounded(parts: list[str], screen: Screen) -> bool:
     """R4: every read-back string must appear verbatim in the current screen."""
     texts = _screen_texts(screen)
@@ -327,6 +355,15 @@ def check(
     if isinstance(action, Tap):
         assert target is not None
         label = _label(target)
+        covering = covered_by_irreversible(target, screen)
+        if covering is not None and covering[1]:
+            # Part of the control: same verdict as tapping the control (hold + read-back).
+            return check(Tap(index=covering[0].index), screen, ctx, cap)
+        if covering is not None:
+            # Taps land on whatever is on top at those coordinates. A floating "Place Order" /
+            # "Pay" / "Send" bar over the target would turn a harmless tap into an
+            # irreversible one (seen on Blinkit's checkout in landscape, 12 Oct).
+            return Verdict("block", "R11", "यह बटन किसी दूसरे बटन के नीचे दबा है, मैं नहीं दबाऊँगा।")
         if screen.package == WHATSAPP and (
             target.rid in WHATSAPP_SEND_RIDS
             or target.desc.lower() in WHATSAPP_SEND_LABELS
