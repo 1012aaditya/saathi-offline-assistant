@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="hi" translate="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="google" content="notranslate">
+  <meta name="description" content="Saathi walk mode: live spoken warnings for vehicles, people and animals ahead. Runs on the phone, nothing is uploaded.">
+  <title>Saathi चलो</title>
+  <link rel="stylesheet" href="walk.css">
+</head>
+<body>
+  <header>
+    <h1>Saathi चलो</h1>
+    <p class="note">छड़ी की जगह नहीं — सिर्फ़ चेतावनी देता है।<br><span lang="en">Not a replacement for a cane. Warnings only.</span></p>
+  </header>
+
+  <main>
+    <button id="toggle" type="button" disabled>लोड हो रहा है…</button>
+    <p id="status" role="status" aria-live="polite">मॉडल लोड हो रहा है…</p>
+
+    <div id="stage" aria-hidden="true">
+      <video id="video" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <p id="stats" aria-hidden="true"></p>
+
+    <details>
+      <summary>डेस्क पर टेस्ट <span lang="en">(test with a street video)</span></summary>
+      <label for="file">सड़क का वीडियो चुनें <span lang="en">— choose a video file</span></label>
+      <input id="file" type="file" accept="video/*">
+    </details>
+
+    <details>
+      <summary>सीमाएँ <span lang="en">(limits)</span></summary>
+      <ul lang="en">
+        <li>Warns about vehicles, people, animals, doors, stairs, chairs, tables, poles, trees, carts and similar. It does <strong>not</strong> see potholes, open drains, kerbs, wires or wet floors.</li>
+        <li>It never says the way is clear or safe to cross. Silence does not mean safe.</li>
+        <li>Distance in metres is an estimate from size on screen (roughly ±30%), always said as "लगभग".</li>
+        <li>Hold the phone at chest height, back camera facing forward. Keep the screen on.</li>
+        <li>Video is processed on this phone only and never uploaded. Models: YOLOv8n (Ultralytics, AGPL-3.0) via onnxruntime-web.</li>
+      </ul>
+    </details>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
