@@ -21,11 +21,13 @@ from saathi import controls, device, safety, talkback
 from saathi.actions import (
     MODEL_SCHEMA,
     AskUser,
+    Back,
     Decision,
     Done,
     Fail,
     Look,
     OpenApp,
+    Tap,
     parse_decision,
 )
 from saathi.config import BLINKIT, GPAY, PAYMENT_APPS, WHATSAPP, get_settings
@@ -60,6 +62,25 @@ SUMMARY_TASK = (
     "then the top 3 things the user can do here. Quote on-screen names exactly. "
     "If the element list is unclear, use `look` once. User asked: "
 )
+
+
+_VIEW_CART = re.compile(r"(?i)view cart|go to cart|^cart\b|कार्ट देखें")
+
+
+def _is_extra_add(action, screen: Screen, verdict: safety.Verdict) -> bool:
+    idx = getattr(action, "index", None)
+    return (
+        verdict.rule == "R3"
+        and idx is not None
+        and idx < len(screen.elements)
+        and safety.is_add_button(screen.elements[idx], screen.package)
+    )
+
+
+def _cart_recovery(screen: Screen) -> Tap | Back:
+    """After the cart has what the user asked for: open it, or close whatever sheet hides it."""
+    cart = next((e for e in screen.elements if _VIEW_CART.search(f"{e.text} {e.desc}")), None)
+    return Tap(index=cart.index) if cart else Back()
 
 
 def is_screen_summary(command: str) -> bool:
@@ -201,6 +222,7 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
     last_changed, look_requested, failures, reconnected = True, summary_mode, 0, False
     recent: list[str] = []  # signatures of executed actions, for loop detection
     unanswered = 0
+    answers: list[str] = []  # user's replies to ask_user, folded into the task text
 
     async def finish(status: str, message: str, steps: int, reached: str = "") -> Result:
         await _say(say, message)
@@ -253,6 +275,8 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 )
 
             task = (SUMMARY_TASK + command) if summary_mode else command
+            if answers:
+                task += " (user already chose: " + "; ".join(answers) + ")"
             decision, meta = await brain.decide(task, screen, history, send_image)
             action = decision.action
 
@@ -286,6 +310,21 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 trace.step(step, record, screen.screenshot)
                 reached = "pin_handoff" if verdict.rule == "R8" else "captcha_handoff"
                 return await finish("handoff", verdict.message, step, reached)
+            if verdict.kind == "block" and _is_extra_add(action, screen, verdict):
+                # The model kept tapping upsell "ADD" buttons after the item was in the cart.
+                # Move on for it: open the cart, or close the upsell sheet. Still gated.
+                recovery = _cart_recovery(screen)
+                if safety.check(recovery, screen, ctx, cap).kind == "allow":
+                    record |= {"recovery": recovery.model_dump()}
+                    trace.step(step, record, screen.screenshot)
+                    await device_call(device.execute, recovery, screen)
+                    await device_call(device.wait_for_change, screen.hash, timeout_s=3)
+                    history.append(
+                        f"{step}: extra ADD blocked (cart already has {ctx.items_added}); "
+                        f"Saathi did {recovery.type} {recovery.model_dump_json(exclude={'type'})}"
+                        " to reach the cart. Now tap the checkout button."
+                    )
+                    continue
             if verdict.kind == "block":
                 trace.step(step, record, screen.screenshot)
                 history.append(f"{step}: {action.type} BLOCKED by safety ({verdict.rule})")
@@ -322,6 +361,19 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 history.append(f"{step}: user CONFIRMED the {verdict.rule} read-back")
 
             if isinstance(action, Done):
+                bad = safety.ungrounded_quotes(action.summary, screen)
+                if bad:
+                    # Never read out a paraphrase as if it were the message (hard rule 4).
+                    record["ungrounded_quotes"] = bad
+                    trace.step(step, record, screen.screenshot)
+                    history.append(
+                        f"{step}: done REJECTED: quoted text {bad!r} is not on screen word for "
+                        "word. Copy the message text EXACTLY from the element list."
+                    )
+                    failures += 1
+                    if failures >= MAX_FAILURES:
+                        return await finish("fail", "संदेश ठीक से पढ़ नहीं पाया, मैं रुक रहा हूँ।", step)
+                    continue
                 trace.step(step, record, screen.screenshot)
                 return await finish("done", action.summary, step)
             if isinstance(action, Fail):
@@ -332,8 +384,18 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 history.append(f"{step}: look (screenshot requested)")
                 trace.step(step, record, screen.screenshot)
                 continue
+            if isinstance(action, AskUser) and answers:
+                # One clarification per command: don't nag; use what the user already said.
+                history.append(f"{step}: ask_user REFUSED: the user already answered {answers!r}")
+                trace.step(step, record, screen.screenshot)
+                failures += 1
+                if failures >= MAX_FAILURES:
+                    return await finish("halt", "यह स्टेप नहीं हो पा रहा। मैं रुक रहा हूँ।", step)
+                continue
             if isinstance(action, AskUser):
                 answer = (await ask(action.question)).strip()
+                if answer:
+                    answers.append(answer)
                 history.append(f"{step}: asked user {action.question!r} -> answered {answer!r}")
                 trace.step(step, record, screen.screenshot)
                 unanswered = 0 if answer else unanswered + 1
@@ -341,6 +403,10 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                     return await finish("fail", "मुझे जवाब नहीं मिला, मैं रुक रहा हूँ।", step)
                 continue
 
+            idx = getattr(action, "index", None)
+            idx_target = (
+                screen.elements[idx] if idx is not None and idx < len(screen.elements) else None
+            )
             t1 = time.time()
             try:
                 ok = await device_call(device.execute, action, screen)
@@ -362,6 +428,14 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 f"{step}: {action.type} {action.model_dump_json(exclude={'type'})}{target}"
                 f" -> {'screen changed' if changed else 'NO CHANGE'}"
             )
+            if (
+                ok
+                and changed
+                and idx_target is not None
+                and safety.is_add_button(idx_target, screen.package)
+            ):
+                ctx.items_added += 1
+                history.append(f"{step}: cart now has {ctx.items_added} added item(s) — go to cart")
             sig = action.model_dump_json()
             recent = (recent + [sig])[-LOOP_WINDOW:]
             looping = recent.count(sig) >= LOOP_REPEATS

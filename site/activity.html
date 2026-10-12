@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saathi Activity</title>
+<meta name="description" content="Everything Saathi did for you: tasks, payments, safety checks and time taken, with charts you can read, hear and explore by keyboard.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anek+Devanagari:wdth,wght@75..125,300..800&family=Mukta:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #fbfaff; --lilac: #eeebff; --ink: #17153b; --ink-2: #4b4870; --ink-3: #6e6b90;
+    --blue: #4338f2; --blue-deep: #2b22b8; --marigold: #ffb627; --pink: #ff5c93; --mint: #19c99a; --coral: #f0473c;
+    /* chart roles (validated: dataviz validate_palette.js, light, all checks pass) */
+    --surface: #ffffff; --grid: #ebe9f5;
+    --o-done: #12a882; --o-handed: #4338f2; --o-cancel: #e09400; --o-failed: #e5402f;
+    --s-single: #4338f2;
+    --f-display: "Anek Devanagari", "Mukta", system-ui, sans-serif;
+    --f-body: "Mukta", system-ui, sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, monospace;
+    --r: 22px;
+    --card-shadow: 0 2px 0 rgba(23,21,59,.04), 0 18px 40px -30px rgba(23,21,59,.4);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--f-body); font-size: clamp(17px, 0.6vw + 14px, 19px); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--blue); text-underline-offset: 3px; }
+  :focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; border-radius: 8px; }
+  [lang="hi"] { font-family: var(--f-display); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .skip { position: absolute; left: 16px; top: -60px; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 50; }
+  .skip:focus { top: 12px; }
+
+  header.top { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); background: rgba(251,250,255,.88); border-bottom: 1px solid rgba(67,56,242,.08); }
+  header.top .in { max-width: 1200px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px); height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .mark { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font: 700 1.3rem/1 var(--f-display); }
+  .mark .dot { width: 24px; height: 24px; border-radius: 50%; background: conic-gradient(from 0deg, var(--blue), var(--pink), var(--marigold), var(--mint), var(--blue)); }
+  .top nav { display: flex; gap: 6px; }
+  .top nav a { text-decoration: none; color: var(--ink-2); font-weight: 500; font-size: 0.95rem; padding: 8px 12px; border-radius: 10px; }
+  .top nav a:hover { background: var(--lilac); color: var(--ink); }
+  .top nav a[aria-current="page"] { background: var(--ink); color: #fff; }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 36px clamp(16px, 4vw, 40px) 120px; }
+  .kicker { display: inline-block; font: 500 0.75rem/1 var(--f-mono); letter-spacing: .1em; text-transform: uppercase; padding: 7px 11px; border-radius: 8px; background: var(--lilac); color: var(--blue); margin: 0 0 16px; }
+  h1 { font: 700 clamp(2.4rem, 5vw, 3.8rem)/1 var(--f-display); font-variation-settings: "wdth" 84; letter-spacing: -0.015em; margin: 0 0 10px; }
+  .proto { font-size: 0.85rem; color: var(--ink-2); margin: 0 0 24px; max-width: 70ch; }
+
+  /* filters: one row, above everything they scope */
+  .filters { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 0 0 22px; }
+  fieldset.seg { border: 0; margin: 0; padding: 0; }
+  fieldset.seg legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .seg-opts { display: inline-flex; background: var(--lilac); border-radius: 999px; padding: 4px; gap: 2px; }
+  .seg-opts input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg-opts label { padding: 9px 15px; border-radius: 999px; font-size: 0.95rem; font-weight: 500; cursor: pointer; color: var(--ink-2); white-space: nowrap; }
+  .seg-opts input:checked + label { background: var(--ink); color: #fff; }
+  .seg-opts input:focus-visible + label { outline: 3px solid var(--blue); outline-offset: 2px; }
+  select { font: 500 0.95rem/1.2 var(--f-body); padding: 11px 14px; border-radius: 999px; border: 2px solid var(--lilac); background: #fff; color: var(--ink); }
+
+  .btn { display: inline-flex; align-items: center; gap: 8px; font: 600 0.85rem/1 var(--f-body); padding: 11px 15px; border-radius: 999px; cursor: pointer; border: 2px solid var(--lilac); background: #fff; color: var(--ink); text-decoration: none; }
+  .btn:hover { border-color: var(--blue); }
+  .btn.solid { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .btn.on-blue { background: #fff; color: var(--blue-deep); border-color: #fff; }
+  .btn.danger { color: #b3261e; border-color: #f3c3bf; }
+  .btn[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .btn svg { width: 16px; height: 16px; flex: none; }
+
+  /* summary + tiles */
+  .summary { background: var(--blue); color: #fff; border-radius: 26px; padding: 26px 28px; display: grid; gap: 16px; margin-bottom: 16px; }
+  .summary p { margin: 0; font: 600 clamp(1.2rem, 2.1vw, 1.55rem)/1.35 var(--f-display); font-variation-settings: "wdth" 92; max-width: 60ch; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+  .tile { background: #fff; border-radius: var(--r); box-shadow: var(--card-shadow); padding: 20px 22px; }
+  .tile .lbl { font-size: 0.85rem; color: var(--ink-2); }
+  .tile .val { font: 600 2.3rem/1.1 var(--f-body); margin: 6px 0 4px; }
+  .tile .delta { font-size: 0.85rem; color: var(--ink-2); }
+
+  /* chart cards */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: var(--surface); border-radius: var(--r); box-shadow: var(--card-shadow); padding: 24px; margin-bottom: 16px; min-width: 0; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { font: 700 1.35rem/1.15 var(--f-display); margin: 0 0 4px; }
+  .card .take { margin: 0 0 16px; color: var(--ink-2); font-size: 0.95rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 10px; font-size: 0.85rem; color: var(--ink-2); padding: 0; list-style: none; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart svg:focus-visible { outline: 3px solid var(--blue); outline-offset: 6px; }
+  .chart text { font-family: var(--f-body); fill: var(--ink-2); font-size: 12px; }
+  .chart text.val { fill: var(--ink); font-weight: 600; font-size: 13px; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+  .chart text.cat { fill: var(--ink); font-size: 13px; }
+  .chart .hit { fill: transparent; cursor: default; }
+  .chart .band-hl { fill: var(--lilac); opacity: 0; }
+  .chart .band-hl.on { opacity: 1; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .empty { padding: 32px 0; text-align: center; color: var(--ink-2); }
+
+  table.data { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+  table.data th, table.data td { text-align: left; padding: 8px 10px 8px 0; border-top: 1px solid var(--lilac); }
+  table.data th { font: 500 0.7rem/1 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  table.data td.num, table.data th.num { text-align: right; }
+  .tbl-wrap { overflow-x: auto; }
+
+  .tip { position: absolute; pointer-events: none; z-index: 5; background: var(--ink); color: #fff; border-radius: 12px; padding: 10px 12px; font-size: 0.85rem; line-height: 1.35; min-width: 150px; box-shadow: 0 14px 30px -14px rgba(23,21,59,.6); opacity: 0; transition: opacity .12s ease; }
+  .tip.on { opacity: 1; }
+  .tip .t-h { font-weight: 600; margin-bottom: 4px; color: #d9d6ff; font-size: 0.75rem; }
+  .tip .t-r { display: flex; align-items: center; gap: 8px; }
+  .tip .t-r b { min-width: 2ch; text-align: right; font-weight: 700; }
+  .tip .t-r i { width: 12px; height: 2px; border-radius: 1px; display: inline-block; }
+
+  /* status rows */
+  .status-row .ic { font-weight: 700; }
+
+  /* log */
+  .log-head { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .log-head input { font: 500 0.95rem/1.2 var(--f-body); padding: 11px 14px; border-radius: 999px; border: 2px solid var(--lilac); min-width: 0; flex: 1 1 240px; max-width: 360px; }
+  .log-head input:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(67,56,242,.25); }
+  ol.log { list-style: none; margin: 0; padding: 0; }
+  ol.log > li { border-top: 1px solid var(--lilac); }
+  ol.log details summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 116px 1fr auto; gap: 14px; align-items: baseline; padding: 14px 4px; border-radius: 10px; }
+  ol.log details summary::-webkit-details-marker { display: none; }
+  ol.log details summary:hover { background: var(--paper); }
+  ol.log time { font: 400 0.8rem/1.3 var(--f-mono); color: var(--ink-2); }
+  .what b { font-weight: 600; }
+  .what small { display: block; color: var(--ink-2); font-size: 0.85rem; }
+  .res { font: 500 0.7rem/1 var(--f-mono); letter-spacing: .05em; padding: 6px 8px; border-radius: 6px; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
+  .r-done { background: #d3f5ea; color: #0b5e48; }
+  .r-handed { background: #e2e0ff; color: #2b22b8; }
+  .r-cancelled { background: #ffefcc; color: #7a4d00; }
+  .r-failed { background: #ffdcd8; color: #9b1c12; }
+  .detail { margin: 0 0 14px 130px; padding: 14px 18px; background: var(--paper); border-radius: 14px; font-size: 0.95rem; display: grid; gap: 6px; }
+  .detail p { margin: 0; }
+  .detail span { color: var(--ink-2); }
+  .more { margin-top: 12px; }
+
+  dialog { border: 0; border-radius: 26px; padding: 30px; max-width: 460px; width: calc(100vw - 32px); color: var(--ink); box-shadow: 0 40px 80px -30px rgba(23,21,59,.6); }
+  dialog::backdrop { background: rgba(23,21,59,.45); }
+  dialog h2 { font: 700 1.7rem/1.1 var(--f-display); margin: 0 0 8px; }
+  dialog p { color: var(--ink-2); margin: 0 0 22px; }
+  dialog .row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  @media (max-width: 960px) { .tiles { grid-template-columns: 1fr 1fr; } .grid2 { grid-template-columns: 1fr; } }
+  @media (max-width: 640px) {
+    .top nav a { padding: 8px 9px; font-size: 0.85rem; }
+    ol.log details summary { grid-template-columns: 1fr auto; }
+    ol.log time { grid-column: 1 / -1; }
+    .detail { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to activity</a>
+<header class="top">
+  <div class="in">
+    <a class="mark" href="index.html"><span class="dot" aria-hidden="true"></span>Saathi</a>
+    <nav aria-label="Pages">
+      <a href="index.html">Home</a>
+      <a href="settings.html">Settings</a>
+      <a href="activity.html" aria-current="page">Activity</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <p class="kicker">Activity</p>
+  <h1>What Saathi did for you</h1>
+  <p class="proto">Sample data for this prototype. When Saathi runs on your phone, this page fills in from its own records, which stay on your computer.</p>
+
+  <div class="filters" role="group" aria-label="Filters for everything on this page">
+    <fieldset class="seg">
+      <legend>Time range</legend>
+      <div class="seg-opts">
+        <input type="radio" name="range" id="r7" value="7" checked><label for="r7">Last 7 days</label>
+        <input type="radio" name="range" id="r30" value="30"><label for="r30">Last 30 days</label>
+      </div>
+    </fieldset>
+    <label class="sr-only" for="appFilter">App</label>
+    <select id="appFilter">
+      <option value="all">All apps</option>
+      <option>WhatsApp</option>
+      <option>Google Pay</option>
+      <option>Blinkit</option>
+      <option>Screen reading</option>
+    </select>
+  </div>
+
+  <div id="content">
+    <div class="summary">
+      <p id="summary"></p>
+      <div><button class="btn on-blue" type="button" id="readSummary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+        Read aloud</button></div>
+    </div>
+
+    <div class="tiles" id="tiles"></div>
+
+    <div class="grid2">
+      <section class="card wide" aria-labelledby="c1-h">
+        <h2 id="c1-h">Tasks per day</h2>
+        <p class="take" id="c1-take"></p>
+        <ul class="legend" id="c1-legend" aria-label="Legend"></ul>
+        <div class="chart" id="c1"></div>
+        <p class="sr-only" aria-live="polite" id="c1-live"></p>
+        <div class="actions">
+          <button class="btn" type="button" data-read="c1">Read aloud</button>
+          <button class="btn" type="button" data-table="c1" aria-expanded="false">Show table</button>
+          <button class="btn" type="button" id="sonify" aria-pressed="false">Play as sound</button>
+        </div>
+        <div class="tbl-wrap" id="c1-table" hidden></div>
+      </section>
+
+      <section class="card" aria-labelledby="c2-h">
+        <h2 id="c2-h">Tasks by app</h2>
+        <p class="take" id="c2-take"></p>
+        <div class="chart" id="c2"></div>
+        <div class="actions">
+          <button class="btn" type="button" data-read="c2">Read aloud</button>
+          <button class="btn" type="button" data-table="c2" aria-expanded="false">Show table</button>
+        </div>
+        <div class="tbl-wrap" id="c2-table" hidden></div>
+      </section>
+
+      <section class="card" aria-labelledby="c3-h">
+        <h2 id="c3-h">Safety gate decisions</h2>
+        <p class="take" id="c3-take"></p>
+        <div class="chart" id="c3"></div>
+        <div class="actions">
+          <button class="btn" type="button" data-read="c3">Read aloud</button>
+          <button class="btn" type="button" data-table="c3" aria-expanded="false">Show table</button>
+        </div>
+        <div class="tbl-wrap" id="c3-table" hidden></div>
+      </section>
+
+      <section class="card wide" aria-labelledby="c4-h">
+        <h2 id="c4-h">Time per task</h2>
+        <p class="take" id="c4-take"></p>
+        <div class="chart" id="c4"></div>
+        <div class="actions">
+          <button class="btn" type="button" data-read="c4">Read aloud</button>
+          <button class="btn" type="button" data-table="c4" aria-expanded="false">Show table</button>
+        </div>
+        <div class="tbl-wrap" id="c4-table" hidden></div>
+      </section>
+    </div>
+
+    <section class="card" aria-labelledby="log-h" id="log">
+      <div class="log-head">
+        <div><h2 id="log-h">Every task</h2><p class="take" id="log-take" style="margin:0"></p></div>
+        <label class="sr-only" for="search">Search tasks</label>
+        <input type="search" id="search" placeholder="Search, e.g. Rahul or milk">
+      </div>
+      <ol class="log" id="logList"></ol>
+      <div class="actions">
+        <button class="btn more" type="button" id="moreBtn">Show more</button>
+        <button class="btn" type="button" id="csvBtn">Download as spreadsheet (CSV)</button>
+        <button class="btn danger" type="button" id="deleteBtn">Delete all history</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="emptyAll" class="card empty" hidden>
+    <h2 style="margin-bottom:8px">No activity yet</h2>
+    <p>Ask Saathi to do something, like “Mummy ka last message padho”, and it will show up here.</p>
+    <p><button class="btn" type="button" id="restore">Bring back the sample data (prototype only)</button></p>
+  </div>
+</main>
+
+<div class="tip" id="tip" aria-hidden="true"></div>
+
+<dialog id="confirm" aria-labelledby="cTitle" aria-describedby="cBody">
+  <h2 id="cTitle"></h2>
+  <p id="cBody"></p>
+  <div class="row">
+    <button class="btn" type="button" id="cNo" autofocus>Cancel</button>
+    <button class="btn solid" type="button" id="cYes">Yes, delete</button>
+  </div>
+</dialog>
+
+<script src="voice.js"></script>
+<script>
+(() => {
+  /* ================= sample data (deterministic, labelled as sample on the page) ================= */
+  function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const R = rng(47);
+  const pick = a => a[Math.floor(R() * a.length)];
+  const between = (a, b) => Math.round(a + R() * (b - a));
+  const R2 = rng(108);                 // separate stream for outcomes, so they don't correlate with task choice
+  const roll = p => R2() < p;
+
+  const KINDS = [
+    { app: 'WhatsApp', kind: 'read', w: 30, steps: [4, 8], secs: [22, 45],
+      make: () => { const n = pick(['Mummy', 'Rahul', 'Priya', 'Office group']); return { said: n === 'Office group' ? 'Office group mein kya aaya?' : `${n} ka last message padho`, what: n === 'Office group' ? 'Read new messages in the office group' : `Read ${n}’s last message` }; } },
+    { app: 'WhatsApp', kind: 'reply', w: 16, steps: [7, 12], secs: [35, 62], hold: true,
+      make: () => { const [n, m] = pick([['Mummy', 'main 7 baje aaunga'], ['Rahul', 'kal milte hain'], ['Priya', 'theek hai, done']]); return { said: `${n} ko reply karo: ${m}`, what: `Reply to ${n}: “${m}”`, readback: `${n} ko bhej rahe hain: “${m}”. Confirm?` }; } },
+    { app: 'Google Pay', kind: 'pay', w: 12, steps: [8, 14], secs: [40, 75], hold: true, pin: true,
+      make: () => { const [n, a] = pick([['Rahul Sharma', 1], ['Priya Verma', 5], ['Ramesh (milkman)', 10], ['Rahul Sharma', 2]]); return { said: `${n.split(' ')[0]} ko ${a} rupaye bhejo`, what: `Send ₹${a} to ${n}`, readback: `₹${a} ${n} ko bhej rahe hain. Confirm?`, amount: a }; } },
+    { app: 'Blinkit', kind: 'order', w: 9, steps: [10, 18], secs: [55, 100], hold: true,
+      make: () => { const [it, p, hi] = pick([['Amul milk, 1 litre', 68, 'Amul doodh 1 litre mangao'], ['Bread and 6 eggs', 95, 'Bread aur ande mangao'], ['Potatoes, 1 kg', 42, 'Aloo 1 kilo mangao'], ['Tata salt, 1 kg', 28, 'Namak mangao']]); return { said: hi, what: `Order ${it}`, readback: `${it}, total ₹${p}. Order karein?`, orderTotal: p }; } },
+    { app: 'Screen reading', kind: 'summary', w: 10, steps: [1, 2], secs: [6, 12],
+      make: () => ({ said: pick(['Screen pe kya hai?', 'What’s on my screen?']), what: 'Describe what’s on the screen' }) },
+  ];
+  const WSUM = KINDS.reduce((s, k) => s + k.w, 0);
+  const pickKind = () => { let x = R() * WSUM; for (const k of KINDS) { if ((x -= k.w) < 0) return k; } return KINDS[0]; };
+
+  function makeTasks() {
+    const now = new Date(), out = [];
+    for (let d = 29; d >= 0; d--) {
+      const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - d);
+      let count = between(1, 5) + (day.getDay() === 0 || day.getDay() === 6 ? 1 : 0);
+      for (let i = 0; i < count; i++) {
+        const ts = new Date(day.getTime() + (8 * 60 + between(0, 13 * 60 + 30)) * 60000);
+        if (ts > now) continue;
+        const k = pickKind(), base = k.make();
+        let outcome;
+        if (k.kind === 'read' || k.kind === 'summary') outcome = roll(0.92) ? 'done' : 'failed';
+        else if (k.kind === 'reply') outcome = roll(0.82) ? 'done' : roll(0.67) ? 'cancelled' : 'failed';
+        else if (k.kind === 'pay') outcome = roll(0.8) ? 'handed' : roll(0.75) ? 'cancelled' : 'failed';
+        else outcome = roll(0.6) ? 'done' : roll(0.75) ? 'cancelled' : 'failed';
+        const steps = between(...k.steps);
+        const holds = k.hold && outcome !== 'failed' ? 1 : 0;
+        let stops = k.pin && outcome === 'handed' ? 1 : 0;
+        let stopNote = k.pin && outcome === 'handed' ? 'PIN screen: handed to you (R8)' : '';
+        if (roll(0.04)) { stops++; stopNote = stopNote || 'Blocked a tap on “Delete” you didn’t ask for (R10)'; }
+        out.push({
+          ts, app: k.app, kind: k.kind, ...base, outcome, steps,
+          secs: outcome === 'failed' ? between(k.secs[0], k.secs[1]) + 10 : between(...k.secs),
+          holds, stops, allowed: Math.max(0, steps - holds - stops), stopNote,
+          answer: holds ? (outcome === 'cancelled' ? pick(['“nahi”', 'unclear, asked again, then cancelled']) : '“haan”') : '',
+          amount: outcome === 'handed' ? base.amount || 0 : 0,
+        });
+      }
+    }
+    return out.sort((a, b) => b.ts - a.ts);
+  }
+  const ALL_TASKS = makeTasks();
+
+  /* ================= state, filters ================= */
+  const KEY = 'saathi-settings-v1';
+  const loadSettings = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } };
+  const saveSettings = s => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} };
+  let historyOn = loadSettings().history !== false;
+
+  const OUT = [
+    { key: 'done', label: 'Done', color: 'var(--o-done)', icon: '✓' },
+    { key: 'handed', label: 'Handed to you (PIN)', color: 'var(--o-handed)', icon: '↪' },
+    { key: 'cancelled', label: 'Cancelled', color: 'var(--o-cancel)', icon: '–' },
+    { key: 'failed', label: 'Didn’t work', color: 'var(--o-failed)', icon: '!' },
+  ];
+  const OUT_BY = Object.fromEntries(OUT.map(o => [o.key, o]));
+  const APPS = ['WhatsApp', 'Google Pay', 'Blinkit', 'Screen reading'];
+  let range = 7, appSel = 'all';
+  const dayStart = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today = dayStart(new Date());
+  const days = n => Array.from({ length: n }, (_, i) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - (n - 1 - i)));
+  const inRange = (t, n, offset = 0) => { const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (n - 1) - offset); const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1 - offset); return t.ts >= start && t.ts < end; };
+  const filtered = (offset = 0) => historyOn ? ALL_TASKS.filter(t => inRange(t, range, offset) && (appSel === 'all' || t.app === appSel)) : [];
+  const fmtDay = d => d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  const fmtDayShort = d => range === 7 ? d.toLocaleDateString('en-IN', { weekday: 'short' }) : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  const fmtTime = d => d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+  const median = a => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2); };
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const rangeWords = () => range === 7 ? 'in the last 7 days' : 'in the last 30 days';
+
+  /* ================= svg helpers ================= */
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const txt = (parent, x, y, s, cls, anchor = 'start') => { const t = el('text', { x, y, class: cls || '', 'text-anchor': anchor }, parent); t.textContent = s; return t; };
+  // bar with a 4px rounded data-end, square at the baseline
+  function colPath(x, y, w, h, r, roundTop) { r = Math.min(r, h, w / 2); if (!roundTop || h <= 0) return `M${x},${y}h${w}v${h}h${-w}z`; return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`; }
+  function barPath(x, y, w, h, r) { r = Math.min(r, w, h / 2); if (w <= 0) return ''; return `M${x},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h - r}Q${x + w},${y + h} ${x + w - r},${y + h}H${x}Z`; }
+
+  const tip = document.getElementById('tip');
+  function showTip(container, x, y, head, rows) {
+    tip.innerHTML = '';
+    const h = document.createElement('div'); h.className = 't-h'; h.textContent = head; tip.appendChild(h);
+    rows.forEach(r => { const d = document.createElement('div'); d.className = 't-r'; const b = document.createElement('b'); b.textContent = r.v; const i = document.createElement('i'); i.style.background = r.c || 'transparent'; const s = document.createElement('span'); s.textContent = r.l; d.append(b, i, s); tip.appendChild(d); });
+    const box = container.getBoundingClientRect();
+    tip.classList.add('on');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = box.left + scrollX + x + 14, top = box.top + scrollY + y - th - 10;
+    if (left + tw > scrollX + document.documentElement.clientWidth - 8) left = box.left + scrollX + x - tw - 14;
+    if (top < scrollY + 70) top = box.top + scrollY + y + 14;
+    tip.style.left = left + 'px'; tip.style.top = top + 'px';
+  }
+  const hideTip = () => tip.classList.remove('on');
+
+  function tableHTML(cols, rows) {
+    const t = document.createElement('table'); t.className = 'data';
+    const thead = t.createTHead().insertRow();
+    cols.forEach((c, i) => { const th = document.createElement('th'); th.scope = 'col'; th.textContent = c; if (i) th.className = 'num'; thead.appendChild(th); });
+    const tb = t.createTBody();
+    rows.forEach(r => { const tr = tb.insertRow(); r.forEach((v, i) => { const td = tr.insertCell(); td.textContent = v; if (i) td.className = 'num'; }); });
+    return t;
+  }
+
+  /* ================= chart 1: tasks per day, stacked by outcome ================= */
+  const readText = {};
+  let dayTotals = [];
+  function chart1(tasks) {
+    const box = document.getElementById('c1'); box.innerHTML = '';
+    const ds = days(range);
+    const data = ds.map(d => { const row = { d, total: 0 }; OUT.forEach(o => row[o.key] = 0); tasks.forEach(t => { if (dayStart(t.ts).getTime() === d.getTime()) { row[t.outcome]++; row.total++; } }); return row; });
+    dayTotals = data.map(r => r.total);
+    const W = Math.max(300, box.clientWidth), H = 240, m = { t: 14, r: 8, b: 30, l: 30 };
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'group', tabindex: 0, 'aria-label': `Tasks per day chart, ${rangeWords()}. Use the left and right arrow keys to hear each day.` }, box);
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const peakV = Math.max(1, ...data.map(r => r.total));
+    const stepV = Math.max(1, Math.ceil(peakV / 4));          // whole-number ticks
+    const max = stepV * Math.ceil(peakV / stepV);
+    const y = v => m.t + ih - (v / max) * ih;
+    for (let v = 0; v <= max; v += stepV) { const yy = Math.round(y(v)) + 0.5; el('line', { x1: m.l, x2: W - m.r, y1: yy, y2: yy, stroke: 'var(--grid)', 'stroke-width': 1 }, svg); txt(svg, m.l - 8, yy + 4, String(v), '', 'end'); }
+    const band = iw / data.length, bw = Math.min(24, band * 0.62);
+    const hls = [];
+    data.forEach((r, i) => {
+      const cx = m.l + band * i + band / 2;
+      const hl = el('rect', { x: m.l + band * i + 1, y: m.t, width: band - 2, height: ih, rx: 6, class: 'band-hl' }, svg); hls.push(hl);
+      let acc = 0;
+      const segs = OUT.filter(o => r[o.key] > 0);
+      segs.forEach((o, si) => {
+        const h0 = (r[o.key] / max) * ih;
+        const top = si === segs.length - 1;
+        const yTop = y(acc + r[o.key]);
+        const gap = si > 0 ? 2 : 0;   // 2px surface gap between stacked segments
+        el('path', { d: colPath(cx - bw / 2, yTop, bw, Math.max(0, h0 - gap), 4, top), fill: o.color }, svg);
+        acc += r[o.key];
+      });
+      const every = range === 7 ? 1 : 5;
+      if (i % every === 0 || i === data.length - 1) txt(svg, cx, H - 10, fmtDayShort(r.d), '', 'middle');
+    });
+    // label the busiest day only (selective direct label)
+    const peak = data.reduce((a, b) => (b.total > a.total ? b : a), data[0]);
+    if (peak.total) { const pi = data.indexOf(peak); txt(svg, m.l + band * pi + band / 2, y(peak.total) - 6, String(peak.total), 'val', 'middle'); }
+    const rowsFor = r => [{ v: r.total, l: 'tasks in total' }, ...OUT.map(o => ({ v: r[o.key], l: o.label, c: o.color }))];
+    const sayDay = r => `${fmtDay(r.d)}: ${plural(r.total, 'task')}` + (r.total ? '. ' + OUT.filter(o => r[o.key]).map(o => `${r[o.key]} ${o.label.toLowerCase()}`).join(', ') : '') + '.';
+    let focusI = data.length - 1;
+    const focusDay = (i, fromKey) => { focusI = i; hls.forEach((h, j) => h.classList.toggle('on', j === i)); const r = data[i]; const bx = m.l + band * i + band / 2; showTip(box, bx * (box.clientWidth / W), y(Math.max(r.total, 0)) * (box.clientWidth / W), fmtDay(r.d), rowsFor(r)); if (fromKey) document.getElementById('c1-live').textContent = sayDay(r); };
+    const hit = el('rect', { x: m.l, y: m.t, width: iw, height: ih + m.b, class: 'hit' }, svg);
+    hit.addEventListener('pointermove', e => { const pt = (e.offsetX / box.clientWidth) * W; const i = Math.max(0, Math.min(data.length - 1, Math.floor((pt - m.l) / band))); focusDay(i); });
+    hit.addEventListener('pointerleave', () => { hideTip(); hls.forEach(h => h.classList.remove('on')); });
+    svg.addEventListener('focus', () => focusDay(focusI, true));
+    svg.addEventListener('blur', () => { hideTip(); hls.forEach(h => h.classList.remove('on')); });
+    svg.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); focusDay(Math.max(0, Math.min(data.length - 1, focusI + (e.key === 'ArrowRight' ? 1 : -1))), true); }
+      if (e.key === 'Home') { e.preventDefault(); focusDay(0, true); }
+      if (e.key === 'End') { e.preventDefault(); focusDay(data.length - 1, true); }
+    });
+
+    const total = tasks.length, busiest = peak.total ? `The busiest day was ${fmtDay(peak.d)}, with ${plural(peak.total, 'task')}.` : '';
+    const ok = tasks.filter(t => t.outcome === 'done' || t.outcome === 'handed').length;
+    document.getElementById('c1-take').textContent = total ? `${plural(total, 'task')} ${rangeWords()}. ${ok} finished. ${busiest}` : `No tasks ${rangeWords()}.`;
+    readText.c1 = document.getElementById('c1-take').textContent;
+    const lg = document.getElementById('c1-legend'); lg.innerHTML = '';
+    OUT.forEach(o => { const li = document.createElement('li'); const i = document.createElement('i'); i.style.background = o.color; li.append(i, document.createTextNode(o.label)); lg.appendChild(li); });
+    const tw = document.getElementById('c1-table'); tw.innerHTML = '';
+    tw.appendChild(tableHTML(['Day', 'Total', ...OUT.map(o => o.label)], data.map(r => [fmtDay(r.d), r.total, ...OUT.map(o => r[o.key])])));
+  }
+
+  /* ================= chart 2: tasks by app (single series) ================= */
+  function hbars(boxId, rows, opts = {}) {
+    const box = document.getElementById(boxId); box.innerHTML = '';
+    const W = Math.max(280, box.clientWidth), rowH = 40, m = { t: opts.top || 6, r: 56, b: opts.bottom || 6, l: opts.labelW || 118 };
+    const H = m.t + rows.length * rowH + m.b;
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': opts.aria }, box);
+    const iw = W - m.l - m.r;
+    const max = opts.max || Math.max(1, ...rows.map(r => r.v));
+    if (opts.ref) {
+      const rx = Math.round(m.l + (opts.ref.v / max) * iw) + 0.5;
+      el('line', { x1: rx, x2: rx, y1: m.t - 2, y2: H - m.b + 2, stroke: 'var(--ink)', 'stroke-width': 1 }, svg);
+      txt(svg, rx, H - 2 + (opts.bottom ? 0 : 0), opts.ref.label, '', 'middle');
+    }
+    rows.forEach((r, i) => {
+      const cy = m.t + i * rowH + rowH / 2, bh = 20;
+      el('line', { x1: m.l, x2: m.l, y1: cy - rowH / 2 + 6, y2: cy + rowH / 2 - 6, stroke: 'var(--grid)', 'stroke-width': 1 }, svg);
+      if (r.icon) txt(svg, 4, cy + 4, r.icon, 'cat');
+      txt(svg, r.icon ? 22 : 0, cy + 4, r.label, 'cat');
+      const w = Math.max(r.v ? 3 : 0, (r.v / max) * iw);
+      el('path', { d: barPath(m.l, cy - bh / 2, w, bh, 4), fill: r.color || 'var(--s-single)' }, svg);
+      txt(svg, m.l + w + 8, cy + 4, r.display ?? String(r.v), 'val');
+      const hit = el('rect', { x: 0, y: cy - rowH / 2, width: W, height: rowH, class: 'hit' }, svg);
+      hit.addEventListener('pointermove', () => showTip(box, (m.l + w) * (box.clientWidth / W), (cy - bh / 2) * (box.clientWidth / W), r.label, r.tip || [{ v: r.display ?? r.v, l: opts.unit || '' }]));
+      hit.addEventListener('pointerleave', hideTip);
+    });
+  }
+
+  function chart2(tasks) {
+    const rows = APPS.map(a => ({ label: a, v: tasks.filter(t => t.app === a).length })).filter(r => appSel === 'all' || r.label === appSel).sort((a, b) => b.v - a.v);
+    hbars('c2', rows, { aria: 'Tasks by app: ' + rows.map(r => `${r.label} ${r.v}`).join(', '), unit: 'tasks' });
+    const top = rows[0];
+    document.getElementById('c2-take').textContent = tasks.length ? (appSel === 'all' ? `${top.label} was used most: ${plural(top.v, 'task')} out of ${tasks.length}.` : `${plural(top.v, 'task')} in ${top.label} ${rangeWords()}.`) : `No tasks ${rangeWords()}.`;
+    readText.c2 = document.getElementById('c2-take').textContent + ' ' + rows.map(r => `${r.label}: ${r.v}.`).join(' ');
+    const tw = document.getElementById('c2-table'); tw.innerHTML = '';
+    tw.appendChild(tableHTML(['App', 'Tasks'], rows.map(r => [r.label, r.v])));
+  }
+
+  /* ================= chart 3: safety gate decisions (status: icon + label + color) ================= */
+  function chart3(tasks) {
+    const a = tasks.reduce((s, t) => s + t.allowed, 0), h = tasks.reduce((s, t) => s + t.holds, 0), s = tasks.reduce((x, t) => x + t.stops, 0);
+    const rows = [
+      { label: 'Allowed', icon: '✓', v: a, color: 'var(--o-done)', tip: [{ v: a, l: 'steps went ahead' }] },
+      { label: 'Held for yes', icon: '⏸', v: h, color: 'var(--o-cancel)', tip: [{ v: h, l: 'read back, waited for you' }] },
+      { label: 'Stopped', icon: '✕', v: s, color: 'var(--o-failed)', tip: [{ v: s, l: 'blocked or handed to you' }] },
+    ];
+    hbars('c3', rows, { aria: `Safety gate decisions: ${a} allowed, ${h} held for your yes, ${s} stopped.`, labelW: 128 });
+    const total = a + h + s;
+    document.getElementById('c3-take').textContent = total ? `Every one of ${total} steps was checked. ${plural(h, 'time')} Saathi read back and waited for your yes, and ${plural(s, 'time')} it stopped or handed over to you.` : `No steps ${rangeWords()}.`;
+    readText.c3 = document.getElementById('c3-take').textContent;
+    const tw = document.getElementById('c3-table'); tw.innerHTML = '';
+    tw.appendChild(tableHTML(['Decision', 'Steps'], rows.map(r => [r.label, r.v])));
+  }
+
+  /* ================= chart 4: median time per task, by app, vs 60s goal ================= */
+  function chart4(tasks) {
+    const rows = APPS.filter(a => appSel === 'all' || a === appSel).map(a => { const ts = tasks.filter(t => t.app === a && t.outcome !== 'failed').map(t => t.secs); return { label: a, v: median(ts), n: ts.length }; }).filter(r => r.n);
+    rows.forEach(r => { r.display = r.v + ' s'; r.tip = [{ v: r.v + ' s', l: 'typical (median) time' }, { v: r.n, l: 'tasks counted' }]; });
+    hbars('c4', rows, { aria: 'Typical time per task: ' + rows.map(r => `${r.label} ${r.v} seconds`).join(', ') + '. Goal: 60 seconds.', max: 120, ref: { v: 60, label: '60 s goal' }, bottom: 20 });
+    const over = rows.filter(r => r.v > 60);
+    document.getElementById('c4-take').textContent = rows.length ? (over.length ? `${over.map(r => r.label).join(' and ')} ${over.length === 1 ? 'takes' : 'take'} longer than the 60-second goal. Everything else is under it.` : 'Every app finishes under the 60-second goal.') : `No finished tasks ${rangeWords()}.`;
+    readText.c4 = document.getElementById('c4-take').textContent + ' ' + rows.map(r => `${r.label}: about ${r.v} seconds.`).join(' ');
+    const tw = document.getElementById('c4-table'); tw.innerHTML = '';
+    tw.appendChild(tableHTML(['App', 'Typical time (s)', 'Tasks counted'], rows.map(r => [r.label, r.v, r.n])));
+  }
+
+  /* ================= summary + tiles ================= */
+  function summary(tasks) {
+    const prev = range === 7 && historyOn ? ALL_TASKS.filter(t => inRange(t, 7, 7) && (appSel === 'all' || t.app === appSel)) : null;
+    const ok = tasks.filter(t => t.outcome === 'done' || t.outcome === 'handed').length;
+    const cancelled = tasks.filter(t => t.outcome === 'cancelled').length;
+    const failed = tasks.filter(t => t.outcome === 'failed').length;
+    const pays = tasks.filter(t => t.amount > 0), money = pays.reduce((s, t) => s + t.amount, 0);
+    const asked = tasks.reduce((s, t) => s + t.holds, 0);
+    const scope = appSel === 'all' ? '' : ` in ${appSel}`;
+    document.getElementById('summary').textContent = tasks.length
+      ? `${rangeWords()[0].toUpperCase() + rangeWords().slice(1)}, Saathi did ${plural(tasks.length, 'task')} for you${scope}. ${ok} finished, ${cancelled} you cancelled, and ${failed} didn’t work.` + (pays.length ? ` It sent ₹${money} in ${plural(pays.length, 'payment')}, each after your yes.` : '') + (asked ? ` It asked before acting ${plural(asked, 'time')}.` : '')
+      : `No activity ${rangeWords()}${scope}.`;
+    const pct = tasks.length ? Math.round((ok / tasks.length) * 100) : 0;
+    const delta = prev ? (() => { const d = tasks.length - prev.length; return d === 0 ? 'Same as the 7 days before' : `${d > 0 ? '+' : '−'}${Math.abs(d)} vs the 7 days before`; })() : 'Over the whole range';
+    const tiles = [
+      { lbl: 'Tasks', val: tasks.length, delta },
+      { lbl: 'Finished', val: pct + '%', delta: `${ok} of ${tasks.length}` },
+      { lbl: 'Money sent', val: '₹' + money.toLocaleString('en-IN'), delta: plural(pays.length, 'payment') },
+      { lbl: 'Asked you first', val: asked, delta: 'Read back, waited for yes' },
+    ];
+    const box = document.getElementById('tiles'); box.innerHTML = '';
+    tiles.forEach(t => { const d = document.createElement('div'); d.className = 'tile'; d.innerHTML = '<div class="lbl"></div><div class="val"></div><div class="delta"></div>'; d.querySelector('.lbl').textContent = t.lbl; d.querySelector('.val').textContent = t.val; d.querySelector('.delta').textContent = t.delta; box.appendChild(d); });
+  }
+
+  /* ================= log ================= */
+  let shown = 12, query = '';
+  function renderLog(tasks) {
+    const q = query.trim().toLowerCase();
+    const list = q ? tasks.filter(t => [t.what, t.said, t.app, OUT_BY[t.outcome].label].join(' ').toLowerCase().includes(q)) : tasks;
+    document.getElementById('log-take').textContent = q ? `${plural(list.length, 'task')} match “${query.trim()}”.` : `${plural(list.length, 'task')}, newest first. Open one to see the details.`;
+    const ol = document.getElementById('logList'); ol.innerHTML = '';
+    list.slice(0, shown).forEach(t => {
+      const li = document.createElement('li');
+      const o = OUT_BY[t.outcome];
+      li.innerHTML = `<details><summary><time></time><span class="what"><b></b><small></small></span><span class="res r-${t.outcome}"><span aria-hidden="true">${o.icon}</span><span class="rl"></span></span></summary><div class="detail"></div></details>`;
+      const time = li.querySelector('time'); time.dateTime = t.ts.toISOString(); time.textContent = `${fmtDay(t.ts)}, ${fmtTime(t.ts)}`;
+      li.querySelector('.what b').textContent = t.what;
+      li.querySelector('.what small').textContent = t.app;
+      li.querySelector('.rl').textContent = o.label;
+      const det = li.querySelector('.detail');
+      const add = (k, v, hi) => { const p = document.createElement('p'); const s = document.createElement('span'); s.textContent = k + ': '; const val = document.createElement(hi ? 'q' : 'b'); if (hi) val.lang = 'hi'; val.textContent = v; p.append(s, val); det.appendChild(p); };
+      add('You said', t.said, true);
+      if (t.readback) add('Saathi read back', t.readback, true);
+      if (t.answer) add('Your answer', t.answer);
+      if (t.stopNote) add('Safety gate', t.stopNote);
+      if (t.outcome === 'failed') add('What happened', 'Stopped after 3 steps in a row didn’t change the screen, and told you');
+      add('Steps', `${t.steps} (${t.allowed} allowed, ${t.holds} held, ${t.stops} stopped)`);
+      add('Time taken', `${t.secs} seconds`);
+      ol.appendChild(li);
+    });
+    if (!list.length) ol.innerHTML = '<li class="empty">No tasks match. Try another word, or change the filters above.</li>';
+    const more = document.getElementById('moreBtn');
+    more.hidden = list.length <= shown;
+    more.textContent = `Show more (${Math.max(0, list.length - shown)} left)`;
+  }
+
+  /* ================= render all ================= */
+  let lastTasks = [];
+  function render() {
+    const tasks = filtered();
+    lastTasks = tasks;
+    document.getElementById('content').hidden = !historyOn;
+    document.getElementById('emptyAll').hidden = historyOn;
+    if (!historyOn) return;
+    summary(tasks); chart1(tasks); chart2(tasks); chart3(tasks); chart4(tasks); renderLog(tasks);
+  }
+
+  document.querySelectorAll('input[name="range"]').forEach(r => r.addEventListener('change', () => { range = +r.value; shown = 12; render(); }));
+  document.getElementById('appFilter').addEventListener('change', e => { appSel = e.target.value; shown = 12; render(); });
+  document.getElementById('search').addEventListener('input', e => { query = e.target.value; shown = 12; renderLog(lastTasks); });
+  document.getElementById('moreBtn').addEventListener('click', () => { shown += 12; renderLog(lastTasks); });
+  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+
+  /* ================= read aloud, tables, sound ================= */
+  const synth = window.speechSynthesis;
+  function speak(text) {
+    if (!synth) return Promise.resolve();
+    synth.cancel();
+    return new Promise(res => { const u = new SpeechSynthesisUtterance(text); u.lang = 'en-IN'; const v = synth.getVoices().find(v => v.lang === 'en-IN'); if (v) u.voice = v; u.onend = res; u.onerror = res; synth.speak(u); });
+  }
+  document.getElementById('readSummary').addEventListener('click', () => speak(document.getElementById('summary').textContent));
+  document.querySelectorAll('[data-read]').forEach(b => b.addEventListener('click', () => speak(readText[b.dataset.read] || '')));
+  document.querySelectorAll('[data-table]').forEach(b => b.addEventListener('click', () => {
+    const t = document.getElementById(b.dataset.table + '-table');
+    t.hidden = !t.hidden;
+    b.setAttribute('aria-expanded', String(!t.hidden));
+    b.textContent = t.hidden ? 'Show table' : 'Hide table';
+  }));
+
+  // sonification: one tone per day, higher pitch = more tasks
+  const son = document.getElementById('sonify');
+  let audio = null, playingSound = false;
+  async function playSound() {
+    if (playingSound) { playingSound = false; son.setAttribute('aria-pressed', 'false'); son.textContent = 'Play as sound'; if (audio) audio.close(); audio = null; return; }
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return speak('Sound isn’t supported in this browser.');
+    playingSound = true; son.setAttribute('aria-pressed', 'true'); son.textContent = 'Stop sound';
+    await speak(`Each tone is one day, oldest first. Higher tones mean more tasks. The highest day had ${Math.max(...dayTotals)}.`);
+    if (!playingSound) return;
+    audio = new Ctx();
+    const max = Math.max(1, ...dayTotals), step = range === 7 ? 0.42 : 0.22;
+    dayTotals.forEach((v, i) => {
+      const o = audio.createOscillator(), g = audio.createGain(), t0 = audio.currentTime + 0.1 + i * step;
+      o.type = v ? 'sine' : 'triangle';
+      o.frequency.value = v ? 300 + (v / max) * 600 : 180;
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(v ? 0.22 : 0.08, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t0 + step * 0.85);
+      o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + step);
+    });
+    setTimeout(() => { if (playingSound) playSound(); }, (0.2 + dayTotals.length * step) * 1000);
+  }
+  son.addEventListener('click', playSound);
+
+  /* ================= csv, delete, restore ================= */
+  document.getElementById('csvBtn').addEventListener('click', () => {
+    const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [['Date', 'Time', 'App', 'Task', 'You said', 'Result', 'Steps', 'Seconds', 'Amount (₹)'].map(esc).join(',')]
+      .concat(lastTasks.map(t => [t.ts.toLocaleDateString('en-IN'), fmtTime(t.ts), t.app, t.what, t.said, OUT_BY[t.outcome].label, t.steps, t.secs, t.amount || ''].map(esc).join(',')));
+    const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'saathi-activity.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  const dlg = document.getElementById('confirm');
+  document.getElementById('deleteBtn').addEventListener('click', () => {
+    document.getElementById('cTitle').textContent = 'Delete all history?';
+    document.getElementById('cBody').textContent = 'This removes the list of everything Saathi did, including saved screen recordings on this computer. You can’t get it back.';
+    dlg.showModal(); document.getElementById('cNo').focus();
+  });
+  document.getElementById('cNo').addEventListener('click', () => dlg.close());
+  document.getElementById('cYes').addEventListener('click', () => {
+    dlg.close();
+    const s = loadSettings(); s.history = false; saveSettings(s);
+    historyOn = false; render();
+    document.getElementById('restore').focus();
+    speak('History deleted.');
+  });
+  document.getElementById('restore').addEventListener('click', () => {
+    const s = loadSettings(); s.history = true; saveSettings(s);
+    historyOn = true; render();
+    document.getElementById('summary').focus?.();
+  });
+
+  render();
+
+  /* ================= voice commands (see voice.js) ================= */
+  const V = window.SaathiVoice;
+  if (!V) return;
+  const { has, goTo } = V;
+  V.watchDialog(dlg, document.getElementById('cYes'), document.getElementById('cNo'));
+  const setRange = n => { const r = document.getElementById('r' + n); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); };
+  const setApp = a => { const s = document.getElementById('appFilter'); s.value = a; s.dispatchEvent(new Event('change')); };
+  const APP_WORDS = [['WhatsApp', ['whatsapp', 'whats app', 'व्हाट्सएप']], ['Google Pay', ['google pay', 'gpay', 'g pay', 'payments', 'गूगल पे']], ['Blinkit', ['blinkit', 'blink it', 'groceries', 'ब्लिंकिट']], ['Screen reading', ['screen reading', 'screen']]];
+  const CHARTS = [['c1', ['per day', 'daily', 'tasks per day', 'roz']], ['c2', ['by app', 'apps', 'which app']], ['c3', ['safety', 'gate', 'suraksha', 'सुरक्षा']], ['c4', ['time', 'how long', 'speed', 'kitna time', 'samay']]];
+  V.register([
+    { match: t => has(t, ['settings', 'setting', 'सेटिंग्स']), run: () => { setTimeout(() => { location.href = 'settings.html'; }, 1300); return 'Opening settings.'; } },
+    { match: t => has(t, ['home', 'main site', 'website']), run: () => { setTimeout(() => { location.href = 'index.html'; }, 1300); return 'Going to the Saathi site.'; } },
+    { match: t => has(t, ['delete', 'clear', 'mitao', 'मिटाओ']), run: () => { document.getElementById('deleteBtn').click(); return null; } },
+    { match: t => has(t, ['30 days', 'thirty days', 'month', 'mahina', 'महीना', '30 din']), run: () => { setRange(30); return document.getElementById('summary').textContent; } },
+    { match: t => has(t, ['7 days', 'seven days', 'week', 'hafta', 'हफ़्ता', '7 din']), run: () => { setRange(7); return document.getElementById('summary').textContent; } },
+    { match: t => has(t, ['all apps', 'every app', 'sab apps', 'sabhi']), run: () => { setApp('all'); return document.getElementById('summary').textContent; } },
+    { match: t => has(t, ['sound', 'awaaz mein', 'play chart', 'tones']), run: () => { document.getElementById('c1-h').scrollIntoView({ behavior: 'smooth', block: 'center' }); son.click(); return null; } },
+    { match: t => has(t, ['last task', 'latest', 'most recent', 'aakhri', 'आख़िरी', 'last kya']), run: () => { const x = lastTasks[0]; if (!x) return 'There are no tasks in this range.'; return `${fmtDay(x.ts)}, ${fmtTime(x.ts)}. ${x.what}. Result: ${OUT_BY[x.outcome].label}.`; } },
+    { match: t => { const m = t.match(/^(?:search|find|dhundo|खोजो)\s+(?:for\s+)?(.+)$/); return m ? m[1] : null; }, run: q => { const s = document.getElementById('search'); s.value = q; s.dispatchEvent(new Event('input')); goTo('log-h'); return document.getElementById('log-take').textContent; } },
+    { match: t => APP_WORDS.find(([, w]) => has(t, w)), run: (a) => { setApp(a[0]); return document.getElementById('summary').textContent; } },
+    { match: t => CHARTS.find(([, w]) => has(t, w)), run: c => { goTo(c[0] + '-h'); return readText[c[0]]; } },
+    { match: t => has(t, ['summary', 'overview', 'kya kiya', 'क्या किया', 'read', 'padho', 'पढ़ो']), run: () => document.getElementById('summary').textContent },
+    { match: t => has(t, ['log', 'every task', 'list', 'history']), run: () => { goTo('log-h'); return document.getElementById('log-take').textContent; } },
+  ]);
+  V.setHelp(() => 'You can say: read summary. Last 30 days, or last 7 days. Only WhatsApp, or all apps. Tasks per day, safety, or time. Play as sound. Last task. Search Rahul. Delete history. Or open settings.');
+})();
+</script>
+</body>
+</html>

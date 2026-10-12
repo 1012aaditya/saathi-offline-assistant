@@ -369,3 +369,66 @@ def test_r10_permission_deny_allowed():
 def test_r10_in_app_permission_allow_rid_blocked():
     s = screen(BLINKIT, el("While using the app", rid="permission_allow_foreground_only_button"))
     assert check(Tap(index=0), s).rule == "R10"
+
+
+# --- R3: cart quantity + item count in read-back -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cmd,qty",
+    [
+        ("Blinkit se Amul doodh 1 litre mangao", 1),
+        ("Blinkit se 2 packet Amul doodh mangao", 2),
+        ("do packet doodh mangao", 2),
+        ("Amul doodh mangao", 1),
+    ],
+)
+def test_quantity_from_utterance(cmd, qty):
+    assert CommandContext.from_utterance(cmd).quantity == qty
+
+
+def test_r3_extra_add_blocked_after_quantity_reached():
+    s = screen(BLINKIT, el("Amul Taaza 1 L ₹72"), el(desc="ADD"), el("+"))
+    ctx = CommandContext("Amul doodh mangao", quantity=1)
+    assert check(Tap(index=1), s, ctx).kind == "allow"
+    ctx.items_added = 1
+    assert check(Tap(index=1), s, ctx).rule == "R3"
+    assert check(Tap(index=2), s, ctx).rule == "R3"  # "+" counts too
+    two = CommandContext("2 packet", quantity=2, items_added=1)
+    assert check(Tap(index=1), s, two).kind == "allow"
+
+
+def test_r3_add_rule_only_in_order_apps():
+    s = screen(WHATSAPP, el(desc="ADD"))
+    assert check(Tap(index=0), s, CommandContext("x", items_added=5)).kind == "allow"
+
+
+def test_r3_readback_includes_item_count():
+    s = screen(BLINKIT, el("View cart · 1 item"), el("To Pay ₹72"), el("Place Order", cls="Button"))
+    v = check(Tap(index=2), s)
+    assert "1 item" in v.readback and "To Pay ₹72" in v.readback
+
+
+@pytest.mark.parametrize("label", ["Select Payment Method", "Proceed", "Checkout"])
+def test_r3_blinkit_checkout_variants_hold(label):
+    s = screen(BLINKIT, el("View cart · 1 item"), el("₹72 TOTAL"), el(label, cls="Button"))
+    assert check(Tap(index=2), s).rule == "R3"
+
+
+def test_r4_readout_quotes_must_be_verbatim():
+    from saathi.safety import ungrounded_quotes
+
+    s = screen(WHATSAPP, el("Kai bar pahan li thi to border kharab ho gya tha", rid="message_text"))
+    assert (
+        ungrounded_quotes(
+            'Mummy का आखिरी संदेश: "Kai bar pahan li thi to border kharab ho gya tha"', s
+        )
+        == []
+    )
+    assert ungrounded_quotes('Mummy का संदेश: "Kai baar pehni thi, border kharab hua"', s) != []
+    assert ungrounded_quotes("कोई उद्धरण नहीं", s) == []
+
+
+def test_r3_generic_proceed_without_amount_is_not_checkout():
+    s = screen(BLINKIT, el("Confirm delivery location"), el("Proceed", cls="Button"))
+    assert check(Tap(index=1), s).kind == "allow"

@@ -56,3 +56,13 @@ def test_search_submit_only_for_blinkit_search_fields():
     e = _screen(1).elements[0]
     assert _is_search_field(e.model_copy(update={"desc": "Search for atta, dal, coke and more"}))
     assert not _is_search_field(e.model_copy(update={"text": "Message", "rid": "entry"}))
+
+
+def test_cart_recovery_prefers_view_cart_else_back():
+    from saathi.actions import Back, Tap
+    from saathi.agent import _cart_recovery
+
+    s = _screen(3, "com.grofers.customerapp")
+    s.elements[2] = s.elements[2].model_copy(update={"text": "View cart · 1 item"})
+    assert _cart_recovery(s) == Tap(index=2)
+    assert _cart_recovery(_screen(3, "com.grofers.customerapp")) == Back()

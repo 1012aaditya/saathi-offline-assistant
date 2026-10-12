@@ -5,6 +5,8 @@ Blinkit (com.grofers.customerapp) — hints from real screens:
 - The search box placeholder rotates ("Search "gift bag"", "Search "healthy snacks""): that is not a result.
 - Product cards show name, size and price (₹); the add button is labelled "ADD". Product cards can be unlabeled: use `look` if the element list is not enough to tell products apart.
 - If several products match equally well (e.g. Amul Taaza vs Amul Gold, 500 ml vs 1 l) and the user didn't say which, use `ask_user` with the 2–3 options and prices, quoting names exactly.
-- Add exactly the quantity asked (default 1). After "ADD", the button turns into a − / + counter. Do not tap − (it removes the item).
+- Add exactly ONE product (or the number of packets the user said). Tap "ADD" once on the best match, then go straight to the cart — never add a second product "to be safe". After "ADD", the button turns into a − / + counter; don't tap − or +. (Extra ADD taps are blocked anyway.)
+- The cart may already contain items from before (the bottom bar says e.g. "View cart · 3 items"). That's fine: never remove them and don't add the product again. Once the requested product has been added (its counter shows 1 or more, or "cart now has 1 added item" is in the history), tap "View cart" and then the checkout button ("Place Order" / "Proceed"). Don't open product pages or search again.
+- If the user already chose a variant (shown as "user already chose: ..."), pick that product without asking again.
 - Then open the cart ("View cart" / cart bar at the bottom) and tap the checkout button ("Proceed", "Proceed to pay", "Place order"). Saathi's safety layer stops there, reads the total back and asks the user — never try to get around it.
 - Dismiss offers / pop-ups / location prompts with "Not now", "Skip", "Close" or `back`. Never change the delivery address or pick a payment method.

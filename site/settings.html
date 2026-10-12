@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saathi Settings</title>
+<meta name="description" content="Choose which apps Saathi can use, set money limits, manage trusted people and voice, and see what Saathi did.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anek+Devanagari:wdth,wght@75..125,300..800&family=Mukta:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #fbfaff; --lilac: #eeebff; --ink: #17153b; --ink-2: #4b4870;
+    --blue: #4338f2; --blue-deep: #2b22b8; --marigold: #ffb627; --pink: #ff5c93; --mint: #19c99a; --coral: #f0473c;
+    --f-display: "Anek Devanagari", "Mukta", system-ui, sans-serif;
+    --f-body: "Mukta", system-ui, sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, monospace;
+    --r: 22px;
+    --card-shadow: 0 2px 0 rgba(23,21,59,.04), 0 18px 40px -30px rgba(23,21,59,.4);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--f-body); font-size: clamp(17px, 0.6vw + 14px, 19px); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--blue); text-underline-offset: 3px; }
+  :focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; border-radius: 8px; }
+  [lang="hi"] { font-family: var(--f-display); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .skip { position: absolute; left: 16px; top: -60px; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 50; }
+  .skip:focus { top: 12px; }
+
+  /* header */
+  header.top { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); background: rgba(251,250,255,.85); border-bottom: 1px solid rgba(67,56,242,.08); }
+  header.top .in { max-width: 1200px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px); height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .mark { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font: 700 1.3rem/1 var(--f-display); }
+  .mark .dot { width: 24px; height: 24px; border-radius: 50%; background: conic-gradient(from 0deg, var(--blue), var(--pink), var(--marigold), var(--mint), var(--blue)); }
+  .back { font-weight: 500; font-size: 0.95rem; color: var(--ink-2); text-decoration: none; }
+  .back:hover { color: var(--blue); }
+
+  .shell { max-width: 1200px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px) 120px; display: grid; grid-template-columns: 230px 1fr; gap: clamp(24px, 5vw, 64px); }
+  nav.toc { position: sticky; top: 88px; align-self: start; padding-top: 40px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  nav.toc a { display: block; padding: 9px 14px; border-radius: 12px; text-decoration: none; color: var(--ink-2); font-weight: 500; font-size: 0.95rem; }
+  nav.toc a:hover { background: var(--lilac); color: var(--ink); }
+  nav.toc a.cur { background: var(--ink); color: #fff; }
+
+  /* intro */
+  .intro { padding: 40px 0 8px; }
+  .kicker { display: inline-block; font: 500 0.75rem/1 var(--f-mono); letter-spacing: .1em; text-transform: uppercase; padding: 7px 11px; border-radius: 8px; background: var(--lilac); color: var(--blue); margin: 0 0 16px; }
+  h1 { font: 700 clamp(2.4rem, 5vw, 3.8rem)/1 var(--f-display); font-variation-settings: "wdth" 84; letter-spacing: -0.015em; margin: 0 0 16px; }
+  .summary { background: var(--blue); color: #fff; border-radius: 26px; padding: 26px 28px; display: grid; gap: 18px; margin: 24px 0 8px; }
+  .summary p { margin: 0; font: 600 clamp(1.2rem, 2vw, 1.5rem)/1.35 var(--f-display); font-variation-settings: "wdth" 92; }
+  .summary .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .proto { font-size: 0.88rem; color: var(--ink-2); margin: 12px 0 0; }
+
+  section.block { padding-top: 56px; scroll-margin-top: 72px; }
+  h2 { font: 700 clamp(1.7rem, 3vw, 2.4rem)/1.05 var(--f-display); font-variation-settings: "wdth" 86; margin: 0 0 8px; }
+  .help { margin: 0 0 22px; color: var(--ink-2); max-width: 62ch; }
+
+  /* buttons */
+  .btn { display: inline-flex; align-items: center; gap: 8px; font: 600 0.92rem/1 var(--f-body); padding: 13px 18px; border-radius: 999px; cursor: pointer; border: 2px solid var(--ink); background: var(--ink); color: #fff; text-decoration: none; }
+  .btn.light { background: #fff; color: var(--ink); border-color: var(--lilac); }
+  .btn.light:hover { border-color: var(--blue); }
+  .btn.on-blue { background: #fff; color: var(--blue-deep); border-color: #fff; }
+  .btn.on-blue.ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.5); }
+  .btn.danger { background: #fff; color: #b3261e; border-color: #f3c3bf; }
+  .btn svg { width: 18px; height: 18px; flex: none; }
+
+  /* app groups */
+  details.group { background: #fff; border-radius: var(--r); box-shadow: var(--card-shadow); margin-bottom: 14px; }
+  details.group > summary { list-style: none; cursor: pointer; padding: 20px 24px; display: flex; align-items: center; gap: 14px; border-radius: var(--r); }
+  details.group > summary::-webkit-details-marker { display: none; }
+  .g-ic { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; flex: none; font-size: 1.2rem; }
+  .g-title { font: 700 1.2rem/1.1 var(--f-display); }
+  .g-meta { font-size: 0.85rem; color: var(--ink-2); }
+  .g-chev { margin-left: auto; color: var(--blue); font-size: 1.5rem; line-height: 1; transition: transform .2s ease; }
+  details[open] > summary .g-chev { transform: rotate(45deg); }
+  .apps { list-style: none; margin: 0; padding: 0 24px 10px; }
+  .app { display: grid; grid-template-columns: 1fr auto; gap: 10px 20px; align-items: center; padding: 16px 0; border-top: 1px solid var(--lilac); }
+  .app-name { font-weight: 700; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .app-eg { font-size: 0.88rem; color: var(--ink-2); margin-top: 2px; }
+  .badge { font: 500 0.66rem/1 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; padding: 5px 8px; border-radius: 6px; }
+  .b-now { background: var(--mint); color: var(--ink); }
+  .b-next { background: var(--marigold); color: var(--ink); }
+  .b-later { background: var(--lilac); color: var(--ink-2); }
+  .note { font-size: 0.8rem; color: var(--ink-2); margin-top: 4px; }
+
+  /* segmented radio */
+  fieldset.seg { border: 0; margin: 0; padding: 0; }
+  fieldset.seg legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .seg-opts { display: inline-flex; background: var(--lilac); border-radius: 999px; padding: 4px; gap: 2px; flex-wrap: wrap; }
+  .seg-opts input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg-opts label { padding: 9px 14px; border-radius: 999px; font-size: 0.86rem; font-weight: 500; cursor: pointer; color: var(--ink-2); white-space: nowrap; transition: background .15s ease, color .15s ease; }
+  .seg-opts input:checked + label { background: var(--ink); color: #fff; }
+  .seg-opts input:checked + label.act { background: var(--blue); }
+  .seg-opts input:focus-visible + label { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+  /* switch */
+  .switch { display: inline-flex; align-items: center; gap: 10px; background: none; border: 0; padding: 4px; cursor: pointer; font: 500 0.88rem/1.2 var(--f-body); color: var(--ink); text-align: left; }
+  .switch .track { width: 46px; height: 28px; border-radius: 999px; background: #cfcce6; position: relative; flex: none; transition: background .2s ease; }
+  .switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.2); transition: transform .2s ease; }
+  .switch[aria-checked="true"] .track { background: var(--mint); }
+  .switch[aria-checked="true"] .track::after { transform: translateX(18px); }
+
+  /* cards */
+  .card { background: #fff; border-radius: var(--r); box-shadow: var(--card-shadow); padding: 24px; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 4px; font: 700 1.15rem/1.2 var(--f-display); }
+  .card .sub { margin: 0 0 16px; color: var(--ink-2); font-size: 0.92rem; }
+  .big-val { font: 700 2.6rem/1 var(--f-display); font-variation-settings: "wdth" 80; color: var(--blue); }
+  input[type="range"] { width: 100%; accent-color: var(--blue); height: 32px; }
+  .scale { display: flex; justify-content: space-between; font: 400 0.75rem/1 var(--f-mono); color: var(--ink-2); }
+  select, input[type="text"] { font: 500 1rem/1.2 var(--f-body); padding: 12px 14px; border-radius: 12px; border: 2px solid var(--lilac); background: #fff; color: var(--ink); min-width: 0; }
+  select:focus-visible, input[type="text"]:focus-visible { border-color: var(--blue); outline: none; box-shadow: 0 0 0 3px rgba(67,56,242,.25); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  /* trusted */
+  .people { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 8px; }
+  .person { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--paper); }
+  .person .av { width: 38px; height: 38px; border-radius: 50%; background: #c9c4ff; display: grid; place-items: center; font-weight: 700; color: var(--blue-deep); flex: none; }
+  .person b { display: block; }
+  .person small { color: var(--ink-2); }
+  .person button { margin-left: auto; }
+  .add-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .add-row input { flex: 1 1 180px; }
+  .empty { color: var(--ink-2); font-size: 0.92rem; padding: 12px 0; }
+
+  /* activity */
+  .acts { list-style: none; margin: 0 0 18px; padding: 0; }
+  .acts li { display: grid; grid-template-columns: 74px 1fr auto; gap: 14px; padding: 14px 0; border-top: 1px solid var(--lilac); align-items: baseline; }
+  .acts time { font: 400 0.8rem/1 var(--f-mono); color: var(--ink-2); }
+  .acts .what small { display: block; color: var(--ink-2); font-size: 0.82rem; }
+  .res { font: 500 0.68rem/1 var(--f-mono); letter-spacing: .05em; padding: 5px 8px; border-radius: 6px; white-space: nowrap; }
+  .r-ok { background: var(--mint); } .r-hold { background: var(--marigold); } .r-stop { background: var(--coral); color: #fff; }
+
+  /* locked */
+  .locks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .locks li { display: flex; gap: 14px; align-items: flex-start; background: #fff; border-radius: 18px; padding: 16px 20px; box-shadow: var(--card-shadow); }
+  .locks .lk { width: 36px; height: 36px; border-radius: 11px; background: var(--ink); display: grid; place-items: center; flex: none; }
+  .locks .lk svg { width: 18px; height: 18px; }
+  .locks b { display: block; }
+  .locks span { color: var(--ink-2); font-size: 0.92rem; }
+  .locks .state { margin-left: auto; font: 500 0.68rem/1 var(--f-mono); letter-spacing: .06em; color: var(--ink-2); white-space: nowrap; align-self: center; }
+
+  .export { margin-top: 56px; padding: 26px 28px; border-radius: var(--r); background: var(--lilac); display: flex; gap: 18px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .export p { margin: 0; max-width: 56ch; color: var(--ink-2); font-size: 0.92rem; }
+  .export b { color: var(--ink); }
+
+  /* toast */
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 140%); background: var(--ink); color: #fff; border-radius: 16px; padding: 12px 12px 12px 20px; display: flex; gap: 16px; align-items: center; box-shadow: 0 20px 40px -16px rgba(23,21,59,.6); max-width: calc(100vw - 32px); transition: transform .3s cubic-bezier(.2,.7,.2,1); z-index: 40; }
+  .toast.show { transform: translate(-50%, 0); }
+  .toast button { background: var(--marigold); color: var(--ink); border: 0; border-radius: 999px; padding: 9px 14px; font: 600 0.88rem/1 var(--f-body); cursor: pointer; flex: none; }
+
+  /* dialog */
+  dialog { border: 0; border-radius: 26px; padding: 30px; max-width: 460px; width: calc(100vw - 32px); color: var(--ink); box-shadow: 0 40px 80px -30px rgba(23,21,59,.6); }
+  dialog::backdrop { background: rgba(23,21,59,.45); }
+  dialog h2 { font-size: 1.7rem; }
+  dialog p { color: var(--ink-2); margin: 0 0 22px; }
+  dialog .row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: 1fr; }
+    nav.toc { position: static; padding-top: 16px; overflow-x: auto; }
+    nav.toc ol { display: flex; gap: 6px; width: max-content; }
+    nav.toc a { white-space: nowrap; background: #fff; }
+    .app { grid-template-columns: 1fr; }
+    .two { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .acts li { grid-template-columns: 1fr auto; }
+    .acts time { grid-column: 1 / -1; }
+    .locks .state { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to settings</a>
+<header class="top">
+  <div class="in">
+    <a class="mark" href="index.html"><span class="dot" aria-hidden="true"></span>Saathi</a>
+    <nav aria-label="Pages" style="display:flex;gap:18px"><a class="back" href="index.html">Home</a><a class="back" href="activity.html">Activity</a></nav>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="toc" aria-label="Settings sections">
+    <ol>
+      <li><a href="#apps">Apps</a></li>
+      <li><a href="#money">Money limits</a></li>
+      <li><a href="#people">Trusted people</a></li>
+      <li><a href="#voice">Voice &amp; language</a></li>
+      <li><a href="#activity">Activity</a></li>
+      <li><a href="#locked">Always on</a></li>
+    </ol>
+  </nav>
+
+  <main id="main">
+    <div class="intro">
+      <p class="kicker">Settings</p>
+      <h1>You decide what Saathi can do.</h1>
+      <div class="summary">
+        <p id="summary" aria-live="polite"></p>
+        <div class="row">
+          <button class="btn on-blue" id="readSummary" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+            Read my settings aloud
+          </button>
+          <button class="btn on-blue ghost switch-like" id="speakToggle" type="button" role="switch" aria-checked="false">Also speak every change: Off</button>
+        </div>
+      </div>
+      <p class="proto">Prototype: your choices are saved in this browser only. They aren’t connected to the phone yet.</p>
+    </div>
+
+    <section class="block" id="apps" aria-labelledby="apps-h">
+      <h2 id="apps-h">Apps Saathi can use</h2>
+      <p class="help">Pick how much Saathi may do in each app. Anything that pays, sends or orders always asks you first. For apps that don’t work yet, tell us if you need them.</p>
+      <div id="groups"></div>
+    </section>
+
+    <section class="block" id="money" aria-labelledby="money-h">
+      <h2 id="money-h">Money limits</h2>
+      <p class="help">Saathi won’t send more than these amounts. Lowering a limit happens right away. Raising one needs you to confirm.</p>
+      <div class="card">
+        <h3><label for="perPay">Most Saathi can send in one payment</label></h3>
+        <p class="sub">Payments above this are blocked, even if you say yes.</p>
+        <div class="big-val" id="perPayVal" aria-hidden="true">₹10</div>
+        <input type="range" id="perPay" min="0" max="6" step="1" value="0">
+        <div class="scale" aria-hidden="true"><span>₹10</span><span>₹2,000</span></div>
+      </div>
+      <div class="card">
+        <h3><label for="daily">Most Saathi can send in one day</label></h3>
+        <p class="sub">Adds up every payment Saathi makes today.</p>
+        <select id="daily">
+          <option value="0">No daily limit</option>
+          <option value="100">₹100 a day</option>
+          <option value="500">₹500 a day</option>
+          <option value="1000">₹1,000 a day</option>
+          <option value="2000">₹2,000 a day</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="block" id="people" aria-labelledby="people-h">
+      <h2 id="people-h">Trusted people</h2>
+      <p class="help">People you pay or message often. If you ask Saathi to pay someone who isn’t on this list, it warns you first.</p>
+      <div class="card">
+        <ul class="people" id="peopleList" aria-label="Trusted people"></ul>
+        <form class="add-row" id="addPerson">
+          <label class="sr-only" for="pName">Name, as saved in your contacts</label>
+          <input type="text" id="pName" placeholder="Name, as in your contacts" autocomplete="off" required>
+          <label class="sr-only" for="pRel">Relation (optional)</label>
+          <input type="text" id="pRel" placeholder="Relation (optional)" autocomplete="off">
+          <button class="btn" type="submit">Add person</button>
+        </form>
+      </div>
+      <div class="card">
+        <button class="switch" type="button" id="warnUnknown" role="switch" aria-checked="true">
+          <span class="track" aria-hidden="true"></span>
+          <span>Warn me before paying someone who isn’t on this list</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="block" id="voice" aria-labelledby="voice-h">
+      <h2 id="voice-h">Voice and language</h2>
+      <p class="help">How Saathi talks to you. It understands Hindi, English and a mix of both, whichever you pick here.</p>
+      <div class="card">
+        <fieldset class="seg">
+          <legend>Language Saathi speaks</legend>
+          <h3 aria-hidden="true">Language Saathi speaks</h3>
+          <p class="sub" aria-hidden="true">You can speak to it in any of these.</p>
+          <div class="seg-opts" id="langOpts">
+            <input type="radio" name="lang" id="lang-hi" value="hi"><label for="lang-hi"><span lang="hi">हिन्दी</span></label>
+            <input type="radio" name="lang" id="lang-en" value="en"><label for="lang-en">English</label>
+            <input type="radio" name="lang" id="lang-mix" value="mix"><label for="lang-mix">Hinglish</label>
+          </div>
+        </fieldset>
+      </div>
+      <div class="card">
+        <h3><label for="speed">Speaking speed</label></h3>
+        <p class="sub" id="speedVal">Normal</p>
+        <input type="range" id="speed" min="0" max="4" step="1" value="2" aria-describedby="speedVal">
+        <div class="scale" aria-hidden="true"><span>Slower</span><span>Faster</span></div>
+        <p style="margin:16px 0 0"><button class="btn light" type="button" id="sample">Play a sample</button></p>
+      </div>
+    </section>
+
+    <section class="block" id="activity" aria-labelledby="activity-h">
+      <h2 id="activity-h">What Saathi did</h2>
+      <p class="help">Everything Saathi did for you, newest first. It’s stored only on your own computer, and you can delete it anytime. The entries below are sample data. <a href="activity.html">See the full activity page with charts →</a></p>
+      <div class="card">
+        <ul class="acts" id="acts" aria-label="Sample activity"></ul>
+        <div class="row" style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn light" type="button" id="readActs">Read it to me</button>
+          <button class="btn danger" type="button" id="clearActs">Delete all history</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="block" id="locked" aria-labelledby="locked-h">
+      <h2 id="locked-h">Always on</h2>
+      <p class="help">These protections can’t be switched off, by you or anyone else. They’re built into Saathi’s code and tested before every change.</p>
+      <ul class="locks">
+        <li><span class="lk" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><div><b>Never types your PIN, OTP or password</b><span>On those screens, Saathi stops and hands the phone back to you.</span></div><span class="state">ALWAYS ON</span></li>
+        <li><span class="lk" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><div><b>Reads back before paying, sending or ordering</b><span>Using only words that are actually on the screen, then waits for your yes.</span></div><span class="state">ALWAYS ON</span></li>
+        <li><span class="lk" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><div><b>Unclear answer means cancel</b><span>If it doesn’t hear a clear yes, it asks once more, then cancels.</span></div><span class="state">ALWAYS ON</span></li>
+        <li><span class="lk" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><div><b>Never solves CAPTCHAs or reads OTP messages aloud</b><span>Those are handed to you.</span></div><span class="state">ALWAYS ON</span></li>
+        <li><span class="lk" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><div><b>Your screen reader always comes back</b><span>Whenever Saathi stops, finishes or crashes, TalkBack is switched back on.</span></div><span class="state">ALWAYS ON</span></li>
+        <li><span class="lk" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><div><b>Stop anytime</b><span>Press a key, and Saathi stops in the middle of what it’s doing.</span></div><span class="state">ALWAYS ON</span></li>
+      </ul>
+    </section>
+
+    <div class="export">
+      <p><b>Save these settings as a file.</b> Later, Saathi on your phone will read this file. For now it’s useful for testing.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" type="button" id="exportBtn">Download settings file</button>
+        <button class="btn light" type="button" id="resetBtn">Reset to defaults</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status"><span id="toastMsg"></span><button type="button" id="undoBtn">Undo</button></div>
+
+<dialog id="confirm" aria-labelledby="cTitle" aria-describedby="cBody">
+  <h2 id="cTitle"></h2>
+  <p id="cBody"></p>
+  <div class="row">
+    <button class="btn light" type="button" id="cNo" autofocus>Cancel</button>
+    <button class="btn" type="button" id="cYes">Yes, change it</button>
+  </div>
+</dialog>
+
+<script src="voice.js"></script>
+<script>
+(() => {
+  /* ---------- catalogue: status reflects what Saathi can do today ---------- */
+  const LEVELS = {
+    msg:   ['Off', 'Read', 'Read & reply'],
+    money: ['Off', 'Check balance', 'Pay (asks first)'],
+    shop:  ['Off', 'Browse', 'Order (asks first)'],
+    trip:  ['Off', 'Check', 'Book (asks first)'],
+    read:  ['Off', 'Read only'],
+    use:   ['Off', 'On'],
+  };
+  const GROUPS = [
+    { id: 'talk', title: 'Messages & calls', ic: '💬', bg: '#b8f2e0', apps: [
+      { id: 'whatsapp', name: 'WhatsApp', kind: 'msg', status: 'now', eg: '“Read Mummy’s last message”' },
+      { id: 'phone', name: 'Phone calls', kind: 'use', status: 'later', eg: '“Call Rahul”' },
+      { id: 'sms', name: 'SMS messages', kind: 'msg', status: 'later', eg: '“Read my last SMS from the bank”', note: 'OTP codes are never read aloud.' },
+      { id: 'gmail', name: 'Gmail', kind: 'msg', status: 'later', eg: '“Any new email from office?”' },
+    ]},
+    { id: 'money', title: 'Money & banking', ic: '₹', bg: '#c9c4ff', apps: [
+      { id: 'gpay', name: 'Google Pay', kind: 'money', status: 'now', eg: '“Send Rahul ₹1”' },
+      { id: 'phonepe', name: 'PhonePe', kind: 'money', status: 'next', eg: '“PhonePe se bijli ka bill bharo”' },
+      { id: 'bhim', name: 'BHIM UPI', kind: 'money', status: 'next', eg: '“Check my balance”' },
+      { id: 'paytm', name: 'Paytm', kind: 'money', status: 'later', eg: '“Recharge my phone”' },
+      { id: 'bank', name: 'Bank app (e.g. SBI YONO)', kind: 'read', status: 'later', eg: '“What’s my account balance?”' },
+    ]},
+    { id: 'shop', title: 'Groceries & shopping', ic: '🛒', bg: '#ffe7b0', apps: [
+      { id: 'blinkit', name: 'Blinkit', kind: 'shop', status: 'now', eg: '“Order 1 litre of Amul milk”' },
+      { id: 'zepto', name: 'Zepto', kind: 'shop', status: 'later', eg: '“Order bread and eggs”' },
+      { id: 'instamart', name: 'Swiggy Instamart', kind: 'shop', status: 'later', eg: '“Reorder my usual groceries”' },
+      { id: 'amazon', name: 'Amazon', kind: 'shop', status: 'later', eg: '“Where is my Amazon order?”' },
+      { id: 'flipkart', name: 'Flipkart', kind: 'shop', status: 'later', eg: '“Track my Flipkart parcel”' },
+    ]},
+    { id: 'food', title: 'Food delivery', ic: '🍱', bg: '#ffd1e2', apps: [
+      { id: 'swiggy', name: 'Swiggy', kind: 'shop', status: 'later', eg: '“Order my usual thali”' },
+      { id: 'zomato', name: 'Zomato', kind: 'shop', status: 'later', eg: '“How far is my food?”' },
+    ]},
+    { id: 'travel', title: 'Getting around', ic: '🚕', bg: '#b8f2e0', apps: [
+      { id: 'uber', name: 'Uber', kind: 'trip', status: 'later', eg: '“Book a cab to the station”' },
+      { id: 'ola', name: 'Ola', kind: 'trip', status: 'later', eg: '“How far is my driver?”' },
+      { id: 'rapido', name: 'Rapido', kind: 'trip', status: 'later', eg: '“Book an auto home”' },
+      { id: 'irctc', name: 'IRCTC Rail Connect', kind: 'trip', status: 'later', eg: '“Check my train’s PNR status”', note: 'CAPTCHAs are always handed to you.' },
+      { id: 'maps', name: 'Google Maps', kind: 'read', status: 'later', eg: '“Where am I right now?”' },
+    ]},
+    { id: 'health', title: 'Health', ic: '💊', bg: '#ffd1e2', apps: [
+      { id: '1mg', name: 'Tata 1mg', kind: 'shop', status: 'later', eg: '“Reorder my BP medicine”' },
+      { id: 'pharmeasy', name: 'PharmEasy', kind: 'shop', status: 'later', eg: '“When will my medicines arrive?”' },
+      { id: 'practo', name: 'Practo', kind: 'trip', status: 'later', eg: '“Book a doctor for tomorrow”' },
+    ]},
+    { id: 'gov', title: 'Government & documents', ic: '🪪', bg: '#c9c4ff', apps: [
+      { id: 'digilocker', name: 'DigiLocker', kind: 'read', status: 'later', eg: '“Read my Aadhaar details”' },
+      { id: 'umang', name: 'UMANG', kind: 'read', status: 'later', eg: '“Check my PF balance”' },
+    ]},
+    { id: 'daily', title: 'Everyday', ic: '🎧', bg: '#ffe7b0', apps: [
+      { id: 'youtube', name: 'YouTube', kind: 'use', status: 'later', eg: '“Play today’s news”' },
+      { id: 'spotify', name: 'Spotify', kind: 'use', status: 'later', eg: '“Play old Hindi songs”' },
+      { id: 'clock', name: 'Alarms & reminders', kind: 'use', status: 'later', eg: '“Remind me to take medicine at 9”' },
+    ]},
+  ];
+  const ALL = GROUPS.flatMap(g => g.apps);
+  const STATUS = { now: ['b-now', 'Works now'], next: ['b-next', 'Next up'], later: ['b-later', 'Not yet'] };
+  const PER_PAY = [10, 50, 100, 200, 500, 1000, 2000];
+  const SPEEDS = ['Much slower', 'Slower', 'Normal', 'Faster', 'Much faster'];
+  const RATES = [0.7, 0.85, 1, 1.2, 1.4];
+
+  const DEFAULTS = {
+    apps: { whatsapp: 2, gpay: 2, blinkit: 1 },
+    want: {},
+    perPay: 0, daily: '0', warnUnknown: true,
+    trusted: [{ name: 'Mummy', rel: 'Mother' }, { name: 'Rahul Sharma', rel: 'Friend' }],
+    lang: 'mix', speed: 2, speakChanges: false, history: true,
+  };
+  const KEY = 'saathi-settings-v1';
+  const clone = o => JSON.parse(JSON.stringify(o));
+  let state = clone(DEFAULTS);
+  try { const saved = JSON.parse(localStorage.getItem(KEY)); if (saved) state = { ...clone(DEFAULTS), ...saved }; } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
+
+  /* ---------- speech + announcements ---------- */
+  const synth = window.speechSynthesis;
+  function speak(text, lang) {
+    if (!synth) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang || (state.lang === 'hi' ? 'hi-IN' : 'en-IN');
+    u.rate = RATES[state.speed];
+    const v = synth.getVoices().find(v => v.lang === u.lang);
+    if (v) u.voice = v;
+    synth.speak(u);
+  }
+
+  const toast = document.getElementById('toast');
+  const toastMsg = document.getElementById('toastMsg');
+  let toastTimer, undoSnap = null;
+  function changed(msg, before) {
+    save(); renderSummary();
+    undoSnap = before;
+    toastMsg.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 6000);
+    if (state.speakChanges) speak(msg, 'en-IN');
+  }
+  document.getElementById('undoBtn').addEventListener('click', () => {
+    if (!undoSnap) return;
+    state = undoSnap; undoSnap = null; save(); renderAll();
+    toastMsg.textContent = 'Change undone.';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+  });
+
+  /* ---------- confirm dialog (defaults to Cancel) ---------- */
+  const dlg = document.getElementById('confirm');
+  function confirmChange(title, body) {
+    return new Promise(resolve => {
+      document.getElementById('cTitle').textContent = title;
+      document.getElementById('cBody').textContent = body;
+      const done = ok => { dlg.close(); cleanup(); resolve(ok); };
+      const yes = () => done(true), no = () => done(false), esc = e => { e.preventDefault(); done(false); };
+      const cleanup = () => { cYes.removeEventListener('click', yes); cNo.removeEventListener('click', no); dlg.removeEventListener('cancel', esc); };
+      const cYes = document.getElementById('cYes'), cNo = document.getElementById('cNo');
+      cYes.addEventListener('click', yes); cNo.addEventListener('click', no); dlg.addEventListener('cancel', esc);
+      if (typeof dlg.showModal === 'function') { dlg.showModal(); cNo.focus(); }
+      else resolve(window.confirm(title + '\n' + body));
+    });
+  }
+
+  /* ---------- summary ---------- */
+  const fmt = n => '₹' + n.toLocaleString('en-IN');
+  function renderSummary() {
+    const on = ALL.filter(a => a.status === 'now' && (state.apps[a.id] || 0) > 0).map(a => a.name);
+    const daily = +state.daily ? `, and ${fmt(+state.daily)} a day` : '';
+    const n = state.trusted.length;
+    document.getElementById('summary').textContent =
+      `Saathi can use ${on.length ? on.join(', ') : 'no apps'}. Payments up to ${fmt(PER_PAY[state.perPay])} each${daily}. ${n} trusted ${n === 1 ? 'person' : 'people'}.`;
+  }
+  document.getElementById('readSummary').addEventListener('click', () => {
+    if (state.lang === 'hi') {
+      const on = ALL.filter(a => a.status === 'now' && (state.apps[a.id] || 0) > 0).length;
+      speak(`साथी ${on} ऐप इस्तेमाल कर सकता है। हर पेमेंट ${PER_PAY[state.perPay]} रुपये तक। ${state.trusted.length} भरोसेमंद लोग।`, 'hi-IN');
+    } else speak(document.getElementById('summary').textContent, 'en-IN');
+  });
+  const speakToggle = document.getElementById('speakToggle');
+  speakToggle.addEventListener('click', () => {
+    const before = clone(state);
+    state.speakChanges = !state.speakChanges;
+    renderSpeakToggle();
+    changed(`Speak every change: ${state.speakChanges ? 'on' : 'off'}.`, before);
+  });
+  const renderSpeakToggle = () => { speakToggle.setAttribute('aria-checked', state.speakChanges); speakToggle.textContent = `Also speak every change: ${state.speakChanges ? 'On' : 'Off'}`; };
+
+  /* ---------- apps ---------- */
+  const groupsEl = document.getElementById('groups');
+  function renderApps() {
+    groupsEl.innerHTML = '';
+    GROUPS.forEach(g => {
+      const live = g.apps.filter(a => a.status === 'now');
+      const onCount = live.filter(a => (state.apps[a.id] || 0) > 0).length;
+      const d = document.createElement('details');
+      d.className = 'group';
+      d.open = g.apps.some(a => a.status === 'now');
+      const meta = live.length ? `${onCount} of ${live.length} available ${live.length === 1 ? 'app' : 'apps'} on · ${g.apps.length - live.length} not yet available` : `${g.apps.length} apps not yet available`;
+      d.innerHTML = `<summary><span class="g-ic" style="background:${g.bg}" aria-hidden="true">${g.ic}</span><span><span class="g-title">${g.title}</span><br><span class="g-meta">${meta}</span></span><span class="g-chev" aria-hidden="true">+</span></summary><ul class="apps"></ul>`;
+      const ul = d.querySelector('.apps');
+      g.apps.forEach(a => {
+        const li = document.createElement('li');
+        li.className = 'app';
+        const [bc, bl] = STATUS[a.status];
+        let control;
+        if (a.status !== 'now') {
+          const want = !!state.want[a.id];
+          control = `<button class="switch" type="button" role="switch" aria-checked="${want}" data-want="${a.id}"><span class="track" aria-hidden="true"></span><span>I need this</span></button>`;
+        } else {
+          const lv = LEVELS[a.kind], cur = state.apps[a.id] || 0;
+          control = `<fieldset class="seg"><legend>What Saathi can do in ${a.name}</legend><div class="seg-opts">` +
+            lv.map((l, i) => `<input type="radio" name="app-${a.id}" id="app-${a.id}-${i}" value="${i}" ${i === cur ? 'checked' : ''} data-app="${a.id}"><label for="app-${a.id}-${i}" class="${i === lv.length - 1 && lv.length > 2 ? 'act' : ''}">${l}</label>`).join('') +
+            `</div></fieldset>`;
+        }
+        li.innerHTML = `<div><div class="app-name">${a.name}<span class="badge ${bc}">${bl}</span></div><div class="app-eg">${a.eg}</div>${a.note ? `<div class="note">${a.note}</div>` : ''}</div><div>${control}</div>`;
+        ul.appendChild(li);
+      });
+      groupsEl.appendChild(d);
+    });
+  }
+  groupsEl.addEventListener('change', e => {
+    const t = e.target;
+    if (!t.dataset.app) return;
+    const a = ALL.find(x => x.id === t.dataset.app);
+    const before = clone(state);
+    state.apps[a.id] = +t.value;
+    changed(`${a.name}: ${LEVELS[a.kind][+t.value]}.`, before);
+    const g = t.closest('details');
+    const grp = GROUPS.find(x => x.apps.includes(a));
+    const live = grp.apps.filter(x => x.status === 'now');
+    g.querySelector('.g-meta').textContent = `${live.filter(x => (state.apps[x.id] || 0) > 0).length} of ${live.length} available ${live.length === 1 ? 'app' : 'apps'} on · ${grp.apps.length - live.length} not yet available`;
+  });
+  groupsEl.addEventListener('click', e => {
+    const b = e.target.closest('[data-want]');
+    if (!b) return;
+    const a = ALL.find(x => x.id === b.dataset.want);
+    const before = clone(state);
+    state.want[a.id] = !state.want[a.id];
+    b.setAttribute('aria-checked', state.want[a.id]);
+    changed(state.want[a.id] ? `Noted: you need ${a.name}.` : `Removed ${a.name} from your wish list.`, before);
+  });
+
+  /* ---------- money ---------- */
+  const perPay = document.getElementById('perPay');
+  const perPayVal = document.getElementById('perPayVal');
+  const showPerPay = i => { perPayVal.textContent = fmt(PER_PAY[i]); perPay.setAttribute('aria-valuetext', fmt(PER_PAY[i]) + ' per payment'); };
+  perPay.addEventListener('input', () => showPerPay(+perPay.value));
+  perPay.addEventListener('change', async () => {
+    const next = +perPay.value, prev = state.perPay;
+    if (next === prev) return;
+    if (next > prev) {
+      const ok = await confirmChange('Raise your payment limit?', `Saathi will be able to send up to ${fmt(PER_PAY[next])} in one payment, instead of ${fmt(PER_PAY[prev])}. It will still read back and ask you before every payment.`);
+      if (!ok) { perPay.value = prev; showPerPay(prev); toastMsg.textContent = 'Limit not changed.'; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 3000); return; }
+    }
+    const before = clone(state);
+    state.perPay = next;
+    changed(`Payment limit is now ${fmt(PER_PAY[next])}.`, before);
+  });
+  const daily = document.getElementById('daily');
+  daily.addEventListener('change', async () => {
+    const prev = state.daily, next = daily.value;
+    const loosen = (+next === 0 && +prev !== 0) || (+prev !== 0 && +next > +prev);
+    if (loosen) {
+      const ok = await confirmChange('Raise your daily limit?', +next === 0 ? 'Saathi will have no daily limit. Each payment still has its own limit and still needs your yes.' : `Saathi will be able to send up to ${fmt(+next)} a day, instead of ${fmt(+prev)}.`);
+      if (!ok) { daily.value = prev; return; }
+    }
+    const before = clone(state);
+    state.daily = next;
+    changed(+next ? `Daily limit is now ${fmt(+next)}.` : 'No daily limit.', before);
+  });
+
+  /* ---------- trusted people ---------- */
+  const peopleList = document.getElementById('peopleList');
+  function renderPeople() {
+    peopleList.innerHTML = state.trusted.length ? '' : '<li class="empty">No trusted people yet. Add someone you pay or message often.</li>';
+    state.trusted.forEach((p, i) => {
+      const li = document.createElement('li');
+      li.className = 'person';
+      const initials = p.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+      li.innerHTML = `<span class="av" aria-hidden="true"></span><div><b></b><small></small></div><button class="btn light" type="button">Remove</button>`;
+      li.querySelector('.av').textContent = initials;
+      li.querySelector('b').textContent = p.name;
+      li.querySelector('small').textContent = p.rel || 'No relation added';
+      const btn = li.querySelector('button');
+      btn.setAttribute('aria-label', `Remove ${p.name}`);
+      btn.addEventListener('click', () => {
+        const before = clone(state);
+        state.trusted.splice(i, 1);
+        renderPeople();
+        changed(`Removed ${p.name} from trusted people.`, before);
+        document.getElementById('pName').focus();
+      });
+      peopleList.appendChild(li);
+    });
+  }
+  document.getElementById('addPerson').addEventListener('submit', e => {
+    e.preventDefault();
+    const n = document.getElementById('pName'), r = document.getElementById('pRel');
+    const name = n.value.trim();
+    if (!name) return;
+    const before = clone(state);
+    state.trusted.push({ name, rel: r.value.trim() });
+    n.value = ''; r.value = '';
+    renderPeople();
+    changed(`Added ${name} to trusted people.`, before);
+    n.focus();
+  });
+  const warn = document.getElementById('warnUnknown');
+  warn.addEventListener('click', async () => {
+    if (state.warnUnknown) {
+      const ok = await confirmChange('Turn off the warning?', 'Saathi won’t warn you when you pay someone who isn’t on your trusted list. It will still read back the name and amount and wait for your yes.');
+      if (!ok) return;
+    }
+    const before = clone(state);
+    state.warnUnknown = !state.warnUnknown;
+    warn.setAttribute('aria-checked', state.warnUnknown);
+    changed(`Warning for unknown people: ${state.warnUnknown ? 'on' : 'off'}.`, before);
+  });
+
+  /* ---------- voice ---------- */
+  const SAMPLES = { hi: ['₹1 राहुल शर्मा को भेज रहे हैं। Confirm?', 'hi-IN'], en: ['Sending one rupee to Rahul Sharma. Confirm?', 'en-IN'], mix: ['Ek rupaya Rahul Sharma ko bhej rahe hain. Confirm?', 'en-IN'] };
+  const LANG_NAMES = { hi: 'Hindi', en: 'English', mix: 'Hinglish' };
+  document.getElementById('langOpts').addEventListener('change', e => {
+    const before = clone(state);
+    state.lang = e.target.value;
+    changed(`Saathi will speak ${LANG_NAMES[state.lang]}.`, before);
+  });
+  const speed = document.getElementById('speed');
+  const speedVal = document.getElementById('speedVal');
+  speed.addEventListener('input', () => { speedVal.textContent = SPEEDS[+speed.value]; speed.setAttribute('aria-valuetext', SPEEDS[+speed.value]); });
+  speed.addEventListener('change', () => {
+    const before = clone(state);
+    state.speed = +speed.value;
+    changed(`Speaking speed: ${SPEEDS[state.speed]}.`, before);
+  });
+  document.getElementById('sample').addEventListener('click', () => { const [t, l] = SAMPLES[state.lang]; speak(t, l); });
+
+  /* ---------- activity (sample data) ---------- */
+  const SAMPLE_ACTS = [
+    { t: '6:40 pm', app: 'Blinkit', what: 'Order Amul milk, 1 litre', res: ['r-stop', 'CANCELLED'], why: 'No clear yes, so it cancelled' },
+    { t: '6:02 pm', app: 'Google Pay', what: '₹1 to Rahul Sharma', res: ['r-hold', 'PIN BY YOU'], why: 'You said yes, then entered your PIN' },
+    { t: '2:16 pm', app: 'WhatsApp', what: 'Reply to Mummy: “main 7 baje aaunga”', res: ['r-ok', 'SENT'], why: 'Sent after your yes' },
+    { t: '2:14 pm', app: 'WhatsApp', what: 'Read Mummy’s last message', res: ['r-ok', 'DONE'], why: 'Read aloud' },
+  ];
+  const acts = document.getElementById('acts');
+  function renderActs() {
+    if (!state.history) { acts.innerHTML = '<li class="empty" style="display:block">No history. Saathi will list what it does here.</li>'; return; }
+    acts.innerHTML = SAMPLE_ACTS.map(a => `<li><time>${a.t}</time><div class="what">${a.app}: ${a.what}<small>${a.why}</small></div><span class="res ${a.res[0]}">${a.res[1]}</span></li>`).join('');
+  }
+  document.getElementById('readActs').addEventListener('click', () => {
+    if (!state.history) return speak('There is no history.', 'en-IN');
+    speak(SAMPLE_ACTS.map(a => `At ${a.t}, ${a.app}: ${a.what}. ${a.why}.`).join(' '), 'en-IN');
+  });
+  document.getElementById('clearActs').addEventListener('click', async () => {
+    const ok = await confirmChange('Delete all history?', 'This removes the list of everything Saathi did, including saved screen recordings on this computer. You can’t get it back.');
+    if (!ok) return;
+    state.history = false; save(); renderActs();
+    toastMsg.textContent = 'History deleted.'; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+  });
+
+  /* ---------- export / reset ---------- */
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    const out = {
+      apps: Object.fromEntries(ALL.filter(a => a.status === 'now').map(a => [a.id, LEVELS[a.kind][state.apps[a.id] || 0]])),
+      requested_apps: ALL.filter(a => state.want[a.id]).map(a => a.id),
+      max_amount_inr: PER_PAY[state.perPay],
+      daily_limit_inr: +state.daily || null,
+      warn_unknown_payee: state.warnUnknown,
+      trusted_people: state.trusted,
+      speech: { language: state.lang, speed: RATES[state.speed] },
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'saathi-settings.json'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  document.getElementById('resetBtn').addEventListener('click', async () => {
+    const ok = await confirmChange('Reset all settings?', 'Apps, limits, trusted people and voice go back to how they started.');
+    if (!ok) return;
+    const before = clone(state);
+    state = clone(DEFAULTS); renderAll();
+    changed('Settings reset to defaults.', before);
+  });
+
+  /* ---------- section highlighting in the side nav ---------- */
+  const links = [...document.querySelectorAll('nav.toc a')];
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(es => es.forEach(e => {
+      if (e.isIntersecting) links.forEach(l => l.classList.toggle('cur', l.getAttribute('href') === '#' + e.target.id));
+    }), { rootMargin: '-40% 0px -55% 0px' });
+    document.querySelectorAll('section.block').forEach(s => io.observe(s));
+  }
+
+  function renderAll() {
+    renderApps(); renderPeople(); renderActs(); renderSummary(); renderSpeakToggle();
+    perPay.value = state.perPay; showPerPay(state.perPay);
+    daily.value = state.daily;
+    warn.setAttribute('aria-checked', state.warnUnknown);
+    document.getElementById('lang-' + state.lang).checked = true;
+    speed.value = state.speed; speedVal.textContent = SPEEDS[state.speed];
+  }
+  renderAll();
+
+  /* ---------- voice commands (see voice.js) ---------- */
+  const V = window.SaathiVoice;
+  if (!V) return;
+  const { has, goTo } = V;
+  V.watchDialog(dlg, document.getElementById('cYes'), document.getElementById('cNo'));
+  const ALIASES = [
+    ['phonepe', ['phonepe', 'phone pe', 'फोनपे', 'फ़ोनपे']], ['instamart', ['instamart', 'इंस्टामार्ट']],
+    ['whatsapp', ['whatsapp', 'whats app', 'व्हाट्सएप', 'वॉट्सऐप', 'व्हाट्सऐप']], ['gpay', ['google pay', 'gpay', 'g pay', 'गूगल पे', 'जीपे']],
+    ['blinkit', ['blinkit', 'blink it', 'ब्लिंकिट']], ['phone', ['call', 'calls', 'calling', 'phone calls', 'कॉल']],
+    ['sms', ['sms', 'text message', 'एसएमएस']], ['gmail', ['gmail', 'email', 'mail']], ['bhim', ['bhim', 'भीम']],
+    ['paytm', ['paytm', 'pay tm', 'पेटीएम']], ['bank', ['bank', 'yono', 'sbi', 'बैंक']], ['zepto', ['zepto']],
+    ['amazon', ['amazon', 'अमेज़न']], ['flipkart', ['flipkart']], ['swiggy', ['swiggy']], ['zomato', ['zomato']],
+    ['uber', ['uber']], ['ola', ['ola']], ['rapido', ['rapido']], ['irctc', ['irctc', 'train', 'railway', 'ट्रेन']],
+    ['maps', ['maps', 'map', 'where am i']], ['1mg', ['1mg', 'one mg', 'medicine', 'दवाई']], ['pharmeasy', ['pharmeasy', 'pharm easy']],
+    ['practo', ['practo', 'doctor']], ['digilocker', ['digilocker', 'digi locker', 'aadhaar']], ['umang', ['umang']],
+    ['youtube', ['youtube', 'यूट्यूब']], ['spotify', ['spotify', 'music', 'songs', 'गाने']], ['clock', ['alarm', 'alarms', 'reminder', 'reminders']],
+  ];
+  const findApp = t => { for (const [id, words] of ALIASES) { const w = words.find(x => has(t, [x])); if (w) return { app: ALL.find(a => a.id === id), word: w }; } return null; };
+  function levelFor(app, t) {
+    if (has(t, ['off', 'band', 'बंद', 'disable', 'turn off', 'hatao'])) return 0;
+    if (app.kind === 'msg') { if (has(t, ['reply', 'jawab', 'जवाब', 'send', 'bhej', 'भेज'])) return 2; if (has(t, ['read', 'padh', 'padho', 'पढ़'])) return 1; }
+    if (app.kind === 'money') { if (has(t, ['pay', 'payment', 'payments', 'bhej', 'send', 'भेज', 'पेमेंट'])) return 2; if (has(t, ['balance', 'बैलेंस', 'check'])) return 1; }
+    if (app.kind === 'shop') { if (has(t, ['order', 'orders', 'mangao', 'मंगाओ', 'buy', 'kharid'])) return 2; if (has(t, ['browse', 'dekh', 'देख', 'search'])) return 1; }
+    if (has(t, ['on', 'chalu', 'चालू', 'enable', 'turn on', 'allow'])) return 1;
+    return -1;
+  }
+  const setRadio = (id, val) => { const i = document.getElementById(id); i.checked = true; i.dispatchEvent(new Event('change', { bubbles: true })); };
+  const FILL = ['add', 'trust', 'trusted', 'people', 'person', 'list', 'to', 'my', 'the', 'as', 'a', 'ko', 'mein', 'me', 'jodo', 'jod', 'do', 'karo', 'bharosemand', 'भरोसेमंद', 'को', 'में', 'जोड़ो', 'लिस्ट', 'please', 'remove', 'hatao', 'हटाओ', 'from', 'se', 'से'];
+  const nameFrom = t => t.split(' ').filter(w => !FILL.includes(w)).map(w => w[0] ? w[0].toUpperCase() + w.slice(1) : w).join(' ').trim();
+  const SECTIONS = [
+    { words: ['apps', 'app list', 'permissions'], id: 'apps-h' },
+    { words: ['money', 'limits', 'paisa', 'पैसा'], id: 'money-h' },
+    { words: ['trusted', 'people', 'contacts', 'log', 'लोग'], id: 'people-h' },
+    { words: ['voice', 'language', 'awaaz', 'आवाज़', 'bhasha', 'भाषा'], id: 'voice-h' },
+    { words: ['activity', 'what saathi did'], id: 'activity-h' },
+    { words: ['always on', 'locked', 'protections', 'suraksha', 'सुरक्षा', 'safety'], id: 'locked-h' },
+  ];
+
+  V.register([
+    { match: t => has(t, ['home', 'back to site', 'main site', 'website']),
+      run: () => { setTimeout(() => { location.href = 'index.html'; }, 1300); return 'Going back to the Saathi site.'; } },
+    { match: t => has(t, ['undo', 'wapas', 'वापस', 'galti']),
+      run: () => { if (!undoSnap) return 'There’s nothing to undo right now.'; document.getElementById('undoBtn').click(); return 'Undid your last change.'; } },
+    { match: t => has(t, ['history', 'itihaas', 'what did saathi do', 'kya kiya', 'क्या किया']),
+      run: (m, t) => { if (has(t, ['delete', 'clear', 'mitao', 'हटाओ', 'मिटाओ', 'remove'])) { document.getElementById('clearActs').click(); return null; } document.getElementById('readActs').click(); return null; } },
+    { match: t => has(t, ['reset', 'default', 'defaults']), run: () => { document.getElementById('resetBtn').click(); return null; } },
+    { match: t => has(t, ['download', 'export', 'save file']), run: () => { document.getElementById('exportBtn').click(); return 'Downloading your settings file.'; } },
+    { match: t => has(t, ['my settings', 'settings batao', 'summary', 'read settings', 'read my settings', 'सेटिंग्स बताओ']),
+      run: () => { document.getElementById('readSummary').click(); return null; } },
+    { match: t => { if (!has(t, ['limit', 'limits', 'seema', 'सीमा', 'rupees', 'rupee', 'rupaye', 'रुपये', 'daily'])) return null;
+        const daily = has(t, ['day', 'daily', 'din', 'दिन', 'roz', 'रोज़', 'per day']);
+        if (daily && has(t, ['no limit', 'no daily limit', 'remove', 'hatao'])) return { daily, amount: 0 };
+        const m = t.match(/(\d[\d,]*)/); return m ? { daily, amount: +m[1].replace(/,/g, '') } : null; },
+      run: async ({ daily, amount }) => {
+        if (daily) {
+          const opts = [0, 100, 500, 1000, 2000];
+          let pick = amount === 0 ? 0 : [...opts].reverse().find(o => o && o <= amount) || 100;
+          const prev = +state.daily, loosen = (pick === 0 && prev !== 0) || (prev !== 0 && pick > prev);
+          const note = amount && pick !== amount ? `There’s no ${fmt(amount)} option, so I picked ${fmt(pick)}. ` : '';
+          if (note) await V.say(note);
+          const sel = document.getElementById('daily'); sel.value = String(pick); sel.dispatchEvent(new Event('change'));
+          return loosen ? null : (pick ? `Daily limit is now ${fmt(pick)}.` : 'No daily limit.');
+        }
+        let idx = 0; PER_PAY.forEach((v, i) => { if (v <= amount) idx = i; });
+        const note = amount < PER_PAY[0] ? `The lowest limit is ${fmt(PER_PAY[0])}. ` : PER_PAY[idx] !== amount ? `There’s no ${fmt(amount)} option, so I picked ${fmt(PER_PAY[idx])}, the closest lower one. ` : '';
+        if (note) await V.say(note);
+        if (idx === state.perPay) return `Your payment limit is already ${fmt(PER_PAY[idx])}.`;
+        const raising = idx > state.perPay;
+        perPay.value = idx; perPay.dispatchEvent(new Event('input')); perPay.dispatchEvent(new Event('change'));
+        return raising ? null : `Payment limit is now ${fmt(PER_PAY[idx])}.`;
+      } },
+    { match: t => findApp(t),
+      run: ({ app, word }, t) => {
+        const rest = t.replace(word, ' ');
+        if (app.status !== 'now') {
+          const no = has(rest, ['dont need', 'don’t need', 'nahi chahiye', 'नहीं चाहिए', 'off', 'remove']);
+          const want = !no;
+          if (!!state.want[app.id] !== want) document.querySelector(`[data-want="${app.id}"]`).click();
+          return want ? `${app.name} isn’t available yet. I’ve noted that you need it.` : `Removed ${app.name} from your wish list.`;
+        }
+        const lv = LEVELS[app.kind], lvl = levelFor(app, rest);
+        if (lvl < 0) return `${app.name} is set to ${lv[state.apps[app.id] || 0]}. To change it, say ${app.name} ${lv.join(', or ')}.`;
+        if ((state.apps[app.id] || 0) === lvl) return `${app.name} is already set to ${lv[lvl]}.`;
+        setRadio(`app-${app.id}-${lvl}`);
+        return `${app.name}: ${lv[lvl]}.`;
+      } },
+    { match: t => has(t, ['remove', 'hatao', 'हटाओ']),
+      run: (m, t) => { const n = nameFrom(t).toLowerCase(); const i = state.trusted.findIndex(p => n && (p.name.toLowerCase().includes(n) || n.includes(p.name.toLowerCase().split(' ')[0]))); if (i < 0) return n ? `I couldn’t find ${n} in your trusted people.` : 'Who should I remove? Say remove, then the name.'; const name = state.trusted[i].name; peopleList.querySelectorAll('button')[i].click(); return `Removed ${name} from trusted people.`; } },
+    { match: t => has(t, ['add', 'trust', 'jodo', 'jod do', 'जोड़ो']),
+      run: (m, t) => { const name = nameFrom(t); if (!name) return 'Who should I add? Say add, then the name.'; const dup = state.trusted.find(p => p.name.toLowerCase() === name.toLowerCase() || p.name.toLowerCase().split(' ')[0] === name.toLowerCase()); if (dup) return `${dup.name} is already in your trusted people.`; document.getElementById('pName').value = name; document.getElementById('addPerson').requestSubmit(); return `Added ${name} to trusted people.`; } },
+    { match: t => has(t, ['warning', 'warn', 'chetavani', 'चेतावनी']),
+      run: (m, t) => { const on = !has(t, ['off', 'band', 'बंद', 'disable']); if (state.warnUnknown === on) return `The warning is already ${on ? 'on' : 'off'}.`; warn.click(); return on ? 'Warning for unknown people is on.' : null; } },
+    { match: t => { if (has(t, ['hinglish', 'mix'])) return 'mix'; if (has(t, ['hindi', 'हिंदी', 'हिन्दी'])) return 'hi'; if (has(t, ['english', 'angrezi', 'अंग्रेज़ी', 'इंग्लिश'])) return 'en'; return null; },
+      run: l => { setRadio('lang-' + l); return l === 'hi' ? 'अब साथी हिन्दी में बोलेगा।' : `Saathi will speak ${LANG_NAMES[l]}.`; } },
+    { match: t => { if (has(t, ['faster', 'tez', 'तेज़', 'तेज', 'jaldi'])) return 1; if (has(t, ['slower', 'dheere', 'धीरे', 'slow'])) return -1; if (has(t, ['normal speed', 'normal'])) return 9; return 0; },
+      run: d => { const next = d === 9 ? 2 : Math.max(0, Math.min(4, state.speed + d)); if (next === state.speed) return `Speed is already ${SPEEDS[next]}.`; speed.value = next; speed.dispatchEvent(new Event('input')); speed.dispatchEvent(new Event('change')); return `Speaking speed: ${SPEEDS[next]}.`; } },
+    { match: t => has(t, ['sample', 'namoona', 'नमूना', 'test voice']), run: () => { document.getElementById('sample').click(); return null; } },
+    { match: t => SECTIONS.find(s => has(t, s.words)),
+      run: s => { const title = goTo(s.id); const help = document.getElementById(s.id).closest('section').querySelector('.help'); return `${title}. ${help ? help.textContent.trim() : ''}`; } },
+  ]);
+  V.setHelp(() => 'You can say: WhatsApp read only. Google Pay off. Blinkit order. I need Uber. Set limit 500. Daily limit 1000. Add Rahul. Remove Rahul. Speak Hindi. Faster. Read my settings. Read history. Undo. Go to money limits. Or back to site.');
+})();
+</script>
+</body>
+</html>

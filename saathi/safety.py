@@ -21,7 +21,12 @@ from saathi.config import APP_ALIASES, ORDER_APPS, PAYMENT_APPS, WHATSAPP
 from saathi.device import Element, Screen
 
 PAY_REGEX = re.compile(r"(?i)\b(pay|send|proceed|confirm|place order)\b|भेजें|पे करें|भुगतान|₹")
-ORDER_REGEX = re.compile(r"(?i)place order|\bpay\b|slide to pay|ऑर्डर करें")
+# Checkout buttons = the stop-and-confirm point. "Select Payment Method" is Blinkit's checkout
+# button when no payment method is saved (seen on device, 12 Oct).
+ORDER_REGEX = re.compile(r"(?i)place order|\bpay\b|slide to pay|select payment method|ऑर्डर करें")
+# Generic words also used on non-order screens (Blinkit's location sheet has "Proceed"):
+# only a checkout when a ₹ amount is on screen.
+ORDER_GENERIC_REGEX = re.compile(r"(?i)\b(proceed|checkout|continue)\b")
 SECRET_REGEX = re.compile(r"(?i)\b(pin|otp|password|passcode|cvv|mpin)\b|पिन|ओटीपी|पासवर्ड")
 PIN_SCREEN_REGEX = re.compile(r"(?i)upi pin|enter (your )?pin|enter mpin|पिन (डालें|दर्ज)|यूपीआई पिन")
 CAPTCHA_REGEX = re.compile(r"(?i)captcha|i'?m not a robot|verify you are human")
@@ -75,6 +80,19 @@ _AMOUNT_SPOKEN = re.compile(
 )
 
 
+_QUANTITY_SPOKEN = re.compile(
+    r"([^\s,.:।]+)\s*(?:packets?|packs?|pcs|pieces?|bottles?|पैकेट|बोतल)", re.IGNORECASE
+)
+ADD_BUTTON_REGEX = re.compile(r"(?i)^(add|\+|add to cart|increase quantity|जोड़ें)$")
+
+
+def is_add_button(e: Element, package: str) -> bool:
+    """A Blinkit-style ADD / + button that puts one more item in the cart."""
+    return package in ORDER_APPS and bool(
+        ADD_BUTTON_REGEX.match(e.text.strip()) or ADD_BUTTON_REGEX.match(e.desc.strip())
+    )
+
+
 @dataclass
 class CommandContext:
     """Payee / recipient and amount extracted from the utterance, before any screen is seen.
@@ -84,6 +102,8 @@ class CommandContext:
     command: str
     names: list[str] = field(default_factory=list)
     amount: int | None = None
+    quantity: int = 1  # items to add to a cart ("2 packet"); sizes like "1 litre" don't count
+    items_added: int = 0  # updated by the agent after each executed ADD / + tap
 
     @classmethod
     def from_utterance(cls, command: str) -> "CommandContext":
@@ -93,7 +113,12 @@ class CommandContext:
         if m:
             tok = m.group(1).lower()
             amount = int(tok) if tok.isdigit() else _NUMBER_WORDS.get(tok)
-        return cls(command=command, names=names, amount=amount)
+        quantity = 1
+        q = _QUANTITY_SPOKEN.search(command)
+        if q:
+            tok = q.group(1).lower()
+            quantity = int(tok) if tok.isdigit() else _NUMBER_WORDS.get(tok, 1)
+        return cls(command=command, names=names, amount=amount, quantity=max(1, quantity))
 
 
 def payee_matches(ctx: CommandContext, on_screen: str) -> bool:
@@ -162,6 +187,15 @@ def is_captcha(screen: Screen) -> bool:
     return any(CAPTCHA_REGEX.search(t) for t in _screen_texts(screen))
 
 
+_QUOTED = re.compile(r'["“”]([^"“”]{2,})["“”]')
+
+
+def ungrounded_quotes(summary: str, screen: Screen) -> list[str]:
+    """R4 for read-outs: text Saathi quotes to the user must be verbatim on screen."""
+    texts = _screen_texts(screen)
+    return [q for q in _QUOTED.findall(summary) if not any(q.strip() in t for t in texts)]
+
+
 def grounded(parts: list[str], screen: Screen) -> bool:
     """R4: every read-back string must appear verbatim in the current screen."""
     texts = _screen_texts(screen)
@@ -221,6 +255,9 @@ def _payment(screen: Screen, ctx: CommandContext, cap: int) -> Verdict:
 TOTAL_REGEX = re.compile(r"(?i)grand total|to pay|total|bill|कुल")
 
 
+ITEM_COUNT_REGEX = re.compile(r"(?i)\b\d+\s+items?\b")
+
+
 def _order(screen: Screen) -> Verdict:
     """R3 (+R4): read back the order total, verbatim from the screen. Prefers a text labelled
     total / to pay; otherwise the largest ₹ amount on screen (never a single item price)."""
@@ -233,7 +270,11 @@ def _order(screen: Screen) -> Verdict:
     total = (labelled or sorted(texts, key=value, reverse=True) or [""])[0]
     if not total:
         return Verdict("block", "R3", "कुल रकम स्क्रीन पर नहीं दिखी, मैं रुक रहा हूँ।")
-    return Verdict("hold", "R3", readback=f"ऑर्डर: {total}. ऑर्डर कर दूँ?")
+    count = next(
+        (m.group(0) for t in _screen_texts(screen) for m in [ITEM_COUNT_REGEX.search(t)] if m), ""
+    )
+    what = f"{count}, {total}" if count and count not in total else total
+    return Verdict("hold", "R3", readback=f"ऑर्डर: {what}. ऑर्डर कर दूँ?")
 
 
 # -- the gate ------------------------------------------------------------------------------
@@ -279,8 +320,14 @@ def check(
             return _whatsapp_send(screen, ctx)
         if screen.package in PAYMENT_APPS and PAY_REGEX.search(label):
             return _payment(screen, ctx, cap)
-        if screen.package in ORDER_APPS and ORDER_REGEX.search(label):
+        if screen.package in ORDER_APPS and (
+            ORDER_REGEX.search(label)
+            or (ORDER_GENERIC_REGEX.search(label) and screen_amounts(screen))
+        ):
             return _order(screen)
+        # R3: never put more in the cart than the user asked for.
+        if is_add_button(target, screen.package) and ctx.items_added >= ctx.quantity:
+            return Verdict("block", "R3", f"{ctx.items_added} आइटम जोड़ दिया है, अब कार्ट खोल रहा हूँ।")
         if (
             screen.package in PERMISSION_PACKAGES or target.rid.startswith("permission_allow")
         ) and PERMISSION_ALLOW_REGEX.search(label):

@@ -311,6 +311,9 @@
   .f3 { background: var(--marigold); }
   .f4 { background: var(--pink); color: #fff; } .f4 .then { border-top-color: rgba(255,255,255,.35); } .f4 .badge { background: rgba(255,255,255,.2); color: #fff; }
 
+  .more-apps { margin: 26px 0 0; color: var(--ink-2); }
+  .more-apps a { color: var(--blue); font-weight: 600; }
+
   /* numbers */
   .bars { display: grid; gap: 22px; max-width: 900px; }
   .bar-row { display: grid; grid-template-columns: 220px 1fr 72px; gap: 18px; align-items: center; }
@@ -386,6 +389,8 @@
       <a href="#demo">Demo</a>
       <a href="#safety">Safety</a>
       <a href="#how">How it works</a>
+      <a href="settings.html">Settings</a>
+      <a href="activity.html">Activity</a>
       <button class="btn light" id="listen" aria-pressed="false" aria-label="Listen to this page">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
         <span>Listen to this page</span>
@@ -705,6 +710,7 @@
           <p class="then">One sentence about the screen, plus the three most useful things you can do there.</p>
         </article>
       </div>
+      <p class="more-apps rv">Coming later: PhonePe, BHIM, calls, SMS, cabs, trains, medicines, food delivery and more. <a href="settings.html#apps">See every app and choose what Saathi can do →</a></p>
     </div>
   </section>
 
@@ -1079,6 +1085,60 @@
   ScrollTrigger.sort();
   ScrollTrigger.refresh();
   window.addEventListener('load', () => ScrollTrigger.refresh());
+})();
+</script>
+<script src="voice.js"></script>
+<script>
+/* Voice commands for this page (see voice.js). */
+(() => {
+  const V = window.SaathiVoice;
+  if (!V) return;
+  const { has, goTo } = V;
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const lede = id => { const sec = document.getElementById(id).closest('section'); const l = sec.querySelector('.lede'); if (l) return ' ' + l.textContent.trim(); const st = sec.querySelectorAll('.steps-list li'); return st.length ? ' ' + [...st].map(li => li.querySelector('h3').textContent + ': ' + li.querySelector('p').textContent).join(' ') : ''; };
+  const stageText = () => { const st = document.getElementById('stage'); return [...st.querySelectorAll('.who, .en, .why')].map(n => n.textContent.trim()).join('. '); };
+  const SECTIONS = [
+    { words: ['safety', 'suraksha', 'सुरक्षा', 'gate', 'rules', 'niyam', 'नियम'], id: 'safety-h' },
+    { words: ['how it works', 'how does it work', 'kaise', 'कैसे'], id: 'how-h' },
+    { words: ['problem', 'samasya', 'समस्या'], id: 'problem-h' },
+    { words: ['who is it for', 'who it is for', 'who it’s for', 'kiske liye', 'किसके लिए', 'photo'], id: 'who-h' },
+    { words: ['what can i ask', 'what can i say to saathi', 'apps', 'jobs', 'tasks', 'kaam'], id: 'flows-h' },
+    { words: ['results', 'numbers', 'tested', 'testing', 'score'], id: 'num-h' },
+    { words: ['built with', 'technology', 'stack', 'tech'], id: 'stack-h' },
+    { words: ['demo', 'walkthrough', 'payment demo'], id: 'demo-h' },
+  ];
+  const TRY = [['open', 0], ['search', 1], ['pay', 2], ['pin', 3], ['message', 4], ['send', 4], ['delete', 5]];
+
+  document.addEventListener('saathi-voice-stop', () => {
+    const p = document.getElementById('play');
+    if (p.getAttribute('aria-pressed') === 'true') p.click();
+  });
+
+  V.register([
+    { match: t => has(t, ['settings', 'setting', 'सेटिंग', 'सेटिंग्स', 'permissions', 'permission']),
+      run: () => { setTimeout(() => { location.href = 'settings.html'; }, 1300); return 'Opening settings.'; } },
+    { match: t => has(t, ['play', 'chalao', 'चलाओ', 'शुरू', 'eyes closed', 'aankh band', 'आँख बंद']),
+      run: async () => { goTo('demo-h'); await wait(800); const p = document.getElementById('play'); if (p.getAttribute('aria-pressed') !== 'true') p.click(); return null; } },
+    { match: t => { const m = t.match(/(?:step|kadam|स्टेप|कदम)\s*(\d)/); return m ? +m[1] : 0; },
+      run: n => { const b = document.querySelectorAll('#progress button')[n - 1]; if (!b) return 'There are nine steps. Say a number from one to nine.'; goTo('demo-h'); b.click(); return `Step ${n}. ` + stageText(); } },
+    { match: t => has(t, ['next', 'agla', 'aage', 'अगला', 'आगे']),
+      run: () => { document.getElementById('next').click(); return stageText(); } },
+    { match: t => has(t, ['previous', 'back', 'pichla', 'peeche', 'पिछला', 'पीछे']),
+      run: () => { document.getElementById('prev').click(); return stageText(); } },
+    { match: t => { if (!has(t, ['try', 'what if', 'what happens', 'kya hoga', 'क्या होगा', 'agar'])) return 0; for (const [w, i] of TRY) if (t.includes(w)) return i + 1; return 0; },
+      run: async n => { goTo('safety-h'); await wait(700); document.querySelectorAll('.try-btns button[data-i]')[n - 1].click(); const res = document.getElementById('tryResult'); for (let i = 0; i < 24 && res.hidden; i++) await wait(250); return res.hidden ? 'Look at the safety gate on screen to see the result.' : res.innerText.replace(/\s*\n+\s*/g, '. '); } },
+    { match: t => has(t, ['hear it', 'hear it in hindi', 'hindi mein suno', 'sunao', 'सुनाओ']),
+      run: () => { document.getElementById('hear').click(); return null; } },
+    { match: t => has(t, ['read the page', 'read this page', 'read page', 'page padho', 'padho', 'पढ़ो']),
+      run: () => { document.getElementById('listen').click(); return null; } },
+    { match: t => has(t, ['top', 'go to top', 'beginning', 'shuru se', 'शुरू से']),
+      run: () => { scrollTo({ top: 0, behavior: 'smooth' }); const h = document.getElementById('h1'); h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); return 'Top of the page. ' + h.textContent.replace(/\s+/g, ' ').trim(); } },
+    { match: t => has(t, ['bottom', 'end', 'footer', 'aakhir', 'आख़िर']),
+      run: () => { document.querySelector('footer').scrollIntoView({ behavior: 'smooth' }); return 'End of the page. Saathi means companion in Hindi.'; } },
+    { match: t => SECTIONS.find(s => has(t, s.words)),
+      run: s => { const title = goTo(s.id); return title + '.' + lede(s.id); } },
+  ]);
+  V.setHelp(() => 'You can say: play the demo, next, back, or step five. Go to safety, how it works, or the problem. Try pay, or try PIN, to test the safety gate. Open settings. Read this page. Scroll down. Or stop.');
 })();
 </script>
 </body>
