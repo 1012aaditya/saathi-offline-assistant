@@ -35,6 +35,7 @@ def is_unread_query(command: str) -> bool:
 class UnreadState:
     filter_turned_on: bool = False  # we switched the filter on and must switch it off
     summary: str = ""
+    restore_taps: int = 0
 
 
 def _filter(screen: Screen) -> Element | None:
@@ -82,10 +83,13 @@ def unread_next(screen: Screen, st: UnreadState) -> Action | None:
     if not _on_chat_list(screen):
         return Back()  # inside a chat / contact info / search: back out to the list
     chip = _filter(screen)
-    if st.summary:  # already read: restore the filter, then finish
+    if st.summary:  # already read: restore the filters, then finish
         if st.filter_turned_on and chip is not None and _filter_selected(chip):
-            st.filter_turned_on = False
-            return Tap(index=chip.index)
+            # Filters are a radio group: tapping Unread again doesn't clear it; tap "All".
+            all_chip = next((e for e in screen.elements if e.desc.startswith("All filter")), None)
+            if all_chip is not None and st.restore_taps < 2:
+                st.restore_taps += 1
+                return Tap(index=all_chip.index)
         return Done(summary=st.summary)
     if chip is not None and not _filter_selected(chip):
         st.filter_turned_on = True

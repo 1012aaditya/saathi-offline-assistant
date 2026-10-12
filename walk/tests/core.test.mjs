@@ -79,7 +79,7 @@ test("phrases are short, name the object and the distance, and use the right gen
   assert.equal(phraseFor("Door", "center", 1, false, "लगभग 3 मीटर"), "सामने दरवाज़ा, लगभग 3 मीटर");
   assert.equal(phraseFor("car", "left", 2, true, "लगभग 6 मीटर"), "बाईं ओर गाड़ी पास आ रही है, लगभग 6 मीटर");
   assert.equal(phraseFor("truck", "center", 2, true, "लगभग 7 मीटर"), "सामने ट्रक पास आ रहा है, लगभग 7 मीटर");
-  assert.equal(phraseFor("chair", "center", 3, false, "1 मीटर से कम"), "रुकिए! सामने कुर्सी, 1 मीटर से कम");
+  assert.equal(phraseFor("chair", "center", 3, false, "1 मीटर से कम"), "रुकिए! सामने कुर्सी"); // stop level: shortest line
   for (const label of LABELS) assert.ok(phraseFor(label, "right", 2, true, meters(2.6, true)).split(" ").length <= 12);
 });
 
@@ -137,9 +137,12 @@ test("tracker drops unknown labels and forgets objects that disappear", () => {
   assert.equal(updateTracks(tracker, [], 3000).length, 0);
 });
 
-test("a single-frame detection is not announced (flicker filter)", () => {
-  const tracks = updateTracks(createTracker(), [det("car", 0.5, 0.7)], 0);
-  assert.equal(pickAlert(tracks, 0, createAnnouncer()), null);
+test("a single-frame detection is not announced unless it is at stop distance (flicker filter)", () => {
+  const far = updateTracks(createTracker(), [det("car", 0.5, 0.12)], 0);
+  assert.equal(pickAlert(far, 0, createAnnouncer()), null);
+  const near = updateTracks(createTracker(), [det("car", 0.5, 0.7)], 0);
+  const alert = pickAlert(near, 0, createAnnouncer());
+  assert.ok(alert && alert.level === 3, "a very close object is spoken on its first frame");
 });
 
 test("a door ahead is announced with its distance", () => {
@@ -205,4 +208,116 @@ test("health: a stalled or covered camera is announced, and repeated", () => {
   assert.equal(checkHealth(h, { now: 5000, lastFrameAt: 1000, brightness: 0.5 }), PHRASES.stall);
   assert.equal(checkHealth(h, { now: 6000, lastFrameAt: 1000, brightness: 0.5 }), null); // not every tick
   assert.equal(checkHealth(h, { now: 14000, lastFrameAt: 13900, brightness: 0.02 }), PHRASES.dark);
+});
+
+
+// ---- steering hints ----
+import { steerHint, STEER } from "../core.js";
+
+const trk = (zone, dist, extra = {}) => ({ zone, dist, hits: 5, level: 2, ...extra });
+
+test("steer: ahead + close, left empty -> suggest left", () => {
+  const best = trk("center", 1.2, { level: 3 });
+  assert.equal(steerHint([best, trk("right", 2)], best), STEER.left);
+});
+
+test("steer: ahead + close, right farther than margin -> suggest right", () => {
+  const best = trk("center", 1, { level: 3 });
+  assert.equal(steerHint([best, trk("left", 1.5), trk("right", 6)], best), STEER.right);
+});
+
+test("steer: both sides blocked -> say so", () => {
+  const best = trk("center", 1, { level: 3 });
+  assert.equal(steerHint([best, trk("left", 1.2), trk("right", 1.4)], best), STEER.both);
+});
+
+test("steer: nothing seen on either side -> no guess", () => {
+  const best = trk("center", 1, { level: 3 });
+  assert.equal(steerHint([best], best), "");
+});
+
+test("steer: only for things ahead and at warn level or above", () => {
+  assert.equal(steerHint([trk("left", 1)], trk("left", 1, { level: 3 })), "");
+  assert.equal(steerHint([], trk("center", 2.5, { level: 1 })), "");
+});
+
+test("steer hints never claim a way is clear or safe", () => {
+  const banned = ["साफ", "सुरक्षित", "safe", "clear", "चलिए", "पार"];
+  for (const line of Object.values(STEER)) for (const b of banned) assert.ok(!line.includes(b), line);
+});
+
+
+// ---- slow devices ----
+import { createTracker as mkTracker, updateTracks as upd, MIN_HITS as MH } from "../core.js";
+
+test("slow device (1 frame/s): an object seen every frame is kept and confirmed", () => {
+  const tr = mkTracker();
+  const chair = { label: "chair", x: 0.4, y: 0.3, w: 0.2, h: 0.5 };
+  let tracks = [];
+  for (let i = 0; i < 4; i++) tracks = upd(tr, [chair], 1000 + i * 1100);
+  assert.equal(tracks.length, 1);
+  assert.ok(tracks[0].hits >= MH);
+});
+
+// ---- looming (walls and unnamed obstacles) + lost-while-close ----
+import { LOOM, LOOM_PHRASES, createLoom, expansion, updateLoom } from "../core.js";
+import { createTracker as mkT2, updateTracks as upd2, pickAlert as pick2, createAnnouncer as mkAnn2 } from "../core.js";
+
+/** Textured synthetic scene, zoomed by `s` about the centre (s > 1 = closer). */
+function scene(s = 1, flat = false) {
+  const { w, h } = LOOM;
+  const g = new Float32Array(w * h);
+  const cx = (w - 1) / 2, cy = (h - 1) / 2;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const u = cx + (x - cx) / s, v = cy + (y - cy) / s;
+      g[y * w + x] = flat ? 128 + (x % 2) : 128 + 60 * Math.sin(u / 2.3) * Math.cos(v / 3.1) + 30 * Math.sin((u + v) / 1.7);
+    }
+  return g;
+}
+
+test("looming: a zooming-in scene reads as getting closer, a still one doesn't", () => {
+  assert.ok(expansion(scene(1), scene(1.05), LOOM.w, LOOM.h) > 1.02);
+  assert.equal(expansion(scene(1), scene(1), LOOM.w, LOOM.h), 1);
+});
+
+test("looming: walking fast at a surface escalates warn -> stop", () => {
+  const st = createLoom();
+  let out = [];
+  let s = 1;
+  for (let i = 0; i < 6; i++) {
+    out.push(updateLoom(st, scene(s), i * 250)); // 4 frames/s, 10 % closer per frame ≈ TTC 2.5 s
+    s *= 1.1;
+  }
+  const spoken = out.filter(Boolean);
+  assert.ok(spoken.length >= 1, "warned");
+  assert.ok(spoken.some((a) => a.text === LOOM_PHRASES.stop || a.text === LOOM_PHRASES.warn));
+});
+
+test("looming: standing still stays quiet", () => {
+  const st = createLoom();
+  for (let i = 0; i < 6; i++) assert.equal(updateLoom(st, scene(1), i * 250), null);
+});
+
+test("looming: a plain, featureless close surface is flagged as a possible wall", () => {
+  const st = createLoom();
+  const res = [0, 1, 2, 3].map((i) => updateLoom(st, scene(1, true), i * 250));
+  assert.ok(res.some((r) => r && r.text === LOOM_PHRASES.wall));
+});
+
+test("a close door that drops out of detection still gets a stop warning", () => {
+  const tr = mkT2();
+  const door = { label: "Door", x: 0.3, y: 0.0, w: 0.4, h: 0.99 }; // fills the frame, ahead
+  let tracks = [];
+  for (let i = 0; i < 3; i++) tracks = upd2(tr, [door], i * 300);
+  const ann = mkAnn2();
+  pick2(tracks, 900, ann); // normal warning
+  for (let i = 0; i < 4; i++) tracks = upd2(tr, [], 3000 + i * 1000); // model loses it
+  const a = pick2(tracks, 7000, ann);
+  assert.ok(a && a.level === 3 && a.text.includes("बहुत पास"), JSON.stringify(a));
+});
+
+test("looming phrases never claim a way is clear or safe", () => {
+  const banned = ["साफ", "सुरक्षित", "safe", "clear", "चलिए", "पार"];
+  for (const line of Object.values(LOOM_PHRASES)) for (const b of banned) assert.ok(!line.includes(b), line);
 });

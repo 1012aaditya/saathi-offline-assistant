@@ -63,10 +63,12 @@ export const FOCAL_PER_DIAGONAL = 0.6;
 export const APPROACH_RATE = 0.3; // box-height growth per second that counts as "getting closer"
 export const FAST_APPROACH_RATE = 0.8; // a vehicle growing this fast is a stop warning
 export const MIN_HITS = 2; // frames an object must be seen before we speak (filters flicker)
-export const TRACK_TTL_MS = 1200; // forget an object not seen for this long
+export const TRACK_TTL_MS = 1200; // forget an object not seen for this long (and missed in 2 frames)
+export const MAX_UNSEEN_MS = 2500; // always forget after this, however slow the frames are
 export const HISTORY_MS = 1500; // size history used for the approach rate
+const HISTORY_MS_SLOW = 3000; // keep >= 2 samples at ~1 frame/s so "getting closer" still works
 export const REPEAT_MS = { 1: 20000, 2: 5000, 3: 2500 }; // re-announce the same object at the same level
-export const UPDATE_MS = 4000; // re-announce sooner when its distance bucket shrank
+export const UPDATE_MS = 1500; // re-announce this soon when it got noticeably closer (was 4 s)
 export const GAP_MS = 1500; // min gap between two announcements of equal or lower level
 
 export const PHRASES = {
@@ -76,6 +78,8 @@ export const PHRASES = {
   dark: "सावधान! कैमरा ढका है या अंधेरा है।",
   loadFailed: "चलना मोड चालू नहीं हो पाया।",
   noCamera: "कैमरा नहीं मिला। अनुमति दीजिए।",
+  // Said in English with any available voice when the phone has no Hindi voice (else: silence).
+  noHindiVoice: "Hindi voice missing. Please install Google Hindi text to speech.",
 };
 
 export function zoneOf(box) {
@@ -166,13 +170,38 @@ export function levelOf(kind, zone, dist, rate) {
 export function phraseFor(label, zone, level, approaching, distText) {
   const o = OBJECTS[label];
   const where = WHERE[zone];
-  if (level >= 3) return `रुकिए! ${where} ${o.word}, ${distText}`;
+  if (level >= 3) return `रुकिए! ${where} ${o.word}`; // short: it's already very close
   if (level === 2 && approaching) return `${where} ${o.word} पास आ ${o.fem ? "रही" : "रहा"} है, ${distText}`;
   return `${where} ${o.word}, ${distText}`;
 }
 
+/**
+ * Which way has less in it? Only when something is ahead and close (level >= 2): compare the
+ * nearest tracked object on the left and the right. Relative wording only — the camera can't
+ * see kerbs, potholes or wires, so this never says a side is clear or safe.
+ */
+export const STEER = {
+  left: "बाईं ओर कम रुकावट।",
+  right: "दाईं ओर कम रुकावट।",
+  both: "दोनों तरफ़ भी रुकावट।",
+};
+export const STEER_MARGIN_M = 1.5; // a side must be this much emptier to be suggested
+
+export function steerHint(tracks, best) {
+  if (!best || best.zone !== "center" || best.level < 2) return "";
+  const nearest = (zone) =>
+    Math.min(Infinity, ...tracks.filter((t) => t.zone === zone && t.hits >= MIN_HITS).map((t) => t.dist));
+  const left = nearest("left");
+  const right = nearest("right");
+  const near = Math.max(best.dist, 1) + STEER_MARGIN_M;
+  if (left < near && right < near) return STEER.both;
+  if (left === right) return ""; // nothing seen on either side: don't guess
+  const side = left > right ? "left" : "right";
+  return Math.max(left, right) >= near ? STEER[side] : "";
+}
+
 export function createTracker() {
-  return { tracks: [], nextId: 1 };
+  return { tracks: [], nextId: 1, lostClose: [] };
 }
 
 /**
@@ -205,9 +234,22 @@ export function updateTracks(tracker, dets, now, aspect = 0.75) {
       tracker.tracks.push(best);
     }
     best.hist.push({ t: now, s: box.h });
-    best.hist = best.hist.filter((h) => now - h.t <= HISTORY_MS);
+    best.hist = best.hist.filter((h) => now - h.t <= HISTORY_MS_SLOW);
   }
-  tracker.tracks = tracker.tracks.filter((t) => now - t.lastSeen <= TRACK_TTL_MS);
+  // Slow phones run ~1 frame/s: a fixed 1.2 s memory forgot objects between frames, so they
+  // never reached MIN_HITS (seen on a Galaxy Tab, 13 Oct). Forget after TTL only once the
+  // object has also been missed in 2 frames, and always after MAX_UNSEEN_MS.
+  tracker.lastUpdate = now;
+  for (const t of tracker.tracks) t.missed = t.lastSeen === now ? 0 : (t.missed ?? 0) + 1;
+  const kept = [];
+  for (const t of tracker.tracks) {
+    const unseen = now - t.lastSeen;
+    if (unseen <= TRACK_TTL_MS || (t.missed < 2 && unseen <= MAX_UNSEEN_MS)) kept.push(t);
+    // Close and ahead, then gone: usually it now fills the frame and the model can't see it.
+    // That's the most dangerous moment to go quiet (seen with doors, 13 Oct).
+    else if (t.zone === "center" && t.dist <= DIST[t.kind].warn && t.hits >= MIN_HITS) tracker.lostClose.push(t);
+  }
+  tracker.tracks = kept;
   for (const t of tracker.tracks) {
     t.zone = zoneOf(t.box);
     t.clipped = isClipped(t.box);
@@ -217,8 +259,11 @@ export function updateTracks(tracker, dets, now, aspect = 0.75) {
     t.approaching = t.rate >= APPROACH_RATE;
     t.level = t.lastSeen === now ? levelOf(t.kind, t.zone, t.dist, t.rate) : 0;
   }
+  tracker.tracks.lostClose = tracker.lostClose;
   return tracker.tracks;
 }
+
+const tracker_lost = (tracks) => tracks.lostClose ?? [];
 
 export function createAnnouncer() {
   return { lastAt: -Infinity, lastLevel: 0 };
@@ -233,11 +278,20 @@ export function pickAlert(tracks, now, ann, busyLevel = 0) {
   let best = null;
   for (const t of tracks) {
     if (t.level < t.announcedLevel && now - t.announcedAt > 3000) t.announcedLevel = t.level; // allow re-escalation
-    if (t.level < 1 || t.hits < MIN_HITS || t.level <= busyLevel) continue;
-    const closer = t.dist < t.announcedDist * 0.7 && now - t.announcedAt > UPDATE_MS;
+    // "Stop"-level objects are spoken on their first frame: a late warning is worse than a rare
+    // false one when someone is walking. Everything else waits for MIN_HITS (flicker filter).
+    if (t.level < 1 || t.hits < (t.level >= 3 ? 1 : MIN_HITS) || t.level <= busyLevel) continue;
+    const closer = t.dist < t.announcedDist * 0.8 && now - t.announcedAt > UPDATE_MS;
     const due = t.level > t.announcedLevel || closer || now - t.announcedAt > REPEAT_MS[t.level];
     if (!due) continue;
     if (!best || t.level > best.level || (t.level === best.level && t.dist < best.dist)) best = t;
+  }
+  if (!best && tracker_lost(tracks).length) {
+    const t = tracker_lost(tracks).shift();
+    tracks.lostClose.length = 0;
+    ann.lastAt = now;
+    ann.lastLevel = 3;
+    return { id: t.id, level: 3, text: `रुकिए! ${OBJECTS[t.label].word} बहुत पास है`, interrupt: true };
   }
   if (!best) return null;
   if (now - ann.lastAt < GAP_MS && best.level <= ann.lastLevel) return null;
@@ -246,10 +300,12 @@ export function pickAlert(tracks, now, ann, busyLevel = 0) {
   best.announcedDist = best.dist;
   ann.lastAt = now;
   ann.lastLevel = best.level;
+  const hint = steerHint(tracks, best);
+  const line = phraseFor(best.label, best.zone, best.level, best.approaching, best.distText);
   return {
     id: best.id,
     level: best.level,
-    text: phraseFor(best.label, best.zone, best.level, best.approaching, best.distText),
+    text: hint ? `${line}। ${hint}` : line,
     interrupt: best.level >= 3,
   };
 }
@@ -271,3 +327,98 @@ export function checkHealth(h, { now, lastFrameAt, brightness }) {
   h.lastWarnAt = now;
   return PHRASES[problem];
 }
+
+
+// ---------- looming: "something is getting closer", for things the models have no name for ----------
+// Walls, pillars, big boxes. Compare each small grey frame with the previous one: if the picture is
+// zooming in, the camera is moving towards a surface. Time to contact ≈ dt / (scale − 1).
+
+export const LOOM = {
+  w: 80, h: 60,
+  scales: [1, 1.01, 1.02, 1.035, 1.05, 1.07, 1.1, 1.14],
+  minGain: 0.08, // best zoom must beat "no zoom" by 8 % (noise filter)
+  ttcWarn: 2.5, ttcStop: 1.2, // seconds to contact
+  streak: 2, // frames in a row before speaking
+  flatStd: 7, flatFrames: 3, // a close plain wall: almost no texture, light is fine
+  repeatMs: 2500,
+};  // fmt: skip
+
+export const LOOM_PHRASES = {
+  warn: "सावधान! सामने कोई चीज़ पास है।",
+  stop: "रुकिए! सामने कुछ बहुत पास है।",
+  wall: "रुकिए! सामने दीवार या बड़ी सतह हो सकती है।",
+};
+
+/** RGBA pixels → grey Float32Array (0..255). */
+export function toGray(rgba, w, h) {
+  const g = new Float32Array(w * h);
+  for (let i = 0, p = 0; i < g.length; i++, p += 4) g[i] = 0.299 * rgba[p] + 0.587 * rgba[p + 1] + 0.114 * rgba[p + 2];
+  return g;
+}
+
+export function stdOf(g) {
+  let m = 0;
+  for (const v of g) m += v;
+  m /= g.length;
+  let v2 = 0;
+  for (const v of g) v2 += (v - m) * (v - m);
+  return Math.sqrt(v2 / g.length);
+}
+
+/** Mean abs difference between cur and prev zoomed by s about the centre (central 70 % only). */
+export function zoomError(prev, cur, w, h, s) {
+  const cx = (w - 1) / 2, cy = (h - 1) / 2;
+  let sum = 0, n = 0;
+  for (let y = Math.floor(h * 0.15); y < h * 0.85; y++) {
+    for (let x = Math.floor(w * 0.15); x < w * 0.85; x++) {
+      const px = cx + (x - cx) / s, py = cy + (y - cy) / s;
+      const x0 = Math.floor(px), y0 = Math.floor(py), fx = px - x0, fy = py - y0;
+      const i = y0 * w + x0;
+      const v = (prev[i] * (1 - fx) + prev[i + 1] * fx) * (1 - fy) + (prev[i + w] * (1 - fx) + prev[i + w + 1] * fx) * fy;
+      sum += Math.abs(cur[y * w + x] - v);
+      n++;
+    }
+  }
+  return sum / n;
+}  // fmt: skip
+
+/** Best zoom factor (>1 = getting closer), or 1 when the evidence is weak. */
+export function expansion(prev, cur, w, h) {
+  const base = zoomError(prev, cur, w, h, 1);
+  let best = 1, bestErr = base;
+  for (const s of LOOM.scales.slice(1)) {
+    const e = zoomError(prev, cur, w, h, s);
+    if (e < bestErr) [best, bestErr] = [s, e];
+  }
+  return bestErr < base * (1 - LOOM.minGain) ? best : 1;
+}  // fmt: skip
+
+export function createLoom() {
+  return { prev: null, prevAt: 0, streak: 0, flat: 0, lastAt: -Infinity, lastLevel: 0 };
+}
+
+/**
+ * Feed one small grey frame. Returns {level, text} to speak, or null.
+ * brightOk: false when the camera is dark/covered (the health check speaks for that).
+ */
+export function updateLoom(st, gray, now, brightOk = true) {
+  const { w, h } = LOOM;
+  let level = 0, text = "";
+  const flat = brightOk && stdOf(gray) < LOOM.flatStd;
+  st.flat = flat ? st.flat + 1 : 0;
+  if (st.prev && !flat) {
+    const dt = (now - st.prevAt) / 1000;
+    const s = expansion(st.prev, gray, w, h);
+    const ttc = s > 1 && dt > 0 ? dt / (s - 1) : Infinity;
+    st.streak = ttc <= LOOM.ttcWarn ? st.streak + 1 : 0;
+    if (st.streak >= LOOM.streak) [level, text] = ttc <= LOOM.ttcStop ? [3, LOOM_PHRASES.stop] : [2, LOOM_PHRASES.warn];
+  }
+  if (st.flat >= LOOM.flatFrames) [level, text] = [3, LOOM_PHRASES.wall];
+  st.prev = gray;
+  st.prevAt = now;
+  if (!level) return null;
+  if (now - st.lastAt < LOOM.repeatMs && level <= st.lastLevel) return null;
+  st.lastAt = now;
+  st.lastLevel = level;
+  return { level, text };
+}  // fmt: skip

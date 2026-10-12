@@ -1,9 +1,52 @@
 /* YOLOv8 ONNX models in the browser via onnxruntime-web.
    Video frame → letterboxed square tensor → boxes for the classes walk mode cares about. */
 
-import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.all.min.mjs";
+// Self-hosted (vendor/, from the npm package onnxruntime-web@1.20.1, integrity-checked):
+// multi-threaded WASM needs same-origin worker scripts and a cross-origin-isolated page.
+import * as ort from "./vendor/ort.all.min.mjs";
 
-ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+ort.env.wasm.wasmPaths = new URL("./vendor/", import.meta.url).href;
+// Measured on a Galaxy Tab S6 Lite (13 Oct): 1 thread ≈ 1 s per frame. Use up to 4 cores.
+ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
+
+/** Run a few dummy frames on each backend and keep the faster one (cached per device). */
+async function fastestSession(modelUrl, size) {
+  const key = `walk-backend:${modelUrl}:${ort.env.wasm.numThreads}`;
+  let cached = null;
+  try {
+    cached = localStorage.getItem(key);
+  } catch {}
+  const order = cached ? [cached] : ["webgpu", "wasm"];
+  const dummy = new ort.Tensor("float32", new Float32Array(3 * size * size).fill(0.5), [1, 3, size, size]);
+  let best = null;
+  for (const ep of order) {
+    let s;
+    try {
+      s = await ort.InferenceSession.create(modelUrl, { executionProviders: [ep] });
+    } catch (e) {
+      console.warn(`onnxruntime ${ep} unavailable`, e);
+      continue;
+    }
+    const feeds = { [s.inputNames[0]]: dummy };
+    await s.run(feeds); // warm-up (shader compile / allocation)
+    const t0 = performance.now();
+    await s.run(feeds);
+    await s.run(feeds);
+    const ms = (performance.now() - t0) / 2;
+    if (!best || ms < best.ms) {
+      await best?.session.release?.();
+      best = { session: s, backend: ep, ms };
+    } else {
+      await s.release?.();
+    }
+  }
+  if (best && !cached) {
+    try {
+      localStorage.setItem(key, best.backend);
+    } catch {}
+  }
+  return best;
+}
 
 /**
  * names: class index → class name. wanted: names to keep.
@@ -12,18 +55,10 @@ ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/di
 export async function createDetector(modelUrl, names, wanted, { size = 416, threshold = 0.3 } = {}) {
   const SIZE = size; // must match the size the model was exported at
   const keep = names.map((n, i) => (wanted.has(n) ? i : -1)).filter((i) => i >= 0);
-  let session = null;
-  let backend = "";
-  for (const ep of ["webgpu", "wasm"]) {
-    try {
-      session = await ort.InferenceSession.create(modelUrl, { executionProviders: [ep] });
-      backend = ep;
-      break;
-    } catch (e) {
-      console.warn(`onnxruntime ${ep} unavailable`, e);
-    }
-  }
-  if (!session) throw new Error("model failed to load");
+  const picked = await fastestSession(modelUrl, SIZE);
+  if (!picked) throw new Error("model failed to load");
+  const { session } = picked;
+  const backend = `${picked.backend}${picked.backend === "wasm" ? `×${ort.env.wasm.numThreads}` : ""} ${Math.round(picked.ms)}ms`;
 
   const canvas = new OffscreenCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -75,7 +110,7 @@ export async function createDetector(modelUrl, names, wanted, { size = 416, thre
     return nms(dets, 0.5);
   }
 
-  return { detect, backend };
+  return { detect, backend, ms: picked.ms };
 }
 
 function iou(a, b) {

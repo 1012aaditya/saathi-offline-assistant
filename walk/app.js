@@ -11,15 +11,21 @@ import {
   createTracker,
   pickAlert,
   updateTracks,
+  LOOM,
+  createLoom,
+  toGray,
+  updateLoom,
+  DARK_LUMA,
 } from "./core.js";
 import { createDetector } from "./detector.js";
 
 // Main model every frame (traffic, people, furniture); extra model every EXTRA_EVERY frames
-// for things the main one doesn't know (doors, stairs, poles…). Both YOLOv8n, exported at 416.
-const MODELS = {
-  main: { url: "models/yolov8n-coco-416.onnx", names: "models/coco.json" },
-  extra: { url: "models/yolov8n-oiv7-416.onnx", names: "models/oiv7.json" },
-};
+// for things the main one doesn't know (doors, stairs, poles…). Both YOLOv8n, exported at 320
+// (was 416: ~1.7x less compute for lower latency while walking, 13 Oct).
+// 320 px by default; 256 px on slow devices (main model slower than SLOW_MS per frame).
+const SIZES = [320, 256];
+const SLOW_MS = 180;
+const modelFor = (tag, size) => ({ url: `models/yolov8n-${tag}-${size}.onnx`, names: `models/${tag}.json`, size });
 const EXTRA_EVERY = 3;
 const VIBRATE = { 1: [80], 2: [200, 100, 200], 3: [400, 100, 400, 100, 400] };
 const BOX_COLOR = { 0: "#888", 1: "#ffd400", 2: "#ff8c00", 3: "#ff2020" };
@@ -72,7 +78,7 @@ function speak(text, level) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "hi-IN";
   if (hindiVoice) u.voice = hindiVoice;
-  u.rate = 1.1;
+  u.rate = 1.3; // speech time is part of the warning delay
   const done = () => {
     if (current === u) [current, currentLevel] = [null, 0];
   };
@@ -91,22 +97,50 @@ function setStatus(text) {
 }
 
 // ---------- detector ----------
-async function loadModel({ url, names }) {
+async function loadModel({ url, names, size }) {
   const list = await (await fetch(names)).json();
-  return createDetector(url, list, new Set(LABELS));
+  return createDetector(url, list, new Set(LABELS), { size });
 }
 
 async function loadDetector() {
-  const [main, extra] = await Promise.allSettled([loadModel(MODELS.main), loadModel(MODELS.extra)]);
-  if (main.status === "rejected") throw main.reason;
-  if (extra.status === "rejected") console.warn("door/stairs model unavailable", extra.reason);
-  return { main: main.value, extra: extra.status === "fulfilled" ? extra.value : null, backend: main.value.backend };
+  // One after the other: onnxruntime-web can't run two WebGPU sessions at once ("Session
+  // mismatch"), and each load benchmarks its backends.
+  let size = SIZES[0];
+  let main = await loadModel(modelFor("coco", size));
+  if (main.ms > SLOW_MS) {
+    // Slow device: the smaller input is ~1.5x faster; nearby obstacles stay large enough to see.
+    try {
+      size = SIZES[1];
+      main = await loadModel(modelFor("coco", size));
+    } catch (e) {
+      console.warn("256 px model unavailable", e);
+    }
+  }
+  let extra = null;
+  try {
+    extra = await loadModel(modelFor("oiv7", size));
+  } catch (e) {
+    console.warn("door/stairs model unavailable", e);
+  }
+  const gpu = (d) => d?.backend.startsWith("webgpu");
+  const parallel = !!extra && gpu(main) !== gpu(extra); // different chips: safe to overlap
+  if (extra && !parallel && main.ms > SLOW_MS) extra = null; // would only add lag: skip it
+  return { main, extra, parallel, backend: `${size}px ${main.backend}${extra ? ` + ${extra.backend}` : " (main only)"}` };
 }
 
 async function detectAll(source, frame) {
-  const dets = await detector.main.detect(source);
-  if (detector.extra && frame % EXTRA_EVERY === 0) dets.push(...(await detector.extra.detect(source)));
-  return dets;
+  // Measured on a Galaxy Tab S6 Lite (13 Oct, 320 px): main model fastest on WebGPU (~260 ms),
+  // extra model fastest on 4-thread WASM (~260 ms). Run them at the same time, so the extra
+  // model never delays the main one; on slow devices run the extra one less often.
+  const every = fpsWindow.fps && fpsWindow.fps < 3 ? EXTRA_EVERY * 2 : EXTRA_EVERY;
+  const runExtra = detector.extra && frame % every === 0;
+  if (!runExtra) return detector.main.detect(source);
+  if (detector.parallel) {
+    const [main, extra] = await Promise.all([detector.main.detect(source), detector.extra.detect(source)]);
+    return main.concat(extra);
+  }
+  const main = await detector.main.detect(source);
+  return main.concat(await detector.extra.detect(source));
 }
 
 const ready = loadDetector().then(
@@ -126,6 +160,13 @@ const ready = loadDetector().then(
 
 // ---------- start / stop ----------
 async function start(source) {
+  pickVoice();
+  if (!hindiVoice) {
+    // A blind user can't read the on-screen notice: say it aloud in English instead.
+    const u = new SpeechSynthesisUtterance(PHRASES.noHindiVoice);
+    u.lang = "en-US";
+    speechSynthesis.speak(u);
+  }
   speak(PHRASES.start, SPEAK_ALWAYS); // inside the tap handler, so the browser allows audio
   await ready;
   if (!detector) return;
@@ -154,6 +195,7 @@ async function start(source) {
     // Screen may sleep; the stall warning will tell the user.
   }
   tracker = createTracker();
+  loom = createLoom();
   announcer = createAnnouncer();
   health = createHealth();
   lastFrameAt = performance.now();
@@ -211,8 +253,32 @@ document.addEventListener("visibilitychange", async () => {
 // ---------- per-frame work ----------
 let inflight = false;
 
+// Looming runs on every camera frame (~5 ms), independent of the slower object models, so a
+// wall or anything else getting close is warned about almost immediately.
+const loomCanvas = new OffscreenCanvas(LOOM.w, LOOM.h);
+const loomCtx = loomCanvas.getContext("2d", { willReadFrequently: true });
+let loom = createLoom();
+let lastLoomTime = -1;
+
+function checkLoom() {
+  if (video.readyState < 2 || video.currentTime === lastLoomTime) return;
+  lastLoomTime = video.currentTime;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const cw = vw * 0.6, ch = vh * 0.6; // centre crop: what's straight ahead
+  loomCtx.drawImage(video, (vw - cw) / 2, (vh - ch) / 2, cw, ch, 0, 0, LOOM.w, LOOM.h);
+  const gray = toGray(loomCtx.getImageData(0, 0, LOOM.w, LOOM.h).data, LOOM.w, LOOM.h);
+  const brightOk = brightness === null || brightness > DARK_LUMA;
+  const a = updateLoom(loom, gray, performance.now(), brightOk);
+  if (a && a.level > busyLevel()) {
+    speak(a.text, a.level);
+    vibrate(a.level);
+    setStatus(a.text);
+  }
+}  // fmt: skip
+
 function loop() {
   if (!running) return;
+  checkLoom();
   if (!inflight && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
     inflight = true;
     lastVideoTime = video.currentTime;
@@ -230,6 +296,8 @@ function onDetections(dets) {
     lastFrameAt = now;
     frames++;
     const tracks = updateTracks(tracker, dets, now, video.videoWidth / video.videoHeight);
+    // Something at "stop" distance on its first frame: buzz now, speak once it's confirmed.
+    if (tracks.some((t) => t.level >= 3 && t.hits === 1)) vibrate(3);
     const alert = pickAlert(tracks, now, announcer, busyLevel());
     if (alert) {
       speak(alert.text, alert.level);
@@ -292,4 +360,17 @@ function updateStats(now, count) {
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch((e) => console.warn("offline cache unavailable", e));
+  // First visit: the worker that adds the isolation headers isn't in control yet. Reload once so
+  // multi-threaded detection is available (guarded so it can never loop).
+  if (!self.crossOriginIsolated) {
+    navigator.serviceWorker.ready.then(() => {
+      try {
+        if (sessionStorage.getItem("walk-coi-reload")) return;
+        sessionStorage.setItem("walk-coi-reload", "1");
+      } catch {
+        return;
+      }
+      location.reload();
+    });
+  }
 }

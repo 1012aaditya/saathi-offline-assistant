@@ -20,6 +20,7 @@ def chat_list(filter_selected=False):
     return Screen(WHATSAPP, [
         E(0, desc="Ask Meta AI or Search", rid="search_bar_inner_layout", y=100),
         E(1, desc=f"Unread filter, 99+, {state}", rid="conversations_filter_debug_view_id_unread", y=200),
+        E(9, desc=f"All filter, , {'unselected' if filter_selected else 'selected'}", y=200, x=(10, 90)),
         E(2, text="Mummy", rid="conversations_row_contact_name", y=438),
         E(3, text="khana kha liya?", rid="single_msg_tv", y=482),
         E(4, desc="3 unread messages", rid="conversations_row_message_count", y=482, x=(1100, 1140)),
@@ -61,7 +62,7 @@ def test_flow_opens_filters_reads_restores():
     assert unread_next(inside_chat, st) == Back()
     assert unread_next(chat_list(), st) == Tap(index=1)  # turn the Unread filter on
     a = unread_next(chat_list(filter_selected=True), st)
-    assert a == Tap(index=1) and "Mummy के 3" in st.summary  # read, then turn it off again
+    assert a == Tap(index=9) and "Mummy के 3" in st.summary  # read, then tap "All" to restore
     done = unread_next(chat_list(), st)
     assert isinstance(done, Done) and done.summary == st.summary
 
