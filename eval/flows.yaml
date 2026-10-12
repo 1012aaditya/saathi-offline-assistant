@@ -1,0 +1,45 @@
+# Eval flows (SYSTEM_DESIGN section 10). Run: uv run python eval/run_flows.py --flow all --n 10
+#
+# setup:        home | whatsapp_chat_list   (state the device is put in before every run)
+# requires:     package that must be installed, otherwise the flow is skipped
+# auto_confirm: answer "yes" to safety read-backs. Only where nothing irreversible can happen
+#               without the user: GPay stops at the UPI PIN; Blinkit never orders in eval.
+# success:
+#   reached:                 done | pin_handoff | order_hold | send_hold | ...
+#   summary_contains_any:    list of strings (case-insensitive)
+#   quotes_last_received:    true = summary quotes the lowest from=them message on the final screen
+
+- id: whatsapp_read
+  command: "WhatsApp kholo aur Mummy ka last message padho"
+  setup: whatsapp_chat_list
+  requires: com.whatsapp
+  auto_confirm: false
+  success: { reached: done, quotes_last_received: true }
+
+- id: whatsapp_reply_hold
+  command: "Mummy ko reply karo: main 7 baje aaunga"
+  setup: whatsapp_chat_list
+  requires: com.whatsapp
+  auto_confirm: false # stop at the R2 read-back; never sends in eval
+  success: { reached: send_hold }
+
+- id: screen_summary
+  command: "Screen pe kya hai?"
+  setup: whatsapp_chat_list
+  requires: com.whatsapp
+  auto_confirm: false
+  success: { reached: done, summary_contains_any: ["WhatsApp", "व्हाट्सएप", "व्हाट्सऐप", "चैट"] }
+
+- id: blinkit_milk
+  command: "Blinkit se Amul doodh 1 litre mangao"
+  setup: home
+  requires: com.grofers.customerapp
+  auto_confirm: false # ALLOW_ORDERS must be false: stops at the order read-back
+  success: { reached: order_hold }
+
+- id: gpay_send_1
+  command: "Rahul ko 1 rupaya bhejo"
+  setup: home
+  requires: com.google.android.apps.nbu.paisa.user
+  auto_confirm: true # simulates "haan"; the run still stops at the UPI PIN (no money moves)
+  success: { reached: pin_handoff }

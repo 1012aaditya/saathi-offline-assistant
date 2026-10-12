@@ -218,6 +218,13 @@ async def connect(serial: str | None = None, portal_mode: str = "auto") -> Andro
     return _driver
 
 
+async def reconnect() -> AndroidDriver:
+    """Drop the cached driver and connect again (after Wi-Fi / ADB hiccups)."""
+    global _driver
+    _driver = None
+    return await connect(portal_mode="required")
+
+
 # -- observe / act ---------------------------------------------------------------------------
 
 

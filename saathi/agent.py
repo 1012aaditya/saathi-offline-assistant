@@ -6,11 +6,14 @@ TalkBack and the user's keyboard are always restored in `finally`.
 
 import base64
 import json
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
+from async_adbutils.errors import AdbError
 from openai import AsyncOpenAI, OpenAIError
 
 from saathi import controls, device, safety, talkback
@@ -39,6 +42,25 @@ Ask = Callable[[str], Awaitable[str]]
 Confirm = Callable[[str], Awaitable[bool]]
 
 STOPPED = "रुक गया। आप आगे खुद कर सकते हैं।"
+DEVICE_ERRORS = (AdbError, ConnectionError, OSError, TimeoutError, httpx.TransportError)
+
+# F4 "Screen pe kya hai?" — read-only: describe, never act.
+_SUMMARY_REGEX = re.compile(
+    r"(?i)screen (pe|par|per) kya|kya (dikh|likha)|what('?s| is) on (the |my )?screen|"
+    r"describe (the |my )?screen|स्क्रीन (पे|पर) क्या|क्या दिख|क्या लिखा"
+)
+SUMMARY_TASK = (
+    "SCREEN SUMMARY MODE: do NOT tap, type, scroll or open anything. Answer right away with "
+    "`done`: one Devanagari sentence saying which app/screen this is and what matters on it, "
+    "then the top 3 things the user can do here. Quote on-screen names exactly. "
+    "If the element list is unclear, use `look` once. User asked: "
+)
+
+
+def is_screen_summary(command: str) -> bool:
+    return bool(_SUMMARY_REGEX.search(command))
+
+
 ASK_AGAIN = "साफ़ बताइए: हाँ या नहीं?"
 
 
@@ -49,6 +71,8 @@ class Result:
     steps: int
     run_id: str
     history: list[str] = field(default_factory=list)
+    # How far it got, for eval: done | pin_handoff | order_hold | send_hold | pay_hold | ...
+    reached: str = ""
 
 
 def _app_card(package: str) -> str:
@@ -159,7 +183,9 @@ async def build_context(command: str) -> safety.CommandContext:
 async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None = None) -> Result:
     trace = Trace(command)
     brain = Brain()
-    cap = get_settings().max_amount_inr
+    settings = get_settings()
+    cap = settings.max_amount_inr
+    summary_mode = is_screen_summary(command)
 
     async def _confirm(readback: str) -> bool:
         return await (confirm(readback) if confirm else spoken_confirm(ask, readback))
@@ -167,16 +193,38 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
     talkback.install_guards()
     history: list[str] = []
     screen: Screen | None = None
-    last_changed, look_requested, failures = True, False, 0
+    last_changed, look_requested, failures, reconnected = True, summary_mode, 0, False
 
-    async def finish(status: str, message: str, steps: int) -> Result:
+    async def finish(status: str, message: str, steps: int, reached: str = "") -> Result:
         await _say(say, message)
-        trace.result({"status": status, "message": message, "steps": steps, "history": history})
-        return Result(status, message, steps, trace.run_id, history)
+        reached = reached or status
+        trace.result(
+            {
+                "status": status,
+                "reached": reached,
+                "message": message,
+                "steps": steps,
+                "history": history,
+            }
+        )
+        return Result(status, message, steps, trace.run_id, history, reached)
+
+    async def device_call(fn, *args, **kwargs):
+        """One reconnect attempt on a dropped ADB / Portal link (SYSTEM_DESIGN section 11)."""
+        nonlocal reconnected
+        try:
+            return await fn(*args, **kwargs)
+        except DEVICE_ERRORS:
+            if reconnected:
+                raise
+            reconnected = True
+            await _say(say, "फ़ोन से कनेक्शन टूट गया, फिर से जोड़ रहा हूँ।")
+            await device.reconnect()
+            return await fn(*args, **kwargs)
 
     await device.connect(portal_mode="required")
     ctx = await build_context(command)
-    trace.step(0, {"context": ctx.__dict__})
+    trace.step(0, {"context": ctx.__dict__, "summary_mode": summary_mode})
     await talkback.suspend()
     try:
         for step in range(1, MAX_STEPS + 1):
@@ -184,30 +232,43 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 return await finish("halt", STOPPED, step)
             t0 = time.time()
             send_image = needs_vision(screen, last_changed, look_requested)
-            screen = await device.observe(vision=send_image)
+            screen = await device_call(device.observe, vision=send_image)
             if screen.package in PAYMENT_APPS and screen.screenshot is None:
                 # Always capture in payment apps so R8 can spot a black (secure) PIN screen;
                 # it is only sent to the model when the vision policy asks for it.
-                screen.screenshot = await device.capture_jpeg()
+                screen.screenshot = await device_call(device.capture_jpeg)
             observe_s = round(time.time() - t0, 2)
             look_requested = False
 
             if safety.is_pin_screen(screen):
-                return await finish("handoff", "अपना पिन खुद डालिए, मैं रुक रहा हूँ।", step)
+                return await finish(
+                    "handoff", "अपना पिन खुद डालिए, मैं रुक रहा हूँ।", step, "pin_handoff"
+                )
 
-            decision, meta = await brain.decide(command, screen, history, send_image)
+            task = (SUMMARY_TASK + command) if summary_mode else command
+            decision, meta = await brain.decide(task, screen, history, send_image)
             action = decision.action
-            await _say(say, decision.say, progress=True)
 
             if controls.interrupted():
                 return await finish("halt", STOPPED, step)
             verdict = safety.check(action, screen, ctx, cap)
+            if (
+                summary_mode
+                and verdict.kind == "allow"
+                and not isinstance(action, (Done, Fail, Look))
+            ):
+                # "Screen pe kya hai?" must never change anything on the phone.
+                verdict = safety.Verdict("block", "summary", "")
+            # Narrate only actions that will really run, so "Send dabaya" is never said for a
+            # send the user hasn't confirmed yet (the read-back is spoken instead).
+            if verdict.kind == "allow" and not isinstance(action, Done):
+                await _say(say, decision.say, progress=True)
             record = {
                 "step": step,
                 "package": screen.package,
                 "screen_hash": screen.hash,
                 "elements": [e.to_line() for e in screen.elements],
-                "vision": screen.screenshot is not None,
+                "vision": send_image,
                 "decision": decision.model_dump(),
                 "verdict": verdict.__dict__,
                 "llm": meta,
@@ -216,7 +277,8 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
 
             if verdict.kind == "handoff":
                 trace.step(step, record, screen.screenshot)
-                return await finish("handoff", verdict.message, step)
+                reached = "pin_handoff" if verdict.rule == "R8" else "captcha_handoff"
+                return await finish("handoff", verdict.message, step, reached)
             if verdict.kind == "block":
                 trace.step(step, record, screen.screenshot)
                 history.append(f"{step}: {action.type} BLOCKED by safety ({verdict.rule})")
@@ -228,6 +290,13 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                     )
                 continue
             if verdict.kind == "hold":
+                if verdict.rule == "R3" and not settings.allow_orders:
+                    # Real orders stay off unless ALLOW_ORDERS=true (eval never orders).
+                    trace.step(step, record, screen.screenshot)
+                    await _say(say, verdict.readback.rsplit(".", 1)[0] + ".")
+                    return await finish(
+                        "done", "ऑर्डर तैयार है, पर मैं अभी ऑर्डर नहीं कर रहा।", step, "order_hold"
+                    )
                 confirmed = await _confirm(verdict.readback)
                 record["confirmed"] = confirmed
                 if not confirmed:
@@ -235,8 +304,11 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                     entry = next((e for e in screen.elements if e.rid == "entry"), None)
                     if verdict.rule == "R2" and entry and entry.text:
                         # Don't leave an unsent draft a blind user doesn't know about.
-                        await device.clear_field(entry)
-                    return await finish("cancelled", "कैंसल कर दिया।", step)
+                        await device_call(device.clear_field, entry)
+                    held = {"R1": "pay_hold", "R2": "send_hold", "R3": "order_hold"}
+                    return await finish(
+                        "cancelled", "कैंसल कर दिया।", step, held.get(verdict.rule, "cancelled")
+                    )
                 if controls.interrupted():
                     trace.step(step, record, screen.screenshot)
                     return await finish("halt", STOPPED, step)
@@ -260,10 +332,10 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
                 continue
 
             t1 = time.time()
-            ok = await device.execute(action, screen)
+            ok = await device_call(device.execute, action, screen)
             # Cold-starting an app took ~3.5 s on the tablet; taps settle well within 3 s.
             wait_s = 8 if isinstance(action, OpenApp) else 3
-            changed = await device.wait_for_change(screen.hash, timeout_s=wait_s)
+            changed = await device_call(device.wait_for_change, screen.hash, timeout_s=wait_s)
             record |= {"executed": ok, "changed": changed, "act_s": round(time.time() - t1, 2)}
             trace.step(step, record, screen.screenshot)
 
@@ -281,6 +353,8 @@ async def run_command(command: str, say: Say, ask: Ask, confirm: Confirm | None 
             if failures >= MAX_FAILURES:
                 return await finish("halt", "यह स्टेप नहीं हो पा रहा। मैं रुक रहा हूँ।", step)
         return await finish("halt", "बहुत स्टेप हो गए, मैं रुक रहा हूँ।", MAX_STEPS)
+    except DEVICE_ERRORS:
+        return await finish("halt", "फ़ोन से कनेक्शन नहीं जुड़ पा रहा। मैं रुक रहा हूँ।", 0)
     finally:
         await talkback.restore()
         await device.restore_keyboard()

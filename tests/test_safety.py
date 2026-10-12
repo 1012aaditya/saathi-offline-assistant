@@ -331,3 +331,20 @@ def test_r8_black_screen_in_payment_app_hands_off():
     w = screen(WHATSAPP, el("x"))
     w.screenshot = _png(0)  # dark-mode chats etc. outside payment apps are not PIN screens
     assert not is_pin_screen(w)
+
+
+def test_r3_readback_prefers_labelled_total_over_item_price():
+    s = screen(
+        BLINKIT,
+        el("Amul Taaza ₹28"),
+        el("Delivery ₹15"),
+        el("To Pay ₹43"),
+        el("Proceed to pay", cls="Button"),
+    )
+    v = check(Tap(index=3), s)
+    assert v.kind == "hold" and "To Pay ₹43" in v.readback
+
+
+def test_r3_readback_falls_back_to_largest_amount():
+    s = screen(BLINKIT, el("₹28"), el("₹43"), el("Place order", cls="Button"))
+    assert "₹43" in check(Tap(index=2), s).readback

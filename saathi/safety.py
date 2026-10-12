@@ -209,9 +209,19 @@ def _payment(screen: Screen, ctx: CommandContext, cap: int) -> Verdict:
     return Verdict("hold", "R1", readback=f"{amount_text} {who} को भेज रहे हैं। पक्का?")
 
 
+TOTAL_REGEX = re.compile(r"(?i)grand total|to pay|total|bill|कुल")
+
+
 def _order(screen: Screen) -> Verdict:
-    """R3 (+R4): read back the total, verbatim from the screen."""
-    total = next((t for t in _screen_texts(screen) if AMOUNT_REGEX.search(t)), "")
+    """R3 (+R4): read back the order total, verbatim from the screen. Prefers a text labelled
+    total / to pay; otherwise the largest ₹ amount on screen (never a single item price)."""
+    texts = [t for t in _screen_texts(screen) if AMOUNT_REGEX.search(t)]
+    labelled = [t for t in texts if TOTAL_REGEX.search(t)]
+
+    def value(t: str) -> float:
+        return max(float(a.replace(",", "")) for a in AMOUNT_REGEX.findall(t))
+
+    total = (labelled or sorted(texts, key=value, reverse=True) or [""])[0]
     if not total:
         return Verdict("block", "R3", "कुल रकम स्क्रीन पर नहीं दिखी, मैं रुक रहा हूँ।")
     return Verdict("hold", "R3", readback=f"ऑर्डर: {total}. ऑर्डर कर दूँ?")

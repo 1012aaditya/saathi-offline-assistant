@@ -35,9 +35,9 @@
 - [ ] M0 Setup + experiments (12 Oct AM) — **done except GPay dumps (Q5)**: Portal ping OK over Wi-Fi · WhatsApp + Blinkit trees dumped · TalkBack behavior known · Sarvam STT/TTS works
 - [x] M1 Text agent — F1 in text mode (12 Oct PM) — **3/3 from WhatsApp chat list, 12–15 s, ~₹0.06/run (gpt-5-nano)**
 - [x] M2 Voice in/out (12 Oct night) — **owner tested by voice: reads Mummy's last message aloud**
-- [ ] M3 Safety gate + GPay ₹1 to PIN handoff (13 Oct AM)
-- [ ] M4 Blinkit + screen summary (13 Oct PM)
-- [ ] M5 Eval + hardening (13 Oct night)
+- [ ] M3 Safety gate + GPay ₹1 to PIN handoff (13 Oct AM) — **gate + confirmation done and dry-run on WhatsApp ("nahi" → cancelled, draft cleared); real send untested; GPay deferred by owner**
+- [ ] M4 Blinkit + screen summary (13 Oct PM) — **code built, not yet run on the device**
+- [ ] M5 Eval + hardening (13 Oct night) — **eval harness + hardening built, not yet run on the device**
 - [ ] M6 Blind / low-vision tester session (14 Oct AM)
 - [ ] Feature freeze (14 Oct 12:00)
 - [ ] M7 Demo video + README + Devpost submitted (14 Oct night)
@@ -74,6 +74,15 @@
 | 12 Oct | Narrator transliterates Roman-only lines to Devanagari (Sarvam `/transliterate`) before TTS | Bulbul docs: romanized Hindi "significantly reduces output quality"; gpt-5-nano ignores the Devanagari rule ~50% of the time |
 | 12 Oct | WhatsApp messages tagged `from=me` / `from=them` in the normalizer (row has a `status` tick = sent by user) | First voice run read the user's own reply as "Mummy's last message" |
 | 12 Oct | `.env` uses `SAATHI_LANG` (not `LANG`) | macOS `LANG` overrides `.env` in pydantic-settings |
+| 12 Oct | GPay deferred | Owner has no SIM-linked device with GPay yet; R1/R5/R6/R8 tested on synthetic screens only. SCOPE cut line (13 Oct 14:00): switch to PhonePe/BHIM if GPay stays unreadable |
+| 12 Oct | Safety read-backs only; the model must never ask "should I send/pay?" itself | Dry run showed the model self-confirming with an ungrounded question, bypassing the R2 read-back |
+| 12 Oct | On a cancelled send, Saathi deletes its own draft (key presses) | A blind user wouldn't know an unsent draft is sitting in the box; Portal's clear didn't stick |
+| 12 Oct | adb subprocesses get `stdin=DEVNULL` | `adb shell` swallowed typed answers to the confirmation prompt |
+| 12 Oct | Blinkit stops at the order read-back unless `ALLOW_ORDERS=true`; eval refuses to run if it is true | Hard rule 6: eval must never place real orders |
+| 12 Oct | "Screen pe kya hai?" is enforced read-only in code (any non-done action is blocked) | F4 must never change anything on the phone |
+| 12 Oct | Narrate `say` only for actions the gate allows | Model said "Send button dabaya" before the user had confirmed |
+| 12 Oct | One automatic reconnect on ADB/Portal errors, then halt | SYSTEM_DESIGN §11; Wi-Fi hotspot link dropped Portal probes during M0 |
+| 12 Oct | eval/results.md holds no message text and no device serial | It is committed to a public repo |
 | 12 Oct | Rename `.env` `LANG` → `SAATHI_LANG` (when voice.py lands) | macOS shell already sets `LANG` (e.g. `en_US.UTF-8`), which overrides `.env` in pydantic-settings |
 
 ---
@@ -108,6 +117,7 @@
 - TalkBack: taps click with it on; suspend/restore verified. Sarvam STT + TTS hello-world works.
 - Model: gpt-5-nano chosen (paid, no data sharing); local Ollama too slow on the 8 GB Mac.
 - M1 done: actions + safety (R1–R4, R7–R10, 60 tests) + agent loop + traces. "WhatsApp kholo aur Mummy ka last message padho" 3/3 from the chat list (open_app → tap chat → done), answer verified against the lowest message_text on screen.
+- M3–M5 built (owner asked to build first, test later): confirmation + R5/R6/R8 + draft cleanup; Blinkit card + order hold; F4 read-only summary; reconnect; eval harness (flows.yaml, run_flows.py, results.md). 112 unit tests. **Device test pending** for M4/M5 and the real WhatsApp send.
 - M2 done: voice.py (Enter push-to-talk, saaras:v4 STT, bulbul:v4-flash TTS, phrase cache, transliteration), narrator.py, controls.py (interrupt). Bug found by owner: read the user's own "achaa" as Mummy's message → fixed with sender tagging; verified she gets her last received message.
 
 ### 13 Oct

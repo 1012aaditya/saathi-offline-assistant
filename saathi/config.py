@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     portal_service: str = ""
     talkback_service: str = ""
     max_amount_inr: int = 10
+    # Blinkit: stop at the order read-back unless explicitly enabled (eval never orders).
+    allow_orders: bool = False
     vision_apps: str = "com.phonepe.app"
     # Not LANG: macOS already sets LANG (e.g. en_US.UTF-8), which would override .env.
     saathi_lang: str = "hi-IN"
