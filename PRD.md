@@ -48,7 +48,7 @@ User speaks: *"Rahul ko 1 rupaya bhejo."* Saathi opens GPay, finds Rahul, enters
 - iOS (Apple doesn't let third-party apps operate other apps; Android is ~92% of Indian phones)
 - Supporting every app — 3 flows done well beat 10 done badly
 - Replacing TalkBack — Saathi works alongside it
-- Physical-world vision / navigation (Seeing AI, Be My Eyes already do this)
+- Full physical-world navigation (Seeing AI, Be My Eyes already do this). *Update 13 Oct: a small on-device "walk mode" (beta) was added as an extra — obstacle warnings only, never route guidance or "safe to cross".*
 - Solving CAPTCHAs, reading OTPs, or entering PINs/passwords — always handed to the user
 
 ---
@@ -61,7 +61,7 @@ User speaks: *"Rahul ko 1 rupaya bhejo."* Saathi opens GPay, finds Rahul, enters
 1. "Mummy ka last message padho" → Saathi opens WhatsApp, finds the chat, reads the latest message(s).
 2. "Reply karo: main 7 baje aaunga" → read-back: *"Mummy ko bhej rahe hain: 'main 7 baje aaunga'. Confirm?"* → "haan" → sends → confirms sent.
 
-**F2 — UPI send money (GPay)**
+**F2 — UPI send money (GPay)** — *paused 13 Oct (owner decision); the safety layer for it is built and unit-tested.*
 1. "Rahul ko 1 rupaya bhejo" → opens GPay → searches contact → if several Rahuls, asks which one.
 2. Enters amount → **safety gate** reads back name, UPI handle / last digits, amount → waits for explicit "haan".
 3. Taps Pay → **PIN handoff**: restores TalkBack, says *"Apna UPI PIN daaliye"*, stops acting.

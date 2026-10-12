@@ -52,6 +52,9 @@ flowchart LR
 | `trace.py` | Per-step JSON + PNG logging under `traces/<run_id>/` | — |
 | `prompts/` | System prompt + per-app "cards" (hints for WhatsApp, GPay, Blinkit) | — |
 | `eval/run_flows.py` | Run flows N times, write success table | pyyaml |
+| `blinkit.py` | Deterministic Blinkit steps: search deep link, product-card ranking, size picker, cart, checkout, itemised read-back (added 12 Oct) | rapidfuzz |
+| `walk/` | Walk mode (beta): phone-browser obstacle warnings, on-device YOLOv8n via onnxruntime-web; independent of the agent (merged 13 Oct) | onnxruntime-web |
+| `site/` | Project website + settings/activity prototypes (sample data, not connected to the agent) | GSAP, Web Speech |
 
 ---
 
@@ -152,7 +155,10 @@ The gate runs on **every** action before execution. It returns `allow`, `hold(re
 | R7 Secret fields | `type` action into an element with `password=true`, or into a field labeled PIN / OTP / password / पिन | Block |
 | R8 PIN screen | Tree contains `UPI PIN` / `Enter PIN` / `पिन`, or screenshot ≥ 95% black (secure screen) | Stop all actions → handoff |
 | R9 CAPTCHA | Tree/screenshot indicates CAPTCHA | Stop → handoff |
-| R10 Risky misc | Tap on delete / uninstall / logout / settings changes not part of the command | Block → ask |
+| R10 Risky misc | Tap on delete / uninstall / logout / calls / WhatsApp payments / **granting Android permissions** ("Allow", "While using the app") | Block → ask |
+| R11 Covered tap | The tap point lies inside an order / pay / send control that isn't the target (floating checkout bars) | Partly covered → block; target fully inside the control → treated as tapping that control (R1–R3 hold) |
+
+Also enforced (added 12 Oct after device runs): R3 cart guard — no "ADD"/"+" beyond the spoken quantity; R4 for read-outs — any text quoted in a `done` summary must be verbatim on screen; F4 "screen summary" is read-only (any non-`done` action blocked).
 
 **Config lists (extend as needed):**
 
@@ -195,6 +201,7 @@ Every rule gets unit tests using fixture element lists in `tests/fixtures/` (rec
 | `scroll` | `direction` (up/down) | Implemented as a swipe |
 | `back` / `home` | — | `press_button` |
 | `open_app` | `app` (alias) | Alias → package map in config |
+| `search` | `text` (query) | Blinkit product search via its `/s` deep link; lands directly on results (added 12 Oct) |
 | `look` | — | Request a screenshot next step |
 | `ask_user` | `question` | Spoken; reply transcribed and appended to history |
 | `done` | `summary` | Spoken to the user |
@@ -297,17 +304,18 @@ VISION_APPS=com.phonepe.app
 ## 13. Repository layout
 
 ```
-saathi/
+3-days/                       (repo root)
 ├── CLAUDE.md  PRD.md  SYSTEM_DESIGN.md  SCOPE.md  PROJECT.md  README.md
 ├── pyproject.toml  .env.example  .gitignore
 ├── saathi/
 │   ├── main.py  config.py  voice.py  device.py  agent.py  actions.py
-│   ├── safety.py  narrator.py  talkback.py  trace.py  controls.py
-│   └── prompts/
-│       ├── system_hi.md
-│       └── app_cards/  whatsapp.md  gpay.md  blinkit.md
+│   ├── safety.py  narrator.py  talkback.py  trace.py  controls.py  blinkit.py
+│   └── prompts/  system_hi.md  app_cards/{whatsapp,gpay,blinkit}.md
 ├── eval/       run_flows.py  flows.yaml  results.md
-├── tests/      test_safety.py  test_actions.py  fixtures/
+├── tests/      test_*.py  fixtures/ (fixtures/raw/ gitignored: personal screens)
+├── scripts/    dump_screen.py  talkback_test.py  sarvam_test.py  llm_probe.py  blinkit_empty_cart.py
+├── walk/       walk mode (phone browser, on-device models)
+├── site/       website + app-screen prototypes
 └── traces/     (gitignored)
 ```
 

@@ -16,7 +16,7 @@
 | M3 | Voice in (Hindi/Hinglish STT) and voice out (Hindi TTS) with push-to-talk |
 | M4 | Safety gate R1–R10 + unit tests passing |
 | M5 | F1 WhatsApp read & reply |
-| M6 | F2 GPay send ₹1 → read-back → confirm → PIN handoff |
+| M6 | F2 GPay send ₹1 → read-back → confirm → PIN handoff — **skipped for now (owner, 13 Oct)**: safety rules R1/R5/R6/R8 built and unit-tested, not run on GPay |
 | M7 | TalkBack suspend/restore, always restored on exit |
 | M8 | Eval harness with real success rates |
 | M9 | Demo video + README + Devpost submission |
@@ -38,6 +38,8 @@
 | C2 | PhonePe / BHIM support |
 | C3 | A second Indian language (e.g. Tamil) |
 | C4 | Live trace viewer web page for judges (step list + screenshots) |
+| C5 | **Walk mode (beta)**: on-device camera obstacle warnings in Hindi — merged 13 Oct |
+| C6 | Project website (`site/`) — built 12 Oct |
 
 ### Won't (this hackathon)
 
@@ -69,8 +71,8 @@
 |------------|-----|-------|
 | 12 Oct 12:00 | ADB taps don't click with TalkBack on and suspend/restore doesn't work | Demo with TalkBack off; explain the production on-device design in the pitch |
 | 12 Oct 18:00 | Own agent loop can't do F1 reliably | Use Mobilerun's built-in agent with custom tools; enforce the safety gate inside the tools |
-| 13 Oct 14:00 | GPay screens unreadable (secure / empty tree) | Switch F2 to PhonePe or BHIM; keep the same gate |
-| 13 Oct 20:00 | Blinkit flaky (< 5/10) | Cut F3; polish F1 + F2 + F4 |
+| 13 Oct 14:00 | GPay screens unreadable (secure / empty tree) | Switch F2 to PhonePe or BHIM; keep the same gate — **superseded: payments skipped by owner (13 Oct)** |
+| 13 Oct 20:00 | Blinkit flaky (< 5/10) | Cut F3; polish F1 + F2 + F4 — **checked 12 Oct: 10/10 to order read-back, F3 stays** |
 | 14 Oct 12:00 | Anything not working | Cut it. Freeze. Record what works. |
 
 ---

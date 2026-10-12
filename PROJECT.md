@@ -35,9 +35,9 @@
 - [ ] M0 Setup + experiments (12 Oct AM) — **done except GPay dumps (Q5)**: Portal ping OK over Wi-Fi · WhatsApp + Blinkit trees dumped · TalkBack behavior known · Sarvam STT/TTS works
 - [x] M1 Text agent — F1 in text mode (12 Oct PM) — **3/3 from WhatsApp chat list, 12–15 s, ~₹0.06/run (gpt-5-nano)**
 - [x] M2 Voice in/out (12 Oct night) — **owner tested by voice: reads Mummy's last message aloud**
-- [ ] M3 Safety gate + GPay ₹1 to PIN handoff (13 Oct AM) — **gate + confirmation done and dry-run on WhatsApp ("nahi" → cancelled, draft cleared); real send untested; GPay deferred by owner**
+- [x] M3 Safety gate (13 Oct AM) — **gate R1–R11 + spoken confirmation done (88 safety tests); WhatsApp send-hold 3/3 on device; GPay part skipped by owner (13 Oct); real send untested**
 - [x] M4 Blinkit + screen summary (13 Oct PM) — **screen summary 3/3; Blinkit 10/10 to order read-back (7/7 from an empty cart), median 33 s; never orders**
-- [ ] M5 Eval + hardening (13 Oct night) — **eval run on device (3/flow); 10-run eval still to do**
+- [x] M5 Eval + hardening (13 Oct night) — **device eval: WhatsApp 3/3 ×2 flows, summary 3/3, Blinkit 10/10; timeouts, reconnect, loop detection, R11 (see eval/results.md)**
 - [ ] M6 Blind / low-vision tester session (14 Oct AM)
 - [ ] Feature freeze (14 Oct 12:00)
 - [ ] M7 Demo video + README + Devpost submitted (14 Oct night)
@@ -50,9 +50,11 @@
 |------------|-------|-------|-----------------|
 | **Saathi agent** (voice agent, safety gate, eval) | `saathi/`, `eval/`, `tests/`, `scripts/` on `main` | M0–M2, M4 done; M3 gate done (no payments); 155 tests | **Payments skipped for now** (13 Oct) — payment rules stay in code, not demoed; next: make it more autonomous + user-controlled, on the phone |
 | **Website** | `site/` on `main` (static HTML/JS, GSAP) | Landing page, settings + activity prototypes (sample data, not connected), shared Web Speech voice commands; `config.js paymentsLive=false` | International audience, English-first; bright/colorful + heavy motion; settings/activity are previews of the future app; braille = roadmap only |
-| **Walk mode** (on-device obstacle warnings) | worktree `../3-days-walk`, branch `feature/walk-mode`, `walk/` (uncommitted) | Phone web page, 2× YOLOv8n via onnxruntime-web, Hindi spoken warnings + vibration + rough distance; 21 node tests; not yet tested on a real phone | Extra feature, not the main demo; free + on-device; warnings only, never "safe to cross". ⚠ YOLOv8 weights are AGPL-3.0 |
+| **Walk mode** (on-device obstacle warnings) | `walk/` on `main` (merged 13 Oct from `feature/walk-mode`) | Phone web page, 2× YOLOv8n via onnxruntime-web, Hindi spoken warnings + vibration + rough distance; 21 node tests; not yet tested on a real phone | Extra feature, not the main demo; free + on-device; warnings only, never "safe to cross". ⚠ YOLOv8 weights are AGPL-3.0 |
 
-Open from the sync: merge walk mode into `main` (needs owner OK + PRD non-goal update); replace site target bars with real eval numbers; deploy site for Devpost; Expo phone app (owner request 13 Oct) — not started in any session.
+Done 13 Oct: walk mode merged; site shows measured results (not targets), walk mode, "Works now" for Blinkit/summary, payments "Coming later"; PRD/SCOPE/SYSTEM_DESIGN/CLAUDE.md/README synced. **Checkpoint tag: `checkpoint-pre-expo`.**
+
+Next: **Expo phone app** — owner will design it first (not started). Still open: deploy site for the Devpost link; real WhatsApp send test; blind tester (M6); demo video + Devpost (M7); payments later.
 
 ---
 
@@ -145,7 +147,8 @@ Open from the sync: merge walk mode into `main` (needs owner OK + PRD non-goal u
 - M2 done: voice.py (Enter push-to-talk, saaras:v4 STT, bulbul:v4-flash TTS, phrase cache, transliteration), narrator.py, controls.py (interrupt). Bug found by owner: read the user's own "achaa" as Mummy's message → fixed with sender tagging; verified she gets her last received message.
 
 ### 13 Oct
-- 
+- Owner: skip payments for now; make Saathi more autonomous + controlled for blind users, on the phone; Expo app next (owner designs it first).
+- Synced 3 parallel sessions (agent, website, walk mode) into one; merged walk mode; site + docs updated to measured results. Checkpoint `checkpoint-pre-expo`.
 
 ### 14 Oct
 -

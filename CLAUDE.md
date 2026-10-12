@@ -35,8 +35,9 @@ Read before non-trivial work: `PROJECT.md` (status, decisions, open questions) �
 uv sync                                             # install deps
 adb devices && mobilerun ping                       # device + Portal check
 uv run python -m saathi.main --text "WhatsApp kholo aur Mummy ka last message padho"
-uv run python -m saathi.main                        # voice mode (hold SPACE to talk, ESC to stop)
-uv run python -m saathi.device --dump fixtures/whatsapp_home.json   # record a screen fixture
+uv run python -m saathi.main                        # voice mode (Enter to talk; SPACE-hold only if macOS Input Monitoring is granted)
+uv run python scripts/dump_screen.py whatsapp_home  # record a screen fixture → tests/fixtures/raw/ (gitignored)
+node --test 'walk/tests/*.test.mjs'                 # walk mode tests
 uv run pytest -q                                    # unit tests (safety tests must pass before any commit)
 uv run python eval/run_flows.py --flow all --n 10   # success-rate table → eval/results.md
 uv run ruff check . && uv run ruff format .
@@ -55,9 +56,13 @@ saathi/voice.py       push-to-talk, STT, TTS, phrase cache
 saathi/narrator.py    short Hindi status lines (≤ 12 words, Devanagari)
 saathi/talkback.py    suspend/restore TalkBack via `adb shell settings`
 saathi/trace.py       per-step JSON/JPG logs → traces/<run_id>/
+saathi/blinkit.py     deterministic Blinkit steps (search link, ranking, cart, checkout read-back)
 saathi/prompts/       system_hi.md + app_cards/{whatsapp,gpay,blinkit}.md
 eval/                 flows.yaml, run_flows.py, results.md
-tests/                test_safety.py, test_actions.py, fixtures/
+tests/                test_safety.py, test_actions.py, test_blinkit.py, …, fixtures/
+scripts/              dump_screen, talkback_test, sarvam_test, llm_probe, blinkit_empty_cart
+walk/                 walk mode (beta): on-device obstacle warnings, phone browser, no agent
+site/                 website + app-screen prototypes (not connected to the agent)
 ```
 
 ## Conventions

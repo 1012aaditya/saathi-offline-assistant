@@ -543,7 +543,7 @@
       </div>
       <div class="flow-tabs" role="group" aria-label="Choose a task to follow">
         <button type="button" class="ftab" data-flow="wa" aria-pressed="true">WhatsApp: read &amp; reply</button>
-        <button type="button" class="ftab" data-flow="pay" aria-pressed="false">Send ₹1 on Google Pay <span class="soon-tag if-pay-soon">In progress</span></button>
+        <button type="button" class="ftab" data-flow="pay" aria-pressed="false">Send ₹1 on Google Pay <span class="soon-tag if-pay-soon">Coming later</span></button>
       </div>
       <p class="flow-note if-pay-soon" id="payNote" hidden>This shows how payments will work. The payment flow is still being built and tested on the phone.</p>
 
@@ -704,27 +704,28 @@
           <p class="then">Reply by voice. It reads back who it’s going to and the exact words before sending.</p>
         </article>
         <article class="flow f2 rv-card">
-          <span class="badge"><span class="if-pay-live">Core</span><span class="if-pay-soon">In progress</span></span>
+          <span class="badge"><span class="if-pay-live">Core</span><span class="if-pay-soon">Coming later</span></span>
           <span class="app">Google Pay</span>
           <p class="say">“Send Rahul ₹1.”</p>
           <p class="hi">Or in Hindi: <span lang="hi">“राहुल को एक रुपया भेजो”</span></p>
           <p class="then">Asks which Rahul if there are two, reads back the payment, then hands over for your PIN.</p>
         </article>
         <article class="flow f3 rv-card">
-          <span class="badge">Next</span>
+          <span class="badge">Works now</span>
           <span class="app">Blinkit</span>
           <p class="say">“Order 1 litre of Amul milk.”</p>
           <p class="hi">Or in Hinglish: “Amul doodh 1 litre mangao”</p>
-          <p class="then">Reads back the items and the total before placing the order.</p>
+          <p class="then">Finds the best match, asks if two are equally good, then reads back exactly what’s in the cart and stops before ordering.</p>
         </article>
         <article class="flow f4 rv-card">
-          <span class="badge">Next</span>
+          <span class="badge">Works now</span>
           <span class="app">Any app</span>
           <p class="say">“What’s on my screen?”</p>
           <p class="hi">Or in Hindi: <span lang="hi">“स्क्रीन पे क्या है?”</span></p>
           <p class="then">One sentence about the screen, plus the three most useful things you can do there.</p>
         </article>
       </div>
+      <p class="more-apps rv"><b>New, in beta: Walk mode.</b> Point the phone’s camera ahead and hear Hindi warnings with a rough distance, like <span lang="hi">“सामने दरवाज़ा, लगभग 3 मीटर”</span> (door ahead, about 3 metres). It runs entirely on the phone, works offline, and only ever warns: it never says the way is safe. An aid alongside a cane, not a replacement.</p>
       <p class="more-apps rv">Coming later: PhonePe, BHIM, calls, SMS, cabs, trains, medicines, food delivery and more. <a href="settings.html#apps">See every app and choose what Saathi can do →</a></p>
     </div>
   </section>
@@ -733,14 +734,14 @@
   <section class="band" style="padding-top:0" aria-labelledby="num-h">
     <div class="wrap">
       <div class="head-row">
-        <div><p class="kicker">Measured, not promised</p><h2 id="num-h" class="rv">Tested on a real phone, ten runs per task.</h2></div>
-        <p class="lede rv">Test runs never place real orders, and test payments are capped at ₹10 between our own accounts. The bars below are our targets. They’ll be replaced with measured results when testing finishes.</p>
+        <div><p class="kicker">Measured, not promised</p><h2 id="num-h" class="rv">Tested on a real Android device.</h2></div>
+        <p class="lede rv">Measured on 12 October on a Samsung Galaxy Tab, with real WhatsApp and Blinkit. Samples are still small: 3 runs per WhatsApp task, 10 for Blinkit. Test runs stop at the read-back, so nothing is sent or ordered. Payments are not tested yet.</p>
       </div>
       <div class="bars" id="bars">
         <div class="bar-row"><span class="lbl">Best agent today<small>Published study</small></span><div class="btrack"><div class="fill base" data-w="52.5"></div></div><span class="val">52.5%</span></div>
-        <div class="bar-row"><span class="lbl">WhatsApp read &amp; reply<small>Saathi target</small></span><div class="btrack"><div class="fill t1 target" data-w="90"></div></div><span class="val">9/10</span></div>
-        <div class="bar-row"><span class="lbl">Send ₹1, up to the PIN<small>Saathi target</small></span><div class="btrack"><div class="fill t2 target" data-w="80"></div></div><span class="val">8/10</span></div>
-        <div class="bar-row"><span class="lbl">Blinkit order<small>Saathi target</small></span><div class="btrack"><div class="fill t3 target" data-w="70"></div></div><span class="val">7/10</span></div>
+        <div class="bar-row"><span class="lbl">Read a contact’s last message<small>Saathi, measured</small></span><div class="btrack"><div class="fill t1" data-w="100"></div></div><span class="val">3/3</span></div>
+        <div class="bar-row"><span class="lbl">Reply, up to the read-back<small>Saathi, measured</small></span><div class="btrack"><div class="fill t2" data-w="100"></div></div><span class="val">3/3</span></div>
+        <div class="bar-row"><span class="lbl">Blinkit order, up to the read-back<small>Saathi, measured</small></span><div class="btrack"><div class="fill t3" data-w="100"></div></div><span class="val">10/10</span></div>
       </div>
       <div class="zero rv">
         <b>0</b>
