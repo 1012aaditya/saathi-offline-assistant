@@ -190,8 +190,11 @@ class WalkEngine(context: Context) {
         return best?.first ?: Detector.load(app, model, Backend.Cpu, MAIN_THREADS)
     }
 
-    /** Bind the camera and start warning. Call on the main thread. */
-    fun start(owner: LifecycleOwner, previewView: PreviewView, out: WalkOutput) {
+    /**
+     * Bind the camera and start warning. Call on the main thread. [previewView] null: no preview
+     * (walk mode from the floating bubble, over another app: camera analysis only).
+     */
+    fun start(owner: LifecycleOwner, previewView: PreviewView?, out: WalkOutput) {
         if (running || released) return
         output = out
         running = true
@@ -225,12 +228,14 @@ class WalkEngine(context: Context) {
                     .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
                     .setResolutionStrategy(ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                     .build()
-                val preview = Preview.Builder()
-                    .setResolutionSelector(
-                        ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build(),
-                    )
-                    .build()
-                    .also { it.surfaceProvider = previewView.surfaceProvider }
+                val preview = previewView?.let { v ->
+                    Preview.Builder()
+                        .setResolutionSelector(
+                            ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build(),
+                        )
+                        .build()
+                        .also { it.surfaceProvider = v.surfaceProvider }
+                }
                 val analysis = ImageAnalysis.Builder()
                     .setResolutionSelector(selector)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -238,7 +243,11 @@ class WalkEngine(context: Context) {
                     .build()
                     .also { it.setAnalyzer(analysisThread, ::analyze) }
                 p.unbindAll()
-                p.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                if (preview != null) {
+                    p.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                } else {
+                    p.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, analysis)
+                }
                 lastFrameAt = SystemClock.uptimeMillis()
             } catch (t: Throwable) {
                 Log.e(TAG, "camera failed", t)
@@ -258,6 +267,26 @@ class WalkEngine(context: Context) {
         if (sayStopped) say(words.stop, SPEAK_ALWAYS)
         output = if (sayStopped) output else null
         _state.update { it.copy(running = false, boxes = emptyList(), line = "", lineLevel = 0, hint = null) }
+    }
+
+    private val wantFrame = AtomicBoolean(false)
+    @Volatile private var grabbed: android.graphics.Bitmap? = null
+
+    /**
+     * The next camera frame, upright ("what's in front?" while walking, from the bubble), or null
+     * if none came within [timeoutMs]. Blocking: call off the main thread.
+     */
+    fun nextFrame(timeoutMs: Long = 1_500): android.graphics.Bitmap? {
+        if (!running) return null
+        grabbed = null
+        wantFrame.set(true)
+        val end = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < end) {
+            grabbed?.let { grabbed = null; return it }
+            Thread.sleep(30)
+        }
+        wantFrame.set(false)
+        return null
     }
 
     /** Free the models and threads (screen left). */
@@ -287,6 +316,7 @@ class WalkEngine(context: Context) {
             if (frameBytes.size != src.remaining()) frameBytes = ByteArray(src.remaining())
             src.get(frameBytes) // one bulk copy; per-byte reads from the direct buffer are slow
             val frame = RgbaFrame(frameBytes, image.width, image.height, plane.rowStride, image.imageInfo.rotationDegrees)
+            if (wantFrame.compareAndSet(true, false)) grabbed = runCatching { frame.toUprightBitmap() }.getOrNull()
             val now = SystemClock.uptimeMillis()
             camFrames++
             if (brightness == null || camFrames % 5 == 0) brightness = Yolo.brightness(frame)
@@ -440,4 +470,19 @@ class WalkEngine(context: Context) {
         private const val WATCHDOG_MS = 500L
         private const val SPEECH_START_MS = 400L // TTS reports "speaking" a moment after speak()
     }
+}
+
+/** This frame as an upright bitmap (a copy: the frame's bytes are reused for the next one). */
+internal fun RgbaFrame.toUprightBitmap(): android.graphics.Bitmap {
+    val tight = width * 4
+    val pixels = if (rowStride == tight) {
+        bytes.copyOf(tight * height)
+    } else {
+        ByteArray(tight * height).also { out -> for (r in 0 until height) System.arraycopy(bytes, r * rowStride, out, r * tight, tight) }
+    }
+    val b = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+    b.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(pixels))
+    if (rotation % 360 == 0) return b
+    val m = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+    return android.graphics.Bitmap.createBitmap(b, 0, 0, width, height, m, true).also { if (it !== b) b.recycle() }
 }

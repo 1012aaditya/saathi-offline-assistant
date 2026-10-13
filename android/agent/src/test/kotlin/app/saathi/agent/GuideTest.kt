@@ -487,6 +487,11 @@ class GuideTest {
         assertEquals(Command.Guide("blinkit", "let's do it together in Blinkit"), CommandParser.parse("let's do it together in Blinkit"))
         assertEquals(null, (CommandParser.parse("step by step") as Command.Guide).app)
         assertEquals(null, (CommandParser.parse("guide me") as Command.Guide).app)
+        // The bubble's "Help me here" (14 Oct), said instead of tapped.
+        for (q in listOf("help me here", "help me with this app", "yahan madad karo", "यहाँ मदद करो")) {
+            assertEquals(null, (CommandParser.parse(q) as? Command.Guide)?.app, q)
+            assertTrue(CommandParser.parse(q) is Command.Guide, q)
+        }
         assertEquals(null, (CommandParser.parse("saath mein karte hain") as Command.Guide).app)
         assertEquals(null, (CommandParser.parse("ek ek karke") as Command.Guide).app)
         assertEquals(null, (CommandParser.parse("मिलकर करते हैं") as Command.Guide).app)

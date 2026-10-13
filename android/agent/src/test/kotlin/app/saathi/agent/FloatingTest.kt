@@ -80,7 +80,10 @@ class FloatingTest {
 
     @Test
     fun `a press starts, talks, adopts or restarts on the app in front, never switching apps`() {
-        assertEquals(Floating.Press.START, Floating.press(Floating.Run.NONE, null, wa, usable = true))
+        // 14 Oct (owner): a tap with nothing running opens the home panel ("What shall we do?").
+        assertEquals(Floating.Press.HOME, Floating.press(Floating.Run.NONE, null, wa, usable = true))
+        assertEquals(Floating.Press.SHOW_WALK, Floating.press(Floating.Run.WALK, null, wa, usable = true))
+        assertEquals(Floating.Press.SHOW_WALK, Floating.press(Floating.Run.WALK, null, null, usable = false), "Stop walking is always reachable")
         assertEquals(Floating.Press.TALK, Floating.press(Floating.Run.FLOATING_GUIDE, wa, wa, usable = true))
         assertEquals(Floating.Press.RESTART, Floating.press(Floating.Run.FLOATING_GUIDE, "com.grofers.customerapp", wa, usable = true))
         assertEquals(Floating.Press.ADOPT, Floating.press(Floating.Run.APP_GUIDE, wa, wa, usable = true))
@@ -112,12 +115,16 @@ class FloatingTest {
         assertEquals(Floating.Phase.YOUR_TURN, p(Floating.RunView.Ended(handedOver = true), false, false))
         assertEquals(Floating.Phase.ENDED, p(Floating.RunView.Ended(handedOver = false), false, false))
         assertEquals(Floating.Phase.BUSY, p(Floating.RunView.Busy, false, false))
+        assertEquals(Floating.Phase.HOME, p(Floating.RunView.Home, false, false))
+        assertEquals(Floating.Phase.HOME, p(Floating.RunView.Home, true, false))
+        assertEquals(Floating.Phase.WALKING, p(Floating.RunView.Walking, false, false))
     }
 
     @Test
     fun `Speak works only while the conversation waits for the user (never during a question)`() {
         val on = Floating.Phase.entries.filter(Floating::speakEnabled).toSet()
-        assertEquals(setOf(Floating.Phase.YOUR_MOVE, Floating.Phase.LISTENING), on)
+        assertEquals(setOf(Floating.Phase.YOUR_MOVE, Floating.Phase.LISTENING, Floating.Phase.HOME, Floating.Phase.WALKING), on)
+        assertFalse(Floating.Phase.CONFIRM in on || Floating.Phase.PICK in on)
     }
 
     // -- never touching the overlay ----------------------------------------------------------------------

@@ -21,6 +21,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import app.saathi.agent.Floating
 import app.saathi.agent.Outcome
+import app.saathi.agent.FloatingTexts
 import app.saathi.agent.Requests
 import app.saathi.agent.SaathiAccessibilityService
 import app.saathi.agent.TaskRunner
@@ -113,6 +114,14 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
     /** A push-to-talk press for the panel (when it was made); the panel consumes it. */
     private val talkAt = MutableStateFlow<Long?>(null)
 
+    /** Walk mode from the bubble, and the home panel's actions (made when the overlay is on). */
+    private var walk: FloatingWalk? = null
+    private var home: FloatingHome? = null
+    private var walkJob: kotlinx.coroutines.Job? = null
+
+    /** Bumped each time the home panel opens: it says "What shall we do?" and then listens once. */
+    private val homeOpened = MutableStateFlow(app.saathi.ui.screens.HomeOpen(0, 0))
+
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == AppState.FLOATING_KEY || key == null) main.post { syncEnabled() }
     }
@@ -137,7 +146,12 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
 
     private fun enable() {
         hiddenByUser = false // Settings > Floating Saathi off and on again always brings the bubble back
-        deps = SharedDeps.acquire(service)
+        val d = SharedDeps.acquire(service)
+        deps = d
+        val w = FloatingWalk(service, d).also { walk = it }
+        home = FloatingHome(service, d, w, scope, helpHere = { startHere() })
+        // Walking: the bubble stays reachable (its panel has Stop walking) and shows the walk panel.
+        walkJob = scope.launch { w.walking.collect { on -> if (on) openPanel(); refresh() } }
         Log.i(TAG, "on")
         stateJob = scope.launch { TaskRunner.state.collect { onRunnerState(it) } }
         check()
@@ -149,6 +163,11 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
         if (stopSession && TaskRunner.isFloatingGuiding) TaskRunner.stop()
         stateJob?.cancel()
         stateJob = null
+        walkJob?.cancel()
+        walkJob = null
+        walk?.release()
+        walk = null
+        home = null
         panelOpen = false
         removePanel()
         removeBubble()
@@ -238,6 +257,7 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
         val f = front
         val usable = f != null && f != own && f !in Floating.SYSTEM_UI && !sensitive && !keyguardLocked()
         val run = when {
+            walk?.walking?.value == true -> Floating.Run.WALK
             TaskRunner.isFloatingGuiding -> Floating.Run.FLOATING_GUIDE
             TaskRunner.isAppGuiding -> Floating.Run.APP_GUIDE
             TaskRunner.isRunning -> Floating.Run.TASK
@@ -247,6 +267,16 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
         Log.i(TAG, "press from $source: $decision") // never screen text
         val speak: (String) -> Unit = { line -> d.voice.speak(line) }
         when (decision) {
+            Floating.Press.HOME -> {
+                d.voice.stopSpeaking()
+                home?.clear()
+                d.feedback.cue(Cue.Tick)
+                openPanel()
+                d.voice.speak(FloatingTexts.HOME_TITLE)
+                // A finished bubble run's last words give way to the home panel.
+                homeOpened.value = app.saathi.ui.screens.HomeOpen(homeOpened.value.count + 1, TaskRunner.state.value.runId)
+            }
+            Floating.Press.SHOW_WALK -> openPanel()
             Floating.Press.START, Floating.Press.RESTART -> {
                 d.voice.stopSpeaking()
                 if (TaskRunner.startFloatingGuide(service, f!!, Requests.lang(d), d.state, speak)) {
@@ -265,6 +295,24 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
             }
             Floating.Press.SHOW_BUSY -> openPanel()
             Floating.Press.IGNORE -> d.feedback.cue(Cue.Cancelled)
+        }
+    }
+
+    /** "Help me here": a guide session on the app in front (the panel's button / "help me here"). */
+    private fun startHere() {
+        val d = deps ?: return
+        check()
+        val f = front
+        if (f == null || f == own || f in Floating.SYSTEM_UI || sensitive || keyguardLocked()) {
+            home?.say("I can't help on this screen.")
+            return
+        }
+        d.voice.stopSpeaking()
+        if (TaskRunner.startFloatingGuide(service, f, Requests.lang(d), d.state) { line -> d.voice.speak(line) }) {
+            d.feedback.cue(Cue.Tick)
+            openPanel()
+        } else {
+            home?.say(Texts(Requests.lang(d)).serviceOff)
         }
     }
 
@@ -478,6 +526,9 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
                     CompositionLocalProvider(LocalDeps provides d, LocalActivityResultRegistryOwner provides owner) {
                         FloatingPanel(
                             app = appLabel.value,
+                            home = home,
+                            walking = walk?.walking,
+                            homeOpened = homeOpened,
                             talkAt = talkAt,
                             consumeTalk = { talkAt.value = null },
                             onHide = { closePanel() },

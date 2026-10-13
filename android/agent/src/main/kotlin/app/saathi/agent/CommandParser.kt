@@ -194,7 +194,9 @@ object CommandParser {
     private val GUIDE = Regex(
         "let'?s do (it|this) together|do (it|this) together|together step by step|step by step|step-by-step|guide me|" +
             "walk me through|saath (mein|me|main) karte (hain|hai|he)|saath (mein|me|main) karo|milkar karte (hain|hai)|" +
-            "ek ek karke|ek-ek karke|मिलकर करते|मिल कर करते|साथ में करते|साथ में करो|एक एक करके|एक-एक करके",
+            "ek ek karke|ek-ek karke|मिलकर करते|मिल कर करते|साथ में करते|साथ में करो|एक एक करके|एक-एक करके|" +
+            // The bubble's "Help me here" (14 Oct): guide mode on the app in front.
+            "help me here|help me with this( app| screen)?|help me in this app|yaha(n|in)? madad karo|is(me|mein) madad karo|यहाँ मदद करो|इसमें मदद करो",
         I,
     )
     private val GUIDE_IN = Regex("\\b(?:in|on|inside|with)\\s+(?:the\\s+)?(.+?)(?:\\s+app)?$", I)

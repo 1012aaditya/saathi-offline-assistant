@@ -123,6 +123,26 @@ fun SaathiNavHost(deps: Deps) {
         }
     }
 
+    // A task started from the bubble hands its leftover-draft / "which contact?" question to
+    // Saathi's own screens (TaskRunner.awaitChoice / awaitPick): open that sheet from wherever
+    // Saathi is (the Working screen does this itself when it is showing).
+    LaunchedEffect(Unit) {
+        app.saathi.agent.TaskRunner.state.collect { s ->
+            val sheet = when (s) {
+                is app.saathi.agent.TaskRunner.State.Choosing -> Route.DraftChoice
+                is app.saathi.agent.TaskRunner.State.Picking -> Route.ContactChoice
+                else -> null
+            } ?: return@collect
+            if (nav.current() !in setOf(Route.Working, Route.DraftChoice, Route.ContactChoice)) nav.go(sheet)
+        }
+    }
+
+    // Words from the floating panel that need Saathi's own screens (HandOff).
+    LaunchedEffect(Unit) {
+        HandOff.take()?.let { app.saathi.agent.Requests.handle(it, deps, nav) }
+        HandOff.flow.collect { HandOff.take(); app.saathi.agent.Requests.handle(it, deps, nav) }
+    }
+
     // Debug builds only: a typed command from `adb shell` (DebugCommandReceiver), handled exactly
     // like a spoken one. Release builds have no sender, so this never fires there.
     LaunchedEffect(Unit) {

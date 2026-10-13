@@ -40,7 +40,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.saathi.agent.Command
+import app.saathi.agent.EchoGuard
 import app.saathi.agent.Floating
+import app.saathi.overlay.FloatingHome
 import app.saathi.brain.LlmEngine
 import app.saathi.agent.FloatingTexts
 import app.saathi.agent.GuideTurn
@@ -77,9 +80,15 @@ import kotlinx.coroutines.flow.StateFlow
  * your answer"). Saathi's full lines are spoken once by Saathi's own voice, not again by TalkBack
  * (two voices at once, and TalkBack's speech isn't known to the speak/listen interlock).
  */
+/** The bubble opened the home panel ([count] each time); a finished run [hideRun] gives way to it. */
+data class HomeOpen(val count: Int, val hideRun: Int)
+
 @Composable
-fun FloatingPanel(
+internal fun FloatingPanel(
     app: String,
+    home: FloatingHome?,
+    walking: StateFlow<Boolean>?,
+    homeOpened: StateFlow<HomeOpen>,
     talkAt: StateFlow<Long?>,
     consumeTalk: () -> Unit,
     onHide: () -> Unit,
@@ -95,9 +104,20 @@ fun FloatingPanel(
     val turns = guiding?.turns.orEmpty()
     val lastSaathi = turns.lastOrNull { !it.fromUser }
     val lastUser = turns.lastOrNull { it.fromUser }
-    val finished = (st as? TaskRunner.State.Finished)?.takeIf { floating }
+    val opened by homeOpened.collectAsState()
+    val finished = (st as? TaskRunner.State.Finished)?.takeIf { floating && it.runId != opened.hideRun }
+    val isWalking = walking?.collectAsState()?.value == true
+    val homeLine = home?.line?.collectAsState()?.value
+    val looking = home?.busy?.collectAsState()?.value == true
 
-    val listener = ScreenParts.rememberCommandListener { heard -> TaskRunner.guideCommand(heard, "floating voice") }
+    // Words said on the panel: to the guide session if one runs here, else to the home panel's router.
+    val listener = ScreenParts.rememberCommandListener { heard ->
+        when {
+            guiding != null -> TaskRunner.guideCommand(heard, "floating voice")
+            heard.msAfterSpeech < EchoGuard.MIN_HEARD_AFTER_SPEECH_MS -> home?.say("Sorry, say that again.")
+            else -> home?.handle(heard.text)
+        }
+    }
     val ptt = remember { PushToTalk { SystemClock.elapsedRealtime() } }
     val auto = remember { AutoListen() }
 
@@ -106,9 +126,12 @@ fun FloatingPanel(
         floating && st is TaskRunner.State.ChoosingItem -> Floating.RunView.Pick
         finished != null -> Floating.RunView.Ended(finished.outcome is Outcome.HandedOver)
         guiding != null -> Floating.RunView.Turn(lastFromUser = turns.lastOrNull()?.fromUser == true)
-        floating -> Floating.RunView.Starting
+        // A guide session getting ready; a bubble task (messages, orders) shows its progress + Stop.
+        floating && (st as? TaskRunner.State.Running)?.command is Command.Guide -> Floating.RunView.Starting
+        floating && st !is TaskRunner.State.Finished && st !is TaskRunner.State.Running -> Floating.RunView.Starting
         TaskRunner.isRunning -> Floating.RunView.Busy
-        else -> Floating.RunView.None
+        isWalking -> Floating.RunView.Walking
+        else -> Floating.RunView.Home
     }
     val phase = Floating.phase(run, listener.active, thinking)
     val currentPhase by rememberUpdatedState(phase)
@@ -148,6 +171,18 @@ fun FloatingPanel(
             if (!listener.active) talk(at)
         }
     }
+    // The bubble opened the home panel: after "What shall we do?" it listens once (the tap was the press).
+    LaunchedEffect(opened.count) {
+        if (opened.count > 0 && guiding == null) {
+            ScreenParts.listenAfterSpeech(deps.voice, listener) { currentPhase == Floating.Phase.HOME }
+        }
+    }
+    // Saathi answered on the home / walk panel: listen again only if "Listen after Saathi speaks" is on.
+    LaunchedEffect(homeLine) {
+        if (homeLine != null && deps.state.listenAfterSpeaking && guiding == null) {
+            ScreenParts.listenAfterSpeech(deps.voice, listener) { currentPhase == Floating.Phase.HOME || currentPhase == Floating.Phase.WALKING }
+        }
+    }
     // A question replaces the conversation controls: no command listening under it.
     LaunchedEffect(phase) { if (phase == Floating.Phase.CONFIRM || phase == Floating.Phase.PICK) listener.cancel() }
 
@@ -185,6 +220,16 @@ fun FloatingPanel(
                     Text(finished?.outcome?.message.orEmpty(), style = Clarity.type.headline.copy(fontWeight = FontWeight.Medium), color = c.label)
                     SecondaryButton(FloatingTexts.CLOSE, onClose, description = FloatingTexts.CLOSE_DESC)
                 }
+                Floating.Phase.HOME, Floating.Phase.WALKING -> HomeControls(
+                    walkingNow = phase == Floating.Phase.WALKING,
+                    app = app,
+                    line = if (looking) FloatingTexts.LOOKING else homeLine,
+                    listener = listener,
+                    onTalk = { talk() },
+                    home = home,
+                    onHide = onHide,
+                    onClose = onClose,
+                )
                 Floating.Phase.BUSY -> {
                     val running = st as? TaskRunner.State.Running
                     Text(running?.title ?: FloatingTexts.status(phase, app), style = Clarity.type.headline, color = c.label, modifier = Modifier.semantics { heading() })
@@ -258,5 +303,58 @@ private fun FloatingSpeakButton(active: Boolean, enabled: Boolean, onClick: () -
             Icon(Icons.Filled.Mic, contentDescription = null, tint = if (active || enabled) c.onAccent else c.secondary, modifier = Modifier.size(36.dp))
             Text(if (active) "Listening" else FloatingTexts.SPEAK, style = Clarity.type.callout, color = if (active || enabled) c.onAccent else c.secondary)
         }
+    }
+}
+
+/**
+ * The home panel ("What shall we do?") and the walk panel: Saathi's last words, Speak, and big
+ * buttons. Home: Help me here · Walk · What's in front · Read messages. Walking: What's in front ·
+ * Stop walking (red). Every button says what it does to TalkBack.
+ */
+@Composable
+private fun HomeControls(
+    walkingNow: Boolean,
+    app: String,
+    line: String?,
+    listener: ScreenParts.ScreenListener,
+    onTalk: () -> Unit,
+    home: FloatingHome?,
+    onHide: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val c = Clarity.colors
+    Text(
+        if (walkingNow) "${FloatingTexts.PANEL} · Walking" else "${FloatingTexts.PANEL} · $app",
+        style = Clarity.type.callout,
+        color = c.secondary,
+        modifier = Modifier.semantics { heading() },
+    )
+    Text(
+        line ?: if (walkingNow) "Walking. I'll warn you about things ahead." else FloatingTexts.HOME_TITLE,
+        style = Clarity.type.headline.copy(fontWeight = FontWeight.Medium),
+        color = c.label,
+    )
+    ScreenParts.ListenHint(listener)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        FloatingSpeakButton(listener.active, enabled = true) { onTalk() }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (walkingNow) {
+                SecondaryButton(FloatingTexts.LOOK, { home?.look() }, description = FloatingTexts.LOOK_DESC, height = 52.dp)
+                DangerButton(FloatingTexts.STOP_WALK, { home?.stopAll() }, description = FloatingTexts.STOP_WALK_DESC, height = 52.dp)
+            } else {
+                SecondaryButton(FloatingTexts.HELP_HERE, { home?.helpHereNow() }, description = FloatingTexts.HELP_HERE_DESC, height = 52.dp)
+                SecondaryButton(FloatingTexts.WALK, { home?.startWalk() }, description = FloatingTexts.WALK_DESC, height = 52.dp)
+            }
+        }
+    }
+    if (!walkingNow) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SecondaryButton(FloatingTexts.LOOK, { home?.look() }, modifier = Modifier.weight(1f), description = FloatingTexts.LOOK_DESC, height = 52.dp)
+            SecondaryButton(FloatingTexts.MESSAGES, { home?.readMessages() }, modifier = Modifier.weight(1f), description = FloatingTexts.MESSAGES_DESC, height = 52.dp)
+        }
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SecondaryButton(FloatingTexts.HIDE, onHide, modifier = Modifier.weight(1f), description = FloatingTexts.HIDE_DESC, height = 52.dp)
+        if (!walkingNow) SecondaryButton(FloatingTexts.CLOSE, onClose, modifier = Modifier.weight(1f), description = FloatingTexts.CLOSE_DESC, height = 52.dp)
     }
 }

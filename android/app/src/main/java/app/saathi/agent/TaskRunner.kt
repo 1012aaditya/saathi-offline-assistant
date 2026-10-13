@@ -155,14 +155,14 @@ object TaskRunner {
      * Start [command]. False when a task is already running or the service is off.
      * [speak] is called on the main thread for each narration line.
      */
-    fun start(context: Context, command: Command, lang: Lang, appState: AppState, speak: (String) -> Unit): Boolean {
+    fun start(context: Context, command: Command, lang: Lang, appState: AppState, floating: Boolean = false, speak: (String) -> Unit): Boolean {
         if (isRunning && isFloatingGuiding) {
             // A new request from Saathi's own screens ends the floating session first (never two drivers).
             val previous = job
             stop()
             scope.launch {
                 previous?.join()
-                withContext(Dispatchers.Main) { start(context, command, lang, appState, speak) }
+                withContext(Dispatchers.Main) { start(context, command, lang, appState, floating, speak) }
             }
             return true
         }
@@ -187,6 +187,9 @@ object TaskRunner {
         }
         session.remember(command)
         val id = ++runCounter
+        // Started from the bubble's panel: progress and the Confirm / "which one?" questions stay
+        // on the panel over the app; Saathi's screen isn't brought forward (see [floatingRun]).
+        if (floating) floatingRun = id
         val title = title(command)
         val appLabel = when (command) {
             is Command.OpenApp -> appName(command.packageName)
@@ -701,8 +704,11 @@ object TaskRunner {
         val d = CompletableDeferred<String?>()
         picked = d
         val lines = (_state.value as? State.Running)?.lines.orEmpty()
+        // The leftover-draft and "which contact?" questions are asked on Saathi's own screens only
+        // (13 Oct incident sheets; not on the floating panel): a bubble task hands over here.
+        if (isFloatingRun(id)) { floatingRun = 0; log("question moved from the bubble to Saathi's screen") }
         _state.value = State.Picking(id, command, title, req, lines)
-        if (!isFloatingRun(id)) bringSaathiToFront(context) // floating: asked on the panel, over the app
+        bringSaathiToFront(context)
         return try {
             d.await()
         } finally {
@@ -737,8 +743,11 @@ object TaskRunner {
         val d = CompletableDeferred<DraftChoice>()
         choice = d
         val lines = (_state.value as? State.Running)?.lines.orEmpty()
+        // The leftover-draft and "which contact?" questions are asked on Saathi's own screens only
+        // (13 Oct incident sheets; not on the floating panel): a bubble task hands over here.
+        if (isFloatingRun(id)) { floatingRun = 0; log("question moved from the bubble to Saathi's screen") }
         _state.value = State.Choosing(id, command, title, req, lines)
-        if (!isFloatingRun(id)) bringSaathiToFront(context) // floating: asked on the panel, over the app
+        bringSaathiToFront(context)
         return try {
             d.await().also { log("draft choice answered: $it") } // the choice only, never text
         } finally {

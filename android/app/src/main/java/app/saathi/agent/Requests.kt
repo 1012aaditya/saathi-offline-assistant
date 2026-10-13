@@ -83,7 +83,7 @@ object Requests {
         nav.replace(Route.Working)
     }
 
-    private fun levelRefusal(command: Command, deps: Deps, t: Texts): String? {
+    internal fun levelRefusal(command: Command, deps: Deps, t: Texts): String? {
         fun level(app: String) = deps.state.appLevels.firstOrNull { it.first == app }?.second
         val whatsapp = command is Command.ReadLast || command is Command.Reply || command is Command.UnreadSummary ||
             (command is Command.OpenApp && command.packageName == Apps.WHATSAPP)

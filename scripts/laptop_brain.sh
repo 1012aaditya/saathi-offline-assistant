@@ -6,7 +6,7 @@
 #   ADB_SERIAL=<serial> scripts/laptop_brain.sh
 set -euo pipefail
 MODEL="qwen3:4b"
-SERIAL="${ADB_SERIAL:-$(adb devices | awk 'NR>1 && $2=="device"{print $1; exit}')}"
+SERIAL="${ADB_SERIAL:-$(adb devices | awk -F'\t' 'NR>1 && $2=="device"{print $1; exit}')}"
 [ -n "$SERIAL" ] || { echo "No adb device. Connect the tablet first."; exit 1; }
 curl -sf http://127.0.0.1:11434/api/tags >/dev/null || { echo "Ollama isn't running. Open the Ollama app (or run: ollama serve)."; exit 1; }
 ollama list | awk '{print $1}' | grep -qx "$MODEL" || { echo "Model $MODEL missing: ollama pull $MODEL"; exit 1; }

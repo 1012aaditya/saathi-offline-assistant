@@ -69,9 +69,21 @@ object Floating {
 
         /** A scripted task (reply, order …): the panel only shows it and offers Stop. */
         TASK,
+
+        /** Walk mode from the bubble (camera warnings over any app). */
+        WALK,
     }
 
     enum class Press {
+        /**
+         * Nothing running: open the home panel ("What shall we do?") and listen once. From there:
+         * help me here (guide), walk, what's in front, messages, or anything said.
+         */
+        HOME,
+
+        /** Walking: show the walk panel (Stop walking, What's in front). */
+        SHOW_WALK,
+
         /** Start a guide session on the app in front (it describes the screen first). */
         START,
 
@@ -93,8 +105,9 @@ object Floating {
 
     fun press(run: Run, sessionApp: String?, front: String?, usable: Boolean): Press = when {
         run == Run.TASK -> Press.SHOW_BUSY
+        run == Run.WALK -> Press.SHOW_WALK
         !usable || front == null -> Press.IGNORE
-        run == Run.NONE -> Press.START
+        run == Run.NONE -> Press.HOME
         sessionApp != front -> Press.RESTART
         run == Run.FLOATING_GUIDE -> Press.TALK
         else -> Press.ADOPT
@@ -131,6 +144,12 @@ object Floating {
 
         /** A scripted task is running. */
         BUSY,
+
+        /** Nothing running: "What shall we do?" (Speak + Help me here · Walk · What's in front · Messages). */
+        HOME,
+
+        /** Walk mode is on. */
+        WALKING,
     }
 
     /** What the runner is in, as far as the panel cares. */
@@ -142,6 +161,8 @@ object Floating {
         data object Pick : RunView
         data class Ended(val handedOver: Boolean) : RunView
         data object Busy : RunView
+        data object Home : RunView
+        data object Walking : RunView
     }
 
     fun phase(run: RunView, listening: Boolean, thinking: Boolean): Phase = when (run) {
@@ -149,6 +170,8 @@ object Floating {
         RunView.Pick -> Phase.PICK
         is RunView.Ended -> if (run.handedOver) Phase.YOUR_TURN else Phase.ENDED
         RunView.Busy -> Phase.BUSY
+        RunView.Walking -> Phase.WALKING
+        RunView.Home -> Phase.HOME // listening shows on the panel's own Speak button
         RunView.None, RunView.Starting -> Phase.STARTING
         is RunView.Turn -> when {
             listening -> Phase.LISTENING
@@ -159,7 +182,7 @@ object Floating {
     }
 
     /** Speak (push-to-talk for a command) works only while the conversation waits for the user. */
-    fun speakEnabled(p: Phase): Boolean = p == Phase.YOUR_MOVE || p == Phase.LISTENING
+    fun speakEnabled(p: Phase): Boolean = p == Phase.YOUR_MOVE || p == Phase.LISTENING || p == Phase.HOME || p == Phase.WALKING
 
     // -- never touching the overlay itself -----------------------------------------------------------
 
@@ -239,6 +262,19 @@ object FloatingTexts {
     const val BUSY_STOP_DESC = "Stop this task now"
     const val GETTING_READY = "Getting ready…"
     const val MIC_FROM_APP = "To use the microphone here, open Saathi once and allow it."
+    const val LOOKING = "Looking…"
+    const val HOME_TITLE = "What shall we do?"
+    const val HELP_HERE = "Help me here"
+    const val HELP_HERE_DESC = "Help me in this app: Saathi says what it sees and does each step you say."
+    const val WALK = "Walk"
+    const val WALK_DESC = "Walk mode: the back camera watches ahead and Saathi warns you, over any app."
+    const val STOP_WALK = "Stop walking"
+    const val STOP_WALK_DESC = "Stop walk mode: the camera turns off."
+    const val LOOK = "What's in front"
+    const val LOOK_DESC = "Take a picture with the back camera and hear what is in front of you."
+    const val MESSAGES = "Read messages"
+    const val MESSAGES_DESC = "Hear who sent you new WhatsApp messages."
+    const val HOME_HINT = "You can say: help me here, walk, what's in front, read my messages, or message someone."
 
     /** The floating Confirm sheet's chrome (question and hint are the full-screen sheet's own: [Texts]). */
     const val CONFIRM_TITLE_SEND = "Send this message?"
@@ -267,6 +303,8 @@ object FloatingTexts {
         Floating.Phase.ENDED -> "Saathi has finished."
         Floating.Phase.YOUR_TURN -> "Your turn. Saathi has stopped."
         Floating.Phase.BUSY -> "Saathi is working on a task."
+        Floating.Phase.HOME -> "What shall we do? Press Speak, or pick one below."
+        Floating.Phase.WALKING -> "Walking. Saathi warns you about things ahead."
     }
 
     /** Everything above (for the no-yes / no-position tests and as echo sources). */
@@ -274,6 +312,7 @@ object FloatingTexts {
         BUBBLE, BUBBLE_HIDE, PANEL, SPEAK, SPEAK_DESC, STOP_LISTENING, REPEAT, REPEAT_DESC, MORE, MORE_DESC, HIDE, HIDE_DESC,
         STOP, STOP_DESC, CLOSE, CLOSE_DESC, YOUR_TURN, BUSY_STOP_DESC, GETTING_READY, MIC_FROM_APP, CONFIRM_TITLE_SEND,
         CONFIRM_EXACT, CANCEL, CANCEL_DEFAULT, SEND, PICK_FOOTNOTE, PICK_CANCEL_DESC, PICK_OPTION_SUFFIX,
-        ASKING_AGAIN, NOT_SURE,
+        ASKING_AGAIN, NOT_SURE, LOOKING, HOME_TITLE, HELP_HERE, HELP_HERE_DESC, WALK, WALK_DESC, STOP_WALK, STOP_WALK_DESC, LOOK,
+        LOOK_DESC, MESSAGES, MESSAGES_DESC, HOME_HINT,
     ) + Floating.Phase.entries.map { status(it, "the app") }
 }
