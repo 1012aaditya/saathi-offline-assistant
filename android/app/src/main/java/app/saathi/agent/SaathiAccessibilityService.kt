@@ -198,6 +198,22 @@ class SaathiAccessibilityService : AccessibilityService() {
 
     private fun currentRoot(): AccessibilityNodeInfo? = appWindow()?.root ?: rootInActiveWindow
 
+    /**
+     * Every window of the app in front, left to right. On tablets in landscape WhatsApp shows the
+     * chat list and the open chat as two side-by-side activities (two windows); the active one alone
+     * can be just the "No chat selected" pane (seen on the owner's Tab S6 Lite, 13 Oct).
+     */
+    private fun appRoots(): List<AccessibilityNodeInfo> {
+        val active = currentRoot() ?: return emptyList()
+        val pkg = active.packageName?.toString() ?: return listOf(active)
+        val roots = runCatching { windows }.getOrDefault(emptyList())
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .mapNotNull { w -> w.root?.takeIf { it.packageName?.toString() == pkg }?.let { w to it } }
+            .sortedBy { (w, _) -> Rect().also(w::getBoundsInScreen).left }
+            .map { it.second }
+        return roots.ifEmpty { listOf(active) }
+    }
+
     /** Node -> RawNode. A password field's text is never read (hard rule 2). */
     private fun raw(n: AccessibilityNodeInfo, depth: Int, budget: IntArray): RawNode {
         val r = Rect()
@@ -237,7 +253,8 @@ class SaathiAccessibilityService : AccessibilityService() {
     private fun read(): Snapshot? {
         val root = currentRoot() ?: return null
         val pkg = root.packageName?.toString().orEmpty()
-        val snap = Normalizer.normalize(listOf(raw(root, 0, intArrayOf(MAX_NODES))), pkg, keyboardVisible())
+        val budget = intArrayOf(MAX_NODES)
+        val snap = Normalizer.normalize(appRoots().map { raw(it, 0, budget) }, pkg, keyboardVisible())
         // Blinkit hides its search box from accessibility: surface the focused field (order apps only).
         if (pkg !in Apps.ORDER_APPS) return snap
         val focused = runCatching { root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() ?: return snap
