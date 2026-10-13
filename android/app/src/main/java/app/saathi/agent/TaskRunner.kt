@@ -423,7 +423,13 @@ object TaskRunner {
         }
         if (device.snapshot()?.packageName == pkg) return true
         if (withContext(Dispatchers.Main) { MainActivity.sendToBack() } && inFront()) return true
-        if (pkg in Apps.APP_ALIASES.values) return false
+        if (pkg in Apps.APP_ALIASES.values) {
+            // The guide session was allowed to use this app when it started (gated OpenApp then):
+            // reopen the same app if stepping back showed something else (e.g. the home screen).
+            val intent = app.packageManager.getLaunchIntentForPackage(pkg)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return false
+            if (!withContext(Dispatchers.Main) { runCatching { app.startActivity(intent) }.isSuccess }) return false
+            return inFront()
+        }
         val launchable = AppLauncher.installed(app).firstOrNull { it.packageName == pkg } ?: return false
         if (!withContext(Dispatchers.Main) { AppLauncher.launch(app, launchable, appState) }) return false
         return inFront()
