@@ -29,7 +29,8 @@ object LaptopVision {
 
     /** The first answer loads the model on the laptop (~16 s); later ones take 1–3 s. */
     private const val TIMEOUT_MS = 30_000
-    private const val MAX_SIDE = 896
+    // 14 Oct on the M2 (8 GB): 896 px took 8–12 s; smaller pictures and answers are faster.
+    private const val MAX_SIDE = 640
     private const val MAX_CHARS = 420
 
     enum class Kind { SCENE, PHOTO, SCREEN }
@@ -41,7 +42,8 @@ object LaptopVision {
             Kind.SCREEN -> "This is a phone app screen. A blind person asked what the pictures on it show. Describe the pictures, banners and offers, and read any text inside them."
         }
         val language = if (lang == Lang.HI) "simple Hindi written in Devanagari" else "simple English"
-        return "$what Answer in $language, in at most three short sentences, like a helpful friend. " +
+        val sentences = if (kind == Kind.SCREEN) "three" else "two"
+        return "$what Answer in $language, in at most $sentences short sentences, like a helpful friend. " +
             "Never say who a person is, and never guess names; just say \"a person\". " +
             "Never read out passwords, PINs or codes. If you are not sure, say so. No lists, no markdown."
     }
@@ -63,7 +65,7 @@ object LaptopVision {
             .put("model", MODEL)
             .put("stream", false)
             .put("keep_alive", "10m")
-            .put("options", JSONObject().put("temperature", 0.2).put("num_predict", 160))
+            .put("options", JSONObject().put("temperature", 0.2).put("num_predict", 110))
             .put(
                 "messages",
                 JSONArray().put(
