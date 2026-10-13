@@ -22,6 +22,12 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "no" -> { app.saathi.agent.TaskRunner.answer(app.saathi.safety.Answer.NO, "debug"); return }
         }
         val text = intent.getStringExtra("text")?.takeIf { it.isNotBlank() } ?: return
+        // A running guide session (floating panel or Guide screen): hand the words straight to it,
+        // like pressing Speak, without bringing Saathi's screen forward (that would close the panel).
+        if (app.saathi.agent.TaskRunner.isGuiding) {
+            app.saathi.agent.TaskRunner.guideCommand(app.saathi.agent.Heard(text), "request")
+            return
+        }
         DebugCommands.post(text)
         context.startActivity(
             Intent(context, MainActivity::class.java)

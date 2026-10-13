@@ -863,4 +863,11 @@ class GuideTest {
         val out = runBlocking { AgentLoop(GatedDevice(gate, fake), Texts(Lang.EN)).run(stuck, app.saathi.safety.CommandContext(""), {}) { Answer.NO } } as Outcome.Failed
         assertEquals(GuideOffer(Apps.BLINKIT, null), out.offer)
     }
+
+    @Test
+    fun `cheapest questions the owner asked on the tablet (14 Oct) mean Cheaper`() {
+        for (q in listOf("which one is the cheapest", "which is the cheapest", "what's the cheapest", "cheapest one", "lowest price", "sabse sasta kaun sa hai", "सबसे सस्ता कौन सा है")) {
+            assertEquals(GuideCommand.Cheaper, GuideGrammar.parse(q), q)
+        }
+    }
 }

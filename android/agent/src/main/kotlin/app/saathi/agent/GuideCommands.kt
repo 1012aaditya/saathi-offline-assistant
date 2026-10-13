@@ -87,7 +87,7 @@ object GuideGrammar {
         "^(checkout|check out|go to checkout|proceed to checkout|place (my |the )?order|order (karo|kar do|now|it)|checkout (karo|kar do)|चेकआउट( करो)?|ऑर्डर (करो|कर दो))$",
         I,
     )
-    private val CHEAPER = Regex("^(show me )?(something |anything )?(cheaper|cheaper ones?|cheaper options?|the cheapest( one)?|cheapest)( ones?| options?)?$|^(kuch )?(sasta|saste|sasti)( wala| vala| wale)?( dikhao| batao)?$|^(सस्ता|सस्ते)( वाला)?( दिखाओ| बताओ)?$", I)
+    private val CHEAPER = Regex("^(which( one)? is |which is |what('s| is) |what are )?(the )?(lowest price|lowest priced( one)?|least expensive( one)?)$|^(which( one)? is |which is |what('s| is) )?(show me )?(something |anything )?(cheaper|cheaper ones?|cheaper options?|the cheapest( one)?|cheapest)( ones?| options?| one)?( here)?$|^(sabse )?(sasta|saste|sasti)( kaun sa| kaunsa| konsa)?( hai)?$|^सबसे सस्ता( कौन सा)?( है)?$|^(kuch )?(sasta|saste|sasti)( wala| vala| wale)?( dikhao| batao)?$|^(सस्ता|सस्ते)( वाला)?( दिखाओ| बताओ)?$", I)
     private val NEWEST = Regex("^(read (the )?(new|newest|latest|last)? ?messages?|read (the )?(new|newest|latest|last) one|what did (they|he|she) (say|send)|message padho|messages padho|naya message padho|मैसेज पढ़ो|नया मैसेज पढ़ो)$", I)
     private val DOWN = Regex("^(scroll|scroll down|down|go down|neeche|niche|neeche karo|niche karo|neeche scroll karo|scroll karo|aage|aage karo|नीचे|नीचे करो|आगे|आगे करो)$", I)
     private val UP = Regex("^(scroll up|up|go up|upar|upar karo|oopar|peeche|piche|peeche karo|ऊपर|ऊपर करो|पीछे|पीछे करो)$", I)
