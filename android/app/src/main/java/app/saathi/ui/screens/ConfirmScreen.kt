@@ -1,5 +1,7 @@
 package app.saathi.ui.screens
 
+import android.os.SystemClock
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -79,6 +81,12 @@ import kotlinx.coroutines.launch
  * (hard rule 4). Nothing confirms on its own; an unclear voice answer is asked once more, then
  * cancels (hard rule 5). Cancel also removes the message Saathi typed; what is said and shown
  * afterwards is the runner's real outcome (removed, or NOT removed and remembered), never assumed.
+ *
+ * Saathi must never confirm its own question (13 Oct): the mic never listens while Saathi speaks
+ * ([app.saathi.voice.Voice]); a voice yes must be a short explicit yes from the user
+ * ([ConfirmDialog]); a reply that repeats the question or the sheet's words is unclear; the
+ * spoken question and every text on this sheet contain no yes word; and the Send button ignores
+ * a tap in the first [SEND_ARM_MS] after the sheet appears (a touch meant for the app underneath).
  */
 @Composable
 fun ConfirmScreen(nav: AppNav) {
@@ -113,6 +121,8 @@ fun ConfirmScreen(nav: AppNav) {
     var finished by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) } // the runner's final words for this run
+    val shownAt = remember { SystemClock.uptimeMillis() }
+    val hint = t.confirmHint
     val sheet = remember { Animatable(if (still || cancelled) 0f else 1f) } // 1 = below the screen, 0 = up
     val cancelFocus = remember { FocusRequester() }
     val homeFocus = remember { FocusRequester() }
@@ -127,7 +137,7 @@ fun ConfirmScreen(nav: AppNav) {
         deps.feedback.cue(Cue.Cancelled)
         deps.voice.speak(spoken)
         // The runner removes the typed draft, records the outcome, and its result is said below.
-        TaskRunner.answer(Answer.NO)
+        TaskRunner.answer(Answer.NO, "cancel")
         cancelled = true
         scope.launch {
             if (!still) sheet.animateTo(1f, tween(300, easing = ease))
@@ -135,13 +145,17 @@ fun ConfirmScreen(nav: AppNav) {
         }
     }
 
-    fun send() {
+    fun send(source: String) {
         if (finished) return
+        if (source == "tap" && SystemClock.uptimeMillis() - shownAt < SEND_ARM_MS) {
+            Log.i("SaathiConfirm", "send tap ignored: sheet appeared ${SystemClock.uptimeMillis() - shownAt} ms ago")
+            return
+        }
         finished = true
         listener.cancel()
         deps.voice.stopSpeaking()
         // A clear yes (tap or voice): the runner re-checks the screen and the gate, then sends.
-        TaskRunner.answer(Answer.YES)
+        TaskRunner.answer(Answer.YES, source)
         nav.replace(Route.Working)
     }
 
@@ -161,11 +175,29 @@ fun ConfirmScreen(nav: AppNav) {
         }
     }
 
+    // Everything Saathi says or shows while waiting: a reply that repeats it is an echo, not an answer.
+    val sheetWords = listOf(
+        confirmQuestion,
+        "Send to $confirmTo?",
+        confirmText,
+        "Exactly as typed on screen",
+        "Safety check: ${asked?.readback.orEmpty()}",
+        "Needs your answer. Send to $confirmTo: $confirmText? Cancel is selected.",
+        "Cancel. This is the default. Nothing will be sent. $undoing",
+        "Send “$confirmText” to $confirmTo. It will really be sent.",
+        hint,
+        "Cancelling. Not sending.",
+        "I wasn't sure, so I'm cancelling. Not sending.",
+    )
+
     listener = ScreenParts.rememberScreenListener(
-        onFailed = { reason -> if (reason == "I didn't catch that.") askAgainOrCancel(dialog.silence()) },
+        onFailed = { reason -> if (reason == ScreenParts.NOT_CAUGHT) askAgainOrCancel(dialog.silence()) },
+        genericEchoCheck = false, // the dialog's own, stricter check below
     ) { text ->
-        when (val next = dialog.hear(text)) {
-            ConfirmDialog.Next.SEND -> send()
+        val next = dialog.hear(text, echoSources = deps.voice.recentPrompts(30_000) + sheetWords)
+        Log.i("SaathiConfirm", "voice answer: $next (unclear so far ${dialog.unclear}), length ${text.length}")
+        when (next) {
+            ConfirmDialog.Next.SEND -> send("voice")
             ConfirmDialog.Next.CANCEL -> cancel()
             ConfirmDialog.Next.ASK_AGAIN -> askAgainOrCancel(next)
         }
@@ -203,7 +235,7 @@ fun ConfirmScreen(nav: AppNav) {
     DisposableEffect(Unit) {
         onDispose {
             val rotating = (context as? android.app.Activity)?.isChangingConfigurations == true
-            if (!finished && asked != null && !rotating) TaskRunner.answer(Answer.NO)
+            if (!finished && asked != null && !rotating) TaskRunner.answer(Answer.NO, "left the screen")
         }
     }
 
@@ -312,7 +344,7 @@ fun ConfirmScreen(nav: AppNav) {
                     )
                     PrimaryButton(
                         "Send",
-                        { send() },
+                        { send("tap") },
                         description = "Send “$confirmText” to $confirmTo. It will really be sent.",
                     )
                 }
@@ -320,7 +352,7 @@ fun ConfirmScreen(nav: AppNav) {
                 ScreenParts.ListenHint(listener)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Footnote(
-                        if (asking) "Asking again…" else "Say “Yes” or “No”. If I'm not sure, I'll ask again, then cancel.",
+                        if (asking) "Asking again…" else hint,
                         Modifier.weight(1f),
                     )
                     ScreenParts.TalkButton(
@@ -364,3 +396,6 @@ fun ConfirmScreen(nav: AppNav) {
         }
     }
 }
+
+/** The Send button ignores taps this soon after the sheet appears (a touch meant for the app below). */
+private const val SEND_ARM_MS = 700L

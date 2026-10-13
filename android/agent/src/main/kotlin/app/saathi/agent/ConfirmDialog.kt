@@ -1,11 +1,22 @@
 package app.saathi.agent
 
 import app.saathi.safety.Answer
-import app.saathi.safety.parseYesNo
+import app.saathi.safety.NO
 
 /**
- * The spoken yes/no before an irreversible step (hard rule 5): defaults to cancel. A clear yes
- * sends; any no cancels; unclear (or silence) -> ask once more -> still unclear -> cancel.
+ * The spoken yes/no before an irreversible step (hard rule 5): defaults to cancel. Only a short,
+ * explicit yes from the user sends; any no cancels; anything else (or silence) -> ask once more
+ * -> still unclear -> cancel.
+ *
+ * Strict on purpose (13 Oct: a send was confirmed with no human answer while Saathi's own
+ * question was being spoken):
+ *  - YES needs an explicit yes word (yes / yeah / haan / हाँ …) in at most [MAX_YES_WORDS] words,
+ *    and every other word must be a harmless filler ("send it", "bhej do", "please", "ji").
+ *    "send", "bhejo" or "भेज दो" alone is NOT a yes.
+ *  - yes and no together -> unclear.
+ *  - An echo of what Saathi said / showed ([EchoGuard]) -> unclear. In particular, if the yes
+ *    word itself appears in the prompt or on the sheet, it can't be told from an echo, so the
+ *    prompts never contain a yes word (see [Texts.confirmQuestion]).
  */
 class ConfirmDialog(private val maxUnclear: Int = 2) {
     enum class Next { SEND, CANCEL, ASK_AGAIN }
@@ -13,31 +24,65 @@ class ConfirmDialog(private val maxUnclear: Int = 2) {
     var unclear: Int = 0
         private set
 
-    fun hear(reply: String): Next = when (classify(reply)) {
-        Answer.YES -> Next.SEND
-        Answer.NO -> Next.CANCEL
-        Answer.UNCLEAR -> unclearOnce()
+    /**
+     * [echoSources]: what Saathi said lately and the sheet's own words (title, message, buttons,
+     * hints). A reply that overlaps them is treated as unclear, never as yes.
+     */
+    fun hear(reply: String, echoSources: List<String> = emptyList()): Next {
+        if (isEcho(reply, echoSources)) return unclearOnce()
+        return when (classify(reply)) {
+            Answer.YES -> Next.SEND
+            Answer.NO -> Next.CANCEL
+            Answer.UNCLEAR -> unclearOnce()
+        }
     }
 
-    /** Nothing heard / recogniser error: counts as unclear. */
+    /** Nothing heard / recogniser error / discarded echo: counts as unclear. */
     fun silence(): Next = unclearOnce()
 
     private fun unclearOnce(): Next = if (++unclear >= maxUnclear) Next.CANCEL else Next.ASK_AGAIN
 
     companion object {
-        private val EXTRA_YES = setOf("yeah", "yep", "yup", "sure", "send", "bhejo", "भेजो", "हाँजी", "haanji")
-        private val EXTRA_NO = setOf("nope", "dont", "don't", "nah", "wait", "रुकिए")
-        private val WORD = Regex("[^\\p{L}\\p{M}\\p{N}']+")
+        const val MAX_YES_WORDS = 4
 
-        /** The safety port's parser first (any "no" wins), plus a few more English / Hindi words. */
+        /** Explicit yes words. One of these must be in a YES reply, said by the user. */
+        val YES_WORDS: Set<String> = setOf(
+            "yes", "yeah", "yep", "yup", "haan", "haa", "ha", "han", "haanji", "hanji",
+            "हाँ", "हां", "हा", "हाँजी", "हांजी",
+        ).flatMap { EchoGuard.tokens(it) }.toSet()
+
+        /** Words allowed next to a yes word ("yes send it", "haan bhej do", "ji haan"). Nothing else. */
+        private val YES_FILLERS: Set<String> = setOf(
+            "send", "it", "please", "now", "go", "ahead", "do", "ji", "jee", "bhej", "bhejo", "bhejdo", "de", "dijiye",
+            "dena", "kar", "karo", "kardo", "जी", "भेज", "भेजो", "दो", "दीजिए", "दे", "कर", "करो",
+        ).flatMap { EchoGuard.tokens(it) }.toSet()
+
+        private val NO_WORDS: Set<String> = (
+            NO + setOf("nope", "nah", "dont", "don't", "not", "wait", "nahin", "रुकिए", "मत", "नहीं", "नही")
+            ).flatMap { EchoGuard.tokens(it) }.toSet()
+
+        /** Words to leave out of the overlap ratio: the answer vocabulary and fillers. */
+        private val IGNORE: Set<String> = YES_WORDS + YES_FILLERS + NO_WORDS
+
         fun classify(reply: String): Answer {
-            val base = parseYesNo(reply)
-            if (base == Answer.NO) return Answer.NO
+            val w = EchoGuard.tokens(reply)
+            if (w.isEmpty()) return Answer.UNCLEAR
             val lower = reply.lowercase()
-            val words = lower.split(WORD).filter { it.isNotEmpty() }.toSet()
-            if (words.any { it in EXTRA_NO } || "do not" in lower) return Answer.NO
-            if (base == Answer.YES || words.any { it in EXTRA_YES }) return Answer.YES
-            return Answer.UNCLEAR
+            val no = w.any { it in NO_WORDS } || "do not" in lower
+            val yes = w.any { it in YES_WORDS }
+            return when {
+                no && yes -> Answer.UNCLEAR // "yes no", "haan nahi": ask again
+                no -> Answer.NO
+                yes && w.size <= MAX_YES_WORDS && w.all { it in YES_WORDS || it in YES_FILLERS } -> Answer.YES
+                else -> Answer.UNCLEAR
+            }
         }
+
+        /** The reply repeats Saathi's prompt / sheet, or its yes word is in them. */
+        fun isEcho(reply: String, echoSources: List<String>): Boolean =
+            EchoGuard.overlap(reply, echoSources, ignore = IGNORE, decisive = YES_WORDS) != EchoGuard.Reason.NONE
+
+        /** True if [text] contains a word that [classify] would take as yes (prompts must not). */
+        fun containsYesWord(text: String): Boolean = EchoGuard.tokens(text).any { it in YES_WORDS }
     }
 }

@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.ModelDownloadListener
 import android.speech.RecognitionListener
 import android.speech.RecognitionSupport
@@ -16,6 +17,8 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.annotation.RequiresApi
+import app.saathi.agent.EchoGuard
+import app.saathi.agent.VoiceInterlock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +39,13 @@ import android.speech.tts.Voice as TtsVoice
  * (highest quality first). If the phone's default engine has none, other installed engines
  * (e.g. Google, Samsung) are tried.
  *
+ * Saathi never listens to itself ([VoiceInterlock], 13 Oct incident): the microphone never opens
+ * while Saathi is speaking, and only [EchoGuard.LISTEN_AFTER_SPEECH_MS] after it stopped; if
+ * Saathi starts speaking while a session is open (or waiting to open), that session is cancelled
+ * and its result discarded; a result heard within [EchoGuard.MIN_HEARD_AFTER_SPEECH_MS] of the
+ * end of Saathi's speech is discarded. A discarded result is reported as "I didn't catch that."
+ * ([FailCode.Echo]), which every answer screen treats as unclear (ask again, then the safe side).
+ *
  * The UI only talks to this class. Status lines are logged under the tag "SaathiVoice".
  */
 class Voice(private val context: Context) {
@@ -44,6 +54,12 @@ class Voice(private val context: Context) {
     enum class FailCode {
         NoMatch, SpeechTimeout, NoPermission, Network, LanguageNotSupported, LanguageUnavailable,
         Busy, Audio, Server, Client, Unavailable, Other,
+
+        /** Discarded: Saathi was speaking around this session, or it came too soon after (see [VoiceInterlock]). */
+        Echo,
+
+        /** Cancelled because Saathi started speaking while listening. */
+        Interrupted,
     }
 
     sealed interface Listen {
@@ -77,7 +93,18 @@ class Voice(private val context: Context) {
     val listen: StateFlow<Listen> = _listen.asStateFlow()
 
     private val _speaking = MutableStateFlow(false)
+
+    /** True from [speak] (even before the engine starts) until that speech is done, stopped or failed. */
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
+
+    /** The speak / listen interlock (pure, unit-tested in the agent module). */
+    private val interlock = VoiceInterlock { SystemClock.elapsedRealtime() }
+
+    /** What Saathi said in the last [windowMs] (newest last), for echo checks on answer screens. */
+    fun recentPrompts(windowMs: Long = VoiceInterlock.RECENT_MS): List<String> = interlock.recentPrompts(windowMs)
+
+    /** Utterance id of the speech that [speaking] is about; callbacks for older ones are ignored. */
+    @Volatile private var currentUtterance: String? = null
 
     private val _speechMode = MutableStateFlow(SpeechMode.Unavailable)
     /** Current speech-in mode (updates when the language changes or a pack turns out to be missing). */
@@ -163,20 +190,24 @@ class Voice(private val context: Context) {
             if (ttsReady) {
                 if (ttsEngine == null) ttsEngine = runCatching { tts?.defaultEngine }.getOrNull()
                 ensureOfflineVoice()
-                while (pending.isNotEmpty()) speak(pending.removeFirst())
+                while (pending.isNotEmpty()) speakQueued(pending.removeFirst())
             } else if (engine != null) {
                 main.post { startTts(null) } // chosen engine failed to start: go back to the phone's default
+            } else {
+                // No speech engine at all: nothing queued will be said, so it isn't "speaking".
+                pending.clear()
+                main.post { currentUtterance = null; speechEnded() }
             }
         }
         val t = if (engine == null) TextToSpeech(context, listener) else TextToSpeech(context, listener, engine)
         created[0] = t
         tts = t
         t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(id: String?) { _speaking.value = true }
-            override fun onDone(id: String?) { _speaking.value = false }
+            override fun onStart(id: String?) = Unit // speaking was already set by speak()
+            override fun onDone(id: String?) = utteranceEnded(id)
             @Deprecated("Deprecated in Java")
-            override fun onError(id: String?) { _speaking.value = false }
-            override fun onStop(utteranceId: String?, interrupted: Boolean) { _speaking.value = false }
+            override fun onError(id: String?) = utteranceEnded(id)
+            override fun onStop(utteranceId: String?, interrupted: Boolean) = utteranceEnded(utteranceId)
         })
     }
 
@@ -246,16 +277,76 @@ class Voice(private val context: Context) {
         next(0)
     }
 
-    /** Speak now, replacing anything already being said. */
+    /**
+     * Speak now, replacing anything already being said. Saathi talking cancels any listening
+     * session (open or about to open): its result is discarded, never used as an answer.
+     */
     fun speak(text: String) {
+        val id = UUID.randomUUID().toString()
+        currentUtterance = id
+        _speaking.value = true
+        if (interlock.speechStarted(text)) cancelSessionForSpeech()
         val t = tts
-        if (t == null || !ttsReady) { pending.addLast(text); if (t == null) init(); return }
+        if (t == null || !ttsReady) { pending.addLast(text); if (t == null) init(); armWatchdog(id, text); return }
         if (appliedLocale != locale) ensureOfflineVoice()
         t.setSpeechRate(rate)
-        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        val r = t.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+        if (r != TextToSpeech.SUCCESS) utteranceEnded(id) else armWatchdog(id, text)
     }
 
-    fun stopSpeaking() { tts?.stop(); _speaking.value = false }
+    /**
+     * Text queued before the engine was ready, spoken in order. Each gets its own id and the
+     * last one is [currentUtterance], so speaking ends only when the last one is done.
+     */
+    private fun speakQueued(text: String) {
+        val t = tts ?: return
+        if (currentUtterance == null) return // stopped meanwhile
+        val id = UUID.randomUUID().toString()
+        currentUtterance = id
+        if (appliedLocale != locale) ensureOfflineVoice()
+        t.setSpeechRate(rate)
+        if (t.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) utteranceEnded(id) else armWatchdog(id, text)
+    }
+
+    fun stopSpeaking() {
+        currentUtterance = null
+        pending.clear()
+        tts?.stop()
+        speechEnded()
+    }
+
+    /** A TTS callback (any thread): only the latest utterance ends the speaking state. */
+    private fun utteranceEnded(id: String?) {
+        main.post {
+            if (id != null && id == currentUtterance) {
+                currentUtterance = null
+                speechEnded()
+            }
+        }
+    }
+
+    private fun speechEnded() {
+        interlock.speechEnded()
+        _speaking.value = false
+    }
+
+    /**
+     * If the engine never reports the end (engine crash, lost callback), stop treating it as
+     * speaking after a generous estimate, so the mic isn't blocked forever. Until then listening
+     * waits (fail closed).
+     */
+    private fun armWatchdog(id: String, text: String) {
+        val maxMs = 8_000L + 120L * text.length
+        main.postDelayed({
+            if (currentUtterance == id && tts?.isSpeaking != true) {
+                Log.w(TAG, "speech out: no end callback after ${maxMs / 1000} s; treating speech as ended")
+                currentUtterance = null
+                speechEnded()
+            } else if (currentUtterance == id) {
+                armWatchdog(id, text) // still really speaking (long text): check again later
+            }
+        }, maxMs)
+    }
 
     /** Opens the phone's text-to-speech settings (choose engine, download voices). For the Settings screen. */
     fun ttsSettingsIntent(): Intent = Intent("com.android.settings.TTS_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -288,18 +379,56 @@ class Voice(private val context: Context) {
         _offlineSpeechAvailable.value = _speechMode.value == SpeechMode.OnDevice && _offlinePack.value == OfflinePack.Installed
     }
 
-    /** Must be called on the main thread. Needs RECORD_AUDIO granted. */
-    fun startListening() {
+    /** Session id of the listening session in progress (or waiting for Saathi's speech to clear). */
+    private var sessionId = 0
+    private var openRunnable: Runnable? = null
+
+    /**
+     * Must be called on the main thread. Needs RECORD_AUDIO granted. The user asked to talk, so
+     * Saathi stops speaking; the microphone opens only [EchoGuard.LISTEN_AFTER_SPEECH_MS] after
+     * Saathi's speech ended (at once if it has been quiet). [onOpen] runs right before the mic
+     * opens (e.g. the "listening" tone), never while Saathi is speaking.
+     */
+    fun startListening(onOpen: (() -> Unit)? = null) {
         stopSpeaking()
         val onDevice = useOnDevice()
         if (!onDevice && !recognitionAvailable) {
             _listen.value = Listen.Failed("Speech recognition isn't available on this phone.", FailCode.Unavailable)
             return
         }
-        startSession(onDevice)
+        openRunnable?.let { main.removeCallbacks(it) }
+        recognizer?.cancel()
+        val id = interlock.requestListen()
+        sessionId = id
+        fun tryOpen() {
+            openRunnable = null
+            if (!interlock.isCurrent(id)) return // Saathi spoke meanwhile, or cancelled
+            val wait = interlock.msUntilMicMayOpen()
+            if (wait == null) return // speaking: speak() already cancelled this session
+            if (wait > 0L || !interlock.open(id)) {
+                val r = Runnable { tryOpen() }
+                openRunnable = r
+                main.postDelayed(r, wait.coerceAtLeast(50L))
+                return
+            }
+            onOpen?.invoke()
+            startSession(onDevice, id)
+        }
+        tryOpen()
     }
 
-    private fun startSession(onDevice: Boolean) {
+    /** Saathi started speaking during a session (open or waiting): cancel it, discard its result. */
+    private fun cancelSessionForSpeech() {
+        openRunnable?.let { main.removeCallbacks(it) }
+        openRunnable = null
+        sessionId++ // callbacks of the cancelled session are ignored from now on
+        runCatching { recognizer?.cancel() }
+        Log.i(TAG, "speech in: cancelled, Saathi started speaking; nothing heard is used")
+        _listen.value = Listen.Failed("Listening stopped.", FailCode.Interrupted)
+    }
+
+    private fun startSession(onDevice: Boolean, id: Int) {
+        if (id != sessionId || !interlock.isCurrent(id)) return
         if (recognizer != null && recognizerIsOnDevice != onDevice) { recognizer?.destroy(); recognizer = null }
         val r = recognizer ?: (
             if (onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
@@ -307,9 +436,13 @@ class Voice(private val context: Context) {
             ).also { recognizer = it; recognizerIsOnDevice = onDevice }
         publishMode()
         r.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { _listen.value = Listen.Hearing("", 0f) }
+            /** Callbacks of a cancelled / replaced session are dropped. */
+            private fun stale() = id != sessionId || !interlock.isCurrent(id)
+
+            override fun onReadyForSpeech(params: Bundle?) { if (!stale()) _listen.value = Listen.Hearing("", 0f) }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {
+                if (stale()) return
                 val cur = _listen.value
                 val level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
                 _listen.value = Listen.Hearing((cur as? Listen.Hearing)?.partial.orEmpty(), level)
@@ -317,6 +450,7 @@ class Voice(private val context: Context) {
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onError(error: Int) {
+                if (stale()) return
                 val code = codeFor(error)
                 // On-device recognizer has no model for this language: quietly retry with the default one.
                 if (onDevice && (code == FailCode.LanguageNotSupported || code == FailCode.LanguageUnavailable) && recognitionAvailable) {
@@ -325,13 +459,23 @@ class Voice(private val context: Context) {
                     if (_offlinePack.value == OfflinePack.Unknown || _offlinePack.value == OfflinePack.Installed) {
                         _offlinePack.value = if (code == FailCode.LanguageNotSupported) OfflinePack.NotSupported else OfflinePack.Downloadable
                     }
-                    main.post { startSession(onDevice = false) }
+                    main.post { startSession(onDevice = false, id) }
                     return
                 }
+                interlock.close(id)
                 _listen.value = Listen.Failed(messageFor(code), code)
             }
             override fun onResults(results: Bundle?) {
+                if (stale()) return
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                // Saathi spoke during / just before this session, or it came too soon after: not the user.
+                val why = interlock.judge(id)
+                interlock.close(id)
+                if (why != EchoGuard.Reason.NONE) {
+                    Log.i(TAG, "speech in: result discarded ($why), length ${text.length}")
+                    _listen.value = Listen.Failed("I didn't catch that.", FailCode.Echo)
+                    return
+                }
                 if (onDevice && _offlinePack.value == OfflinePack.Unknown) {
                     _offlinePack.value = OfflinePack.Installed // it just worked on-device
                     publishMode()
@@ -339,6 +483,7 @@ class Voice(private val context: Context) {
                 _listen.value = if (text.isBlank()) Listen.Failed("I didn't catch that.", FailCode.NoMatch) else Listen.Heard(text)
             }
             override fun onPartialResults(partial: Bundle?) {
+                if (stale()) return
                 val text = partial?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                 val cur = _listen.value
                 _listen.value = Listen.Hearing(text, (cur as? Listen.Hearing)?.level ?: 0f)
@@ -372,9 +517,26 @@ class Voice(private val context: Context) {
         else -> "Listening stopped."
     }
 
-    fun stopListening() { recognizer?.stopListening() }
+    /** Finish the current utterance. If the mic hasn't opened yet (waiting for Saathi's speech to clear), give up. */
+    fun stopListening() {
+        if (openRunnable != null) {
+            main.removeCallbacks(openRunnable!!)
+            openRunnable = null
+            interlock.close(sessionId)
+            _listen.value = Listen.Failed("Listening stopped.", FailCode.Other)
+            return
+        }
+        recognizer?.stopListening()
+    }
 
-    fun cancelListening() { recognizer?.cancel(); _listen.value = Listen.Idle }
+    fun cancelListening() {
+        openRunnable?.let { main.removeCallbacks(it) }
+        openRunnable = null
+        interlock.cancelAll()
+        sessionId++
+        recognizer?.cancel()
+        _listen.value = Listen.Idle
+    }
 
     fun reset() { _listen.value = Listen.Idle }
 
@@ -487,9 +649,12 @@ class Voice(private val context: Context) {
     }
 
     fun shutdown() {
+        cancelListening()
         recognizer?.destroy(); recognizer = null
         supportRecognizer?.destroy(); supportRecognizer = null
         tts?.shutdown(); tts = null; ttsReady = false
+        currentUtterance = null
+        speechEnded()
     }
 
     private companion object {

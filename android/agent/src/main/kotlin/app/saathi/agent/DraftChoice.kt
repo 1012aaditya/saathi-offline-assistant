@@ -51,6 +51,11 @@ data class DraftChoiceRequest(
  * The spoken answer to [DraftChoiceRequest]. Like [ConfirmDialog] it defaults to the safe side:
  * any "no / don't / cancel" means KEEP; an unclear answer (or silence) is asked once more, then KEEP.
  * English, Hindi (Devanagari) and Hinglish words.
+ *
+ * The choice must come from the user, not from Saathi's own question (which has to name the
+ * options): a reply that repeats the question / the sheet ([EchoGuard]) is unclear, and a change
+ * (replace / add / send it) must be a short reply ([MAX_CHANGE_WORDS] words) naming one choice.
+ * None of these sends anything: sending still needs the read-back and a clear yes.
  */
 class DraftChoiceDialog(private val maxUnclear: Int = 2) {
     enum class Next { KEEP, REPLACE, ADD, SEND, ASK_AGAIN }
@@ -58,7 +63,9 @@ class DraftChoiceDialog(private val maxUnclear: Int = 2) {
     var unclear: Int = 0
         private set
 
-    fun hear(reply: String, canChange: Boolean = true): Next {
+    /** [echoSources]: what Saathi said lately and the sheet's own words. */
+    fun hear(reply: String, canChange: Boolean = true, echoSources: List<String> = emptyList()): Next {
+        if (isEcho(reply, echoSources)) return unclearOnce()
         val c = classify(reply) ?: return unclearOnce()
         if (!canChange && (c == DraftChoice.REPLACE || c == DraftChoice.ADD)) return unclearOnce()
         return when (c) {
@@ -75,6 +82,9 @@ class DraftChoiceDialog(private val maxUnclear: Int = 2) {
     private fun unclearOnce(): Next = if (++unclear >= maxUnclear) Next.KEEP else Next.ASK_AGAIN
 
     companion object {
+        /** Replace / add / send it by voice: at most this many words. */
+        const val MAX_CHANGE_WORDS = 4
+
         private val WORD = Regex("[^\\p{L}\\p{M}\\p{N}']+")
 
         private val NEGATIVE = setOf(
@@ -97,12 +107,27 @@ class DraftChoiceDialog(private val maxUnclear: Int = 2) {
             val replace = of(REPLACE)
             val add = of(ADD)
             val send = of(SEND)
+            val all = negative + keep + replace + add + send
         }
 
+        /** Fillers that say nothing about where a reply came from ("replace IT", "add MY MESSAGE"). */
+        private val FILLERS = setOf(
+            "it", "its", "it's", "this", "that", "the", "a", "my", "mine", "message", "new", "please", "now", "just", "and",
+            "with", "after", "do", "de", "dijiye", "dena", "karo", "kar", "ji", "jee", "mera", "meri", "mere", "sandesh",
+            "naya", "wala", "wali", "ise", "isko", "use", "usko", "दो", "दीजिए", "दे", "करो", "कर", "जी", "मेरा", "मेरी", "मेरे",
+            "संदेश", "नया", "इसे", "इसको", "उसे", "और",
+        ).flatMap { words(it) }.toSet()
+
+        /** The reply repeats Saathi's question / the sheet's words. */
+        fun isEcho(reply: String, echoSources: List<String>): Boolean =
+            EchoGuard.overlap(reply, echoSources, ignore = Normed.all + FILLERS) != EchoGuard.Reason.NONE
+
         /** Lowercase, Devanagari nukta dropped (ड़ typed either way matches), split into words. */
-        internal fun words(reply: String): Set<String> {
+        internal fun words(reply: String): Set<String> = wordList(reply).toSet()
+
+        private fun wordList(reply: String): List<String> {
             val n = TextNormalizer.normalize(reply.lowercase(), TextNormalizer.Form.NFD).replace("़", "")
-            return n.split(WORD).filter { it.isNotEmpty() }.toSet()
+            return n.split(WORD).filter { it.isNotEmpty() }
         }
 
         /** The choice the words name, or null when unclear (nothing, or two that conflict). */
@@ -115,8 +140,11 @@ class DraftChoiceDialog(private val maxUnclear: Int = 2) {
             val replace = has(Normed.replace)
             val add = has(Normed.add)
             val send = has(Normed.send)
+            // A change has to be a short reply that names it, not a long sentence.
+            val short = wordList(reply).size <= MAX_CHANGE_WORDS
             return when {
                 keep -> if (replace || add || send) null else DraftChoice.KEEP
+                !short -> null
                 replace && add -> null
                 replace -> DraftChoice.REPLACE // "replace it and send": sending still needs a yes
                 add -> DraftChoice.ADD

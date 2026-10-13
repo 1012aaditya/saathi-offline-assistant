@@ -389,7 +389,8 @@ class ConfirmDialogTest {
         assertEquals(ConfirmDialog.Next.SEND, ConfirmDialog().hear("haan bhej do"))
         assertEquals(ConfirmDialog.Next.CANCEL, ConfirmDialog().hear("no"))
         assertEquals(ConfirmDialog.Next.CANCEL, ConfirmDialog().hear("nahi"))
-        assertEquals(ConfirmDialog.Next.CANCEL, ConfirmDialog().hear("yes no")) // any no wins
+        // Mixed yes + no is unclear (asked once more, then cancelled); it never sends.
+        assertEquals(ConfirmDialog.Next.ASK_AGAIN, ConfirmDialog().hear("yes no"))
         assertEquals(ConfirmDialog.Next.CANCEL, ConfirmDialog().hear("don't send"))
     }
 

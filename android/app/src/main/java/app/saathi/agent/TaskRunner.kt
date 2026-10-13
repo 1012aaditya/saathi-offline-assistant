@@ -257,8 +257,13 @@ object TaskRunner {
         speaker?.let { s -> withContext(Dispatchers.Main) { runCatching { s(note) } } }
     }
 
-    /** The user's answer on the Confirm screen. Only [Answer.YES] can send. */
-    fun answer(a: Answer) {
+    /**
+     * The user's answer on the Confirm screen. Only [Answer.YES] can send. [source] says where
+     * it came from ("tap", "voice", "cancel", "left the screen", "debug" …); it is logged so any
+     * answer can be traced (never the message text).
+     */
+    fun answer(a: Answer, source: String = "unknown") {
+        log("confirm answer $a from $source (waiting=${answer != null})")
         val s = _state.value
         if (s is State.Confirming && a == Answer.YES) {
             _state.value = State.Running(s.runId, s.command, s.title, "WhatsApp", s.lines)
@@ -266,8 +271,9 @@ object TaskRunner {
         answer?.complete(a)
     }
 
-    /** The user's answer on the Draft choice sheet. KEEP (the default) ends the task untouched. */
-    fun choose(c: DraftChoice) {
+    /** The user's answer on the Draft choice sheet. KEEP (the default) ends the task untouched. [source] as in [answer]. */
+    fun choose(c: DraftChoice, source: String = "unknown") {
+        log("draft choice $c from $source (waiting=${choice != null})")
         val s = _state.value
         if (s is State.Choosing && c != DraftChoice.KEEP) {
             _state.value = State.Running(s.runId, s.command, s.title, "WhatsApp", s.lines)

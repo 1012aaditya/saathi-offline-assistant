@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
@@ -73,6 +74,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.core.content.ContextCompat
+import app.saathi.agent.EchoGuard
 import app.saathi.agent.Requests
 import app.saathi.feedback.Cue
 import app.saathi.feedback.Feedback
@@ -297,6 +299,11 @@ object ScreenParts {
     /**
      * Listening without leaving the screen (Confirm's yes/no, "Repeat" on Result, "Continue" on
      * Welcome …). Asks for the microphone itself if needed. Only reacts to sessions it started.
+     *
+     * Never hears Saathi itself: [Voice.startListening] stops Saathi's speech and opens the mic
+     * only after the speech-to-listen gap; Saathi speaking meanwhile cancels the session; a
+     * result too close to Saathi's speech is discarded (arrives here as "I didn't catch that.").
+     * The listening tone plays when the mic actually opens.
      */
     @Stable
     class ScreenListener internal constructor(private val voice: Voice, private val feedback: Feedback) {
@@ -319,9 +326,8 @@ object ScreenParts {
         internal fun begin() {
             problem = null
             voice.reset()
-            voice.startListening()
-            feedback.cue(Cue.StartListening)
             active = true
+            voice.startListening(onOpen = { feedback.cue(Cue.StartListening) })
         }
 
         /** Talk button: start, or finish the current utterance. */
@@ -338,8 +344,21 @@ object ScreenParts {
         }
     }
 
+    /** What every unclear / discarded hearing is reported as (the answer screens count it as unclear). */
+    const val NOT_CAUGHT = "I didn't catch that."
+
+    /**
+     * [genericEchoCheck]: screens whose answers don't send or change anything (Welcome, Result,
+     * Working …) drop a transcript that repeats what Saathi said in the last 15 s
+     * ([EchoGuard.looksLikeEcho]) and report it as [NOT_CAUGHT]. The Confirm and Draft choice
+     * sheets pass false and apply their own stricter checks with the sheet's words.
+     */
     @Composable
-    fun rememberScreenListener(onFailed: (String) -> Unit = {}, onHeard: (String) -> Unit): ScreenListener {
+    fun rememberScreenListener(
+        onFailed: (String) -> Unit = {},
+        genericEchoCheck: Boolean = true,
+        onHeard: (String) -> Unit,
+    ): ScreenListener {
         val deps = LocalDeps.current
         val context = LocalContext.current
         val heard by rememberUpdatedState(onHeard)
@@ -359,7 +378,13 @@ object ScreenParts {
                     listener.active = false
                     deps.voice.reset()
                     deps.feedback.cue(Cue.StopListening)
-                    heard(l.text)
+                    if (genericEchoCheck && EchoGuard.looksLikeEcho(l.text, deps.voice.recentPrompts(15_000))) {
+                        Log.i("SaathiVoice", "screen listener: dropped an echo of Saathi's own words, length ${l.text.length}")
+                        listener.problem = NOT_CAUGHT
+                        failed(NOT_CAUGHT)
+                    } else {
+                        heard(l.text)
+                    }
                 }
                 is Voice.Listen.Failed -> {
                     listener.active = false

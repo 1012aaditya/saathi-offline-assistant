@@ -1,5 +1,7 @@
 package app.saathi.ui.screens
 
+import android.os.SystemClock
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -70,6 +72,11 @@ import kotlinx.coroutines.launch
  * gets here (the runner leaves it alone without reading it). An unclear voice answer is asked
  * once more, then Keep; silence twice, Back, or leaving the screen = Keep. Nothing is sent from
  * here: Replace / Add / Send it all go on to the normal read-back and need a clear yes.
+ *
+ * The choice must come from the user, not from Saathi's own question (13 Oct): the mic never
+ * listens while Saathi speaks ([app.saathi.voice.Voice]); a reply that repeats the question or the
+ * sheet's words is unclear ([DraftChoiceDialog]); a change by voice must be a short reply naming
+ * it; and the change buttons ignore a tap in the first [CHANGE_ARM_MS] after the sheet appears.
  */
 @Composable
 fun DraftChoiceScreen(nav: AppNav) {
@@ -89,18 +96,23 @@ fun DraftChoiceScreen(nav: AppNav) {
 
     var finished by remember { mutableStateOf(req == null) }
     var asking by remember { mutableStateOf(false) }
+    val shownAt = remember { SystemClock.uptimeMillis() }
     val sheet = remember { Animatable(if (still) 0f else 1f) } // 1 = below the screen, 0 = up
     val keepFocus = remember { FocusRequester() }
     val ease = remember { CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f) }
 
     lateinit var listener: ScreenParts.ScreenListener
 
-    fun answer(choice: DraftChoice) {
+    fun answer(choice: DraftChoice, source: String) {
         if (finished) return
+        if (source == "tap" && choice != DraftChoice.KEEP && SystemClock.uptimeMillis() - shownAt < CHANGE_ARM_MS) {
+            Log.i("SaathiConfirm", "draft choice tap ignored: sheet appeared ${SystemClock.uptimeMillis() - shownAt} ms ago")
+            return
+        }
         finished = true
         listener.cancel()
         deps.voice.stopSpeaking()
-        TaskRunner.choose(choice)
+        TaskRunner.choose(choice, source)
         // Keep: the runner ends the task and the Result screen says so (with the Cancelled cue).
         // Anything else carries on in WhatsApp, then the normal read-back asks before sending.
         if (choice != DraftChoice.KEEP) nav.replace(Route.Working)
@@ -108,7 +120,7 @@ fun DraftChoiceScreen(nav: AppNav) {
 
     fun askAgainOrKeep(next: DraftChoiceDialog.Next) {
         if (next == DraftChoiceDialog.Next.KEEP) {
-            answer(DraftChoice.KEEP)
+            answer(DraftChoice.KEEP, "unclear")
             return
         }
         asking = true
@@ -121,14 +133,41 @@ fun DraftChoiceScreen(nav: AppNav) {
         }
     }
 
+    val sayHint = when {
+        canChange -> "Say “Keep”, “Replace”, “Add” or “Send it” (or rehne do, badal do, jod do, bhej do). If I'm not sure, I'll ask again, then keep it."
+        else -> "Say “Keep” or “Send it” (or rehne do, bhej do). If I'm not sure, I'll ask again, then keep it."
+    }
+    // Everything Saathi says or shows while waiting: a reply that repeats it is an echo, not a choice.
+    val sheetWords = listOf(
+        question,
+        "Sorry, I'm not sure. $question",
+        "$chat's chat already has unsent text",
+        existing,
+        "Exactly as it is in the message box. Nothing has been changed.",
+        "Your new message: “${req?.newMessage.orEmpty()}”",
+        t.draftCantChange,
+        "Needs your answer. $question Keep is selected.",
+        "Keep it. This is the default. I won't change or send anything.",
+        "Replace with my message",
+        "Replace it with your new message. I'll read it to you before sending. If you say no, I'll put your text back.",
+        "Add my message after it",
+        "Add your new message after it. I'll read the whole text to you before sending. If you say no, I'll put your text back as it was.",
+        "Send it as it is",
+        "Send this text as it is. I'll read it to you and ask before sending.",
+        sayHint,
+    )
+
     listener = ScreenParts.rememberScreenListener(
-        onFailed = { reason -> if (reason == "I didn't catch that.") askAgainOrKeep(dialog.silence()) },
+        onFailed = { reason -> if (reason == ScreenParts.NOT_CAUGHT) askAgainOrKeep(dialog.silence()) },
+        genericEchoCheck = false, // the dialog's own check below
     ) { text ->
-        when (val next = dialog.hear(text, canChange)) {
-            DraftChoiceDialog.Next.KEEP -> answer(DraftChoice.KEEP)
-            DraftChoiceDialog.Next.REPLACE -> answer(DraftChoice.REPLACE)
-            DraftChoiceDialog.Next.ADD -> answer(DraftChoice.ADD)
-            DraftChoiceDialog.Next.SEND -> answer(DraftChoice.SEND)
+        val next = dialog.hear(text, canChange, echoSources = deps.voice.recentPrompts(30_000) + sheetWords)
+        Log.i("SaathiConfirm", "draft voice answer: $next (unclear so far ${dialog.unclear}), length ${text.length}")
+        when (next) {
+            DraftChoiceDialog.Next.KEEP -> answer(DraftChoice.KEEP, "voice")
+            DraftChoiceDialog.Next.REPLACE -> answer(DraftChoice.REPLACE, "voice")
+            DraftChoiceDialog.Next.ADD -> answer(DraftChoice.ADD, "voice")
+            DraftChoiceDialog.Next.SEND -> answer(DraftChoice.SEND, "voice")
             DraftChoiceDialog.Next.ASK_AGAIN -> askAgainOrKeep(next)
         }
     }
@@ -156,7 +195,7 @@ fun DraftChoiceScreen(nav: AppNav) {
     DisposableEffect(Unit) {
         onDispose {
             val rotating = (context as? android.app.Activity)?.isChangingConfigurations == true
-            if (!finished && req != null && !rotating) TaskRunner.choose(DraftChoice.KEEP)
+            if (!finished && req != null && !rotating) TaskRunner.choose(DraftChoice.KEEP, "left the screen")
         }
     }
 
@@ -168,7 +207,7 @@ fun DraftChoiceScreen(nav: AppNav) {
         runCatching { keepFocus.requestFocus() }
     }
 
-    BackHandler { if (req == null) nav.home() else answer(DraftChoice.KEEP) }
+    BackHandler { if (req == null) nav.home() else answer(DraftChoice.KEEP, "back") }
 
     val status = when {
         listener.active -> "Listening"
@@ -245,7 +284,7 @@ fun DraftChoiceScreen(nav: AppNav) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SecondaryButton(
                         "Keep it",
-                        { answer(DraftChoice.KEEP) },
+                        { answer(DraftChoice.KEEP, "tap") },
                         modifier = Modifier.focusRequester(keepFocus),
                         description = "Keep it. This is the default. I won't change or send anything.",
                         tag = "Default",
@@ -253,18 +292,18 @@ fun DraftChoiceScreen(nav: AppNav) {
                     if (canChange) {
                         SecondaryButton(
                             "Replace with my message",
-                            { answer(DraftChoice.REPLACE) },
+                            { answer(DraftChoice.REPLACE, "tap") },
                             description = "Replace it with your new message. I'll read it to you before sending. If you say no, I'll put your text back.",
                         )
                         SecondaryButton(
                             "Add my message after it",
-                            { answer(DraftChoice.ADD) },
+                            { answer(DraftChoice.ADD, "tap") },
                             description = "Add your new message after it. I'll read the whole text to you before sending. If you say no, I'll put your text back as it was.",
                         )
                     }
                     SecondaryButton(
                         "Send it as it is",
-                        { answer(DraftChoice.SEND) },
+                        { answer(DraftChoice.SEND, "tap") },
                         description = "Send this text as it is. I'll read it to you and ask before sending.",
                     )
                 }
@@ -272,11 +311,7 @@ fun DraftChoiceScreen(nav: AppNav) {
                 ScreenParts.ListenHint(listener)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Footnote(
-                        when {
-                            asking -> "Asking again…"
-                            canChange -> "Say “Keep”, “Replace”, “Add” or “Send it” (or rehne do, badal do, jod do, bhej do). If I'm not sure, I'll ask again, then keep it."
-                            else -> "Say “Keep” or “Send it” (or rehne do, bhej do). If I'm not sure, I'll ask again, then keep it."
-                        },
+                        if (asking) "Asking again…" else sayHint,
                         Modifier.weight(1f),
                     )
                     ScreenParts.TalkButton(
@@ -289,3 +324,6 @@ fun DraftChoiceScreen(nav: AppNav) {
         }
     }
 }
+
+/** Replace / Add / Send it ignore taps this soon after the sheet appears (a touch meant for the app below). */
+private const val CHANGE_ARM_MS = 700L

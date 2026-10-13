@@ -78,9 +78,10 @@ fun ListeningScreen(nav: AppNav) {
         failReason = ""
         transcript = ""
         voice.reset()
-        voice.startListening()
-        feedback.cue(Cue.StartListening)
         active = true
+        // Saathi stops talking; the mic opens only after the speech-to-listen gap, and the tone
+        // plays then (Voice never listens while Saathi speaks, so it can't hear itself).
+        voice.startListening(onOpen = { feedback.cue(Cue.StartListening) })
         phase = ListenPhase.Hearing
     }
 

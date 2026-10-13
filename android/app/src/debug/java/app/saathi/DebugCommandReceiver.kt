@@ -13,6 +13,14 @@ import app.saathi.ui.DebugCommands
  */
 class DebugCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // Non-sending test answers only: keep / replace / add (draft choice) and no (confirm).
+        // There is deliberately no way to answer YES or SEND from here.
+        when (intent.getStringExtra("answer")) {
+            "keep" -> { app.saathi.agent.TaskRunner.choose(app.saathi.agent.DraftChoice.KEEP, "debug"); return }
+            "replace" -> { app.saathi.agent.TaskRunner.choose(app.saathi.agent.DraftChoice.REPLACE, "debug"); return }
+            "add" -> { app.saathi.agent.TaskRunner.choose(app.saathi.agent.DraftChoice.ADD, "debug"); return }
+            "no" -> { app.saathi.agent.TaskRunner.answer(app.saathi.safety.Answer.NO, "debug"); return }
+        }
         val text = intent.getStringExtra("text")?.takeIf { it.isNotBlank() } ?: return
         DebugCommands.post(text)
         context.startActivity(
