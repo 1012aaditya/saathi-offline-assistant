@@ -49,12 +49,12 @@ Small proxy server (holds API keys; never in the app)
 
 ## 4. Design principles
 1. **Voice and touch-free first.** Every action reachable by voice or the volume keys; the screen is a bonus.
-2. **One big thing per screen.** A single huge primary target (≥ 120 dp tall), never small icon-only buttons.
+2. **One clear thing per screen.** One primary action (≥ 64 dp tall, full width; Home mic 200 dp; Stop 72 dp), never small icon-only buttons.
 3. **TalkBack-perfect.** Every element has a spoken label, logical focus order, no gesture-only actions, no time-limited UI.
 4. **Calm, high contrast.** WCAG AAA text contrast (7:1) for body text; large type (body ≥ 20 sp, headings ≥ 32 sp); supports 200 % font scale; dark and light themes.
-5. **Hindi-first, bilingual.** Devanagari primary labels with English secondary (`बोलिए · Speak`); switchable.
+5. **Universal, follows the phone's language.** One language at a time (no bilingual labels); English mockups; Hindi is one of many languages. Every screen shows "You can say …" phrases; Volume-down is push-to-talk everywhere.
 6. **Never surprise with money or messages.** Read-back screens are visually distinct (marigold) and always show Cancel as the default, largest-safe option.
-7. **Brand continuity** with the website: indigo `#4338f2` / deep `#2b22b8`, marigold `#ffb627`, mint `#19c99a`, coral-ink `#c62828` (stop), paper `#fbfaff`, ink `#17153b`; fonts Anek Devanagari (display) + Mukta (body).
+7. **Apple-style minimal ("Clarity", 13 Oct).** White / black backgrounds, iOS-style large titles and inset grouped lists, the system font, one accent (indigo `#2b22b8`; dark `#c9c6ff`), stop `#8e1414`, "needs your answer" yellow `#ffd60a`. No glass, gradients, glows or decorative illustration. Full spec: `DESIGN.md`.
 
 ## 5. Screens
 
@@ -95,7 +95,7 @@ For blind users "motion" is mostly **audio and haptics**; visuals serve low-visi
 - Walk mode: obstacle boxes color by level (yellow → orange → red), red edge flash on "stop", heat-map overlay fades with distance; left/right hint as a large arrow.
 - Transitions: 200–300 ms, ease-out; **respect "Remove animations"** (Android) → instant transitions, all audio/haptics unchanged.
 
-## 7. Stitch prompts (start here)
+## 7. Stitch prompts (superseded 13 Oct — see DESIGN.md for the Clarity prompts)
 1. *Design system:* "Accessible Android app 'Saathi' for blind and low-vision Indian users. Calm, high contrast, WCAG AAA, huge touch targets (≥120dp), Hindi-first bilingual labels in Anek Devanagari + Mukta. Colors: indigo #4338f2, deep indigo #2b22b8, marigold #ffb627, mint #19c99a, stop red #c62828, paper #fbfaff, ink #17153b. Light and dark themes."
 2. One prompt per screen in §5, e.g. *Home:* "Home screen: one giant circular mic button filling the lower half labelled 'बोलिए · Speak', status line on top, two large tiles below: 'चलो · Walk mode' and 'गतिविधि · Activity'. Hint text 'Volume-down दबाकर बोलिए'. Dark theme variant."
 3. *Read-back:* "Confirmation screen: marigold card showing 'Mummy को भेज रहे हैं: \"main 7 baje aaunga\"', two huge buttons stacked: 'नहीं · Cancel' (default, outlined, top) and 'हाँ, भेजो · Yes, send' (filled indigo)."
