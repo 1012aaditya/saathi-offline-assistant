@@ -6,6 +6,7 @@ Kotlin + Jetpack Compose. Design: `../DESIGN.md` ("Clarity"). Spec and build ord
 - **Real:** all 12 Clarity screens, navigation with no dead ends, light/dark, sounds + vibrations, Android "Remove animations", TalkBack labels and focus order, speech in/out via Android's built-in recognizer and text-to-speech (no API keys, no INTERNET permission), runtime permissions, settings and activity history stored only on the phone, Volume-down long-press = talk.
 - **Safety gate:** `safety/` is a 1:1 Kotlin port of `saathi/safety.py` (R1–R11) with all 88 Python safety tests ported, plus parity and config-lock tests. The protected app lists can't be overridden.
 - **Offline app tasks (step 2a, no model, no network):** `agent/` is a pure-Kotlin keyword command parser (English, Hindi, Hinglish) + step-by-step WhatsApp flows (read a contact's last message, who has unread messages, reply with a read-back and your yes, open an app, describe the screen you were on) + the agent loop (25 steps max, stop after 3 failures/loops). `SaathiAccessibilityService` reads the screen and taps; every action passes `DeviceBridge` → `SafetyGate.check()` first. Volume-down long-press from any app = talk (short press still changes volume).
+- **Floating Saathi (14 Oct):** a 64 dp Saathi bubble over other apps, drawn by the accessibility service (`TYPE_ACCESSIBILITY_OVERLAY`, no "display over other apps" permission). Tap it (or hold Volume-down in that app) to do it together ON the app in front: guide mode with a bottom panel (latest line, Speak push-to-talk, Repeat, Read more, Hide, Stop) and the same Confirm / "which one?" questions (shared `ConfirmDialog` / `PickDialog` → `VoiceAnswer`, Cancel default, 700 ms tap arming). Saathi's own screen never comes forward. Hidden over Saathi, the lock screen, system UI, password fields and PIN screens. Settings > Floating Saathi (default on). Code: `overlay/`, `ui/screens/Floating*.kt`, `agent/Floating.kt` (pure, tested).
 - **Switch it on (owner only):** Settings → Accessibility → Installed apps → Saathi → On. Saathi never enables it itself and never toggles TalkBack.
 - **Not yet:** model-driven tasks for anything else (Blinkit, payments) — answered honestly as "can't do that offline yet".
 
@@ -36,6 +37,8 @@ app/src/main/java/app/saathi/
   ui/screens/BrailleParts.kt   word-by-word rhythm reader (next/repeat/read on/sentences/speed)
   ui/screens/BrailleLearnScreen.kt  Learn braille: 5 lessons (six dots, feel a letter, rhythm, quiz, reading)
   agent/                 SaathiAccessibilityService, DeviceBridge (the gated choke point), TaskRunner, Requests
+  overlay/               Floating Saathi: OverlayManager (bubble + panel windows), BubbleView, OverlayOwner
+  ui/SharedDeps.kt       one AppState / Feedback / Voice for the activity AND the overlay (one speak/listen interlock)
 safety/                  pure-Kotlin safety gate + JUnit 5 tests
 agent/                   pure-Kotlin parser, flows, AgentLoop, GatedDevice + tests (synthetic screens only)
 braille/                 pure-Kotlin text → braille cells + OTP extraction + tests (./gradlew :braille:test)

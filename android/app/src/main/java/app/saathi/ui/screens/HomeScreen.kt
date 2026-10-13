@@ -60,6 +60,7 @@ fun HomeScreen(nav: AppNav) {
     val c = Clarity.colors
     val still = ScreenParts.rememberStill()
     val greeting = remember { greetingNow() }
+    val floatingOn = app.saathi.ui.LocalDeps.current.state.floatingSaathi
 
     // The start-listening chime plays on the Listening screen, once the mic is really on.
     val speak = { nav.go(Route.Listening) }
@@ -109,6 +110,16 @@ fun HomeScreen(nav: AppNav) {
                 }
             }
             Text("or hold Volume-down", style = Clarity.type.callout, color = c.secondary)
+        }
+
+        // Floating Saathi: the short explainer (Settings has the switch).
+        if (floatingOn) {
+            ScreenParts.NoteBox(
+                "In any app, tap the round Saathi button to do it together right there: Saathi says what it sees, " +
+                    "you press Speak and say what to do. Holding Volume-down in that app does the same.",
+                ScreenParts.rise(3, still),
+                icon = Icons.Outlined.TouchApp,
+            )
         }
 
         Group(ScreenParts.rise(3, still)) {

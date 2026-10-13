@@ -124,6 +124,8 @@ fun WorkingScreen(nav: AppNav) {
     // Follow the task: confirm before sending, then the result (or hand over).
     LaunchedEffect(st) {
         if (leaving || TaskRunner.pending != null || st.runId < firstRun) return@LaunchedEffect
+        // Floating Saathi's sessions are shown and answered on the overlay, never here.
+        if (TaskRunner.isFloatingRun(st.runId)) return@LaunchedEffect
         when (val s = st) {
             is TaskRunner.State.Confirming -> { leaving = true; nav.replace(Route.Confirm) }
             is TaskRunner.State.Choosing -> { leaving = true; nav.replace(Route.DraftChoice) }

@@ -107,6 +107,12 @@ interface GuideIO {
     /** Bring Saathi back to the front (to talk). */
     suspend fun showSaathi() {}
 
+    /**
+     * Floating Saathi drives this session from an overlay over the app: no app is ever switched or
+     * opened for it ([showApp] only reports whether the app is in front), and Saathi never comes forward.
+     */
+    val floating: Boolean get() = false
+
     /** The Confirm sheet (VoiceAnswer pipeline). Only [Answer.YES] proceeds. */
     suspend fun confirm(request: ConfirmRequest): Answer
 
@@ -328,7 +334,7 @@ class GuideSession(
             }
             val pkg = target ?: return Outcome.Asked(t.noTarget)
             refusalFor(pkg)?.let { return Outcome.Failed(it) }
-            val s = look(settle = true) ?: return Outcome.Failed(t.couldNotReturn)
+            val s = look(settle = true) ?: return Outcome.Failed(if (io.floating) t.notInFront else t.couldNotReturn)
             handover(s)?.let { return it }
             setScreen(s)
             val sum = summary()
@@ -451,7 +457,7 @@ class GuideSession(
     }
 
     private suspend fun sayCantReturn(): Outcome? {
-        say("${t.couldNotReturn} ${t.whatNext}", GuideTurn.Kind.REFUSED)
+        say("${if (io.floating) t.notInFront else t.couldNotReturn} ${t.whatNext}", GuideTurn.Kind.REFUSED)
         return null
     }
 
@@ -987,6 +993,7 @@ class GuideSession(
     /** [pkg] in front: ask the app to show it; for the safety-list apps, a gated OpenApp as a fallback. */
     private suspend fun bringOrOpen(pkg: String): Boolean {
         if (io.showApp(pkg) && device.snapshot()?.packageName == pkg) return true
+        if (io.floating) return false // floating: never open or switch apps for the user
         val alias = Apps.APP_ALIASES.entries.firstOrNull { it.value == pkg }?.key ?: return false
         val now = device.snapshot() ?: return false
         if (now.packageName == pkg) return true

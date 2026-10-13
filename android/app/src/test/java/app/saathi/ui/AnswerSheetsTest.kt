@@ -31,7 +31,7 @@ class AnswerSheetsTest {
     @Test
     fun `the known answer sheets are found`() {
         val sheets = sources().filter { (name, src) -> name != "ScreenParts.kt" && isAnswerSheet(src) }.keys
-        for (expected in listOf("ConfirmScreen.kt", "DraftChoiceScreen.kt", "OrderPickScreen.kt", "ContactChoiceScreen.kt", "AppApprovalScreen.kt")) {
+        for (expected in listOf("ConfirmScreen.kt", "DraftChoiceScreen.kt", "OrderPickScreen.kt", "ContactChoiceScreen.kt", "AppApprovalScreen.kt", "FloatingSheets.kt")) {
             assertTrue("$expected should be detected as an answer sheet (found $sheets)", expected in sheets)
         }
     }
@@ -80,7 +80,7 @@ class AnswerSheetsTest {
     @Test
     fun `pick sheets never say a position (it would make a real first look like an echo)`() {
         val src = sources()
-        for (name in listOf("OrderPickScreen.kt", "ContactChoiceScreen.kt")) {
+        for (name in listOf("OrderPickScreen.kt", "ContactChoiceScreen.kt", "FloatingSheets.kt")) {
             val s = code(src.getValue(name))
             assertFalse("$name: no \"Option N\"", "Option \${" in s)
             assertFalse("$name: no \"N of M\"", "of \${options.size}" in s)

@@ -17,7 +17,8 @@ object Requests {
     fun handle(text: String, deps: Deps, nav: AppNav) {
         // Guide mode: everything said (or a debug `--es text` command) goes to the conversation.
         // It still can't answer a Confirm sheet: the guide grammar has no yes.
-        if (TaskRunner.isGuiding) {
+        // A floating session (driven from the overlay) is not this: a new request here ends it.
+        if (TaskRunner.isAppGuiding) {
             TaskRunner.guideCommand(Heard(text), "request")
             if (nav.current() != Route.Guide) nav.replace(Route.Guide)
             return

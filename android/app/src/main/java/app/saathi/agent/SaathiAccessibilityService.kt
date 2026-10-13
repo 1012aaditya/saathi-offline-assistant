@@ -55,6 +55,7 @@ class SaathiAccessibilityService : AccessibilityService() {
         private const val LONG_PRESS_MS = 600L
         private const val MAX_NODES = 1500
         private const val MAX_DEPTH = 60
+        private const val SENSITIVE_NODES = 800
 
         @Volatile
         var running: SaathiAccessibilityService? = null
@@ -86,12 +87,16 @@ class SaathiAccessibilityService : AccessibilityService() {
 
     private var down = false
 
+    /** Floating Saathi: the bubble + panel this service draws over other apps (null when not connected). */
+    private var overlay: app.saathi.overlay.OverlayManager? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         running = this
         down = false
         DeviceBridge.attach(actuator)
         Log.i(TAG, "connected")
+        overlay = app.saathi.overlay.OverlayManager(this).also { it.start() }
         // Remove a draft an earlier run typed but couldn't remove (service restart, process death).
         TaskRunner.onServiceConnected(this)
     }
@@ -119,10 +124,22 @@ class SaathiAccessibilityService : AccessibilityService() {
         if (running === this) running = null
         DeviceBridge.detach(actuator)
         main.removeCallbacks(longPress)
+        overlay?.stop()
+        overlay = null
         last = null
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit // screens are read on demand
+    /** Screens are read on demand; events only tell Floating Saathi to look at what's in front (throttled). */
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // The overlay's own redraws don't change what's in front.
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED && event.packageName?.toString() == packageName) return
+        overlay?.onScreenEvent()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        overlay?.onConfigurationChanged()
+    }
 
     override fun onInterrupt() = Unit
 
@@ -153,6 +170,8 @@ class SaathiAccessibilityService : AccessibilityService() {
 
     private fun onTalkKey() {
         longFired = true
+        // Floating Saathi on and another app in front: talk right here (the overlay), no app switch.
+        if (overlay?.onTalkKey() == true) return
         // A running task stops at once (Stop); then Saathi listens. In guide mode the key is how the
         // user talks to the guide: the session keeps going and the Guide screen listens.
         if (TaskRunner.isRunning && !TaskRunner.isGuiding) TaskRunner.stop(TaskRunner.StopReason.TALK_KEY)
@@ -197,7 +216,39 @@ class SaathiAccessibilityService : AccessibilityService() {
     private fun keyboardVisible(): Boolean =
         runCatching { windows }.getOrDefault(emptyList()).any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
 
-    private fun currentRoot(): AccessibilityNodeInfo? = appWindow()?.root ?: rootInActiveWindow
+    /** The front app's root. Never Saathi's own overlay windows (bubble / panel): they are not an app. */
+    private fun currentRoot(): AccessibilityNodeInfo? = appWindow()?.root
+        ?: rootInActiveWindow?.takeIf { it.window?.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
+
+    // -- for Floating Saathi (read-only, no screen text leaves this class) --------------------------
+
+    /** The package of the app in front (null if none readable). */
+    fun frontPackageName(): String? = frontPackage()
+
+    fun isKeyboardVisible(): Boolean = keyboardVisible()
+
+    /**
+     * The app in front shows a password field or is a PIN screen (the gate's R8 check): Floating
+     * Saathi hides itself there. Reads flags and texts in memory only; nothing is logged or kept.
+     */
+    fun frontIsSensitive(): Boolean {
+        val roots = appRoots()
+        val pkg = roots.firstOrNull()?.packageName?.toString() ?: return false
+        val els = mutableListOf<Element>()
+        val queue = ArrayDeque(roots)
+        var seen = 0
+        while (queue.isNotEmpty() && seen++ < SENSITIVE_NODES) {
+            val n = queue.removeFirst()
+            if (n.isPassword && n.isVisibleToUser) return true
+            val text = if (n.isPassword) "" else Normalizer.clean(n.text?.toString())
+            val desc = Normalizer.clean(n.contentDescription?.toString())
+            if (text.isNotEmpty() || desc.isNotEmpty()) {
+                els += Element(els.size, "", text, desc, "", false, n.isEditable, false, Bounds(0, 0, 0, 0), Point(0, 0))
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return DeviceBridge.gate.isPinScreen(Screen(pkg, els, "floating"))
+    }
 
     /**
      * Every window of the app in front, left to right. On tablets in landscape WhatsApp shows the
@@ -455,11 +506,17 @@ class SaathiAccessibilityService : AccessibilityService() {
             Log.w(TAG, "refused coordinate tap: Saathi itself is in front")
             return false
         }
-        return gesture(Path().apply { moveTo(p.x.toFloat(), p.y.toFloat()) }, 60)
+        return throughOverlay(listOf(p)) { gesture(Path().apply { moveTo(p.x.toFloat(), p.y.toFloat()) }, 60) }
     }
 
     private suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float): Boolean =
-        gesture(Path().apply { moveTo(x1, y1); lineTo(x2, y2) }, 400)
+        throughOverlay(listOf(Point(x1.toInt(), y1.toInt()), Point(x2.toInt(), y2.toInt()))) {
+            gesture(Path().apply { moveTo(x1, y1); lineTo(x2, y2) }, 400)
+        }
+
+    /** An injected touch must never land on Saathi's own overlay: it passes through it to the app. */
+    private suspend fun throughOverlay(path: List<Point>, block: suspend () -> Boolean): Boolean =
+        overlay?.passThrough(path, block) ?: block()
 
     private suspend fun gesture(path: Path, durationMs: Long): Boolean = suspendCancellableCoroutine { cont ->
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, durationMs)).build()

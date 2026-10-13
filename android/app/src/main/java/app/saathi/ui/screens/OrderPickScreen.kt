@@ -311,4 +311,4 @@ fun OrderPickScreen(nav: AppNav) {
 }
 
 /** Option buttons ignore taps this soon after the sheet appears (a touch meant for the app below). */
-private const val PICK_ARM_MS = 700L
+private const val PICK_ARM_MS = app.saathi.agent.AnswerArming.TAP_ARM_MS

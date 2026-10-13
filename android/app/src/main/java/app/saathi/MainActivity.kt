@@ -6,12 +6,10 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import app.saathi.data.AppState
-import app.saathi.feedback.Feedback
 import app.saathi.ui.Deps
+import app.saathi.ui.SharedDeps
 import app.saathi.ui.SaathiNavHost
 import app.saathi.ui.theme.SaathiTheme
-import app.saathi.voice.Voice
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -38,16 +36,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         current = java.lang.ref.WeakReference(this)
         enableEdgeToEdge()
-        val state = AppState(applicationContext)
         // [brain hook] Find the on-device AI model file (if any) at startup; it loads only when guide mode starts.
         app.saathi.brain.LlmEngine.attach(applicationContext)
-        val feedback = Feedback(applicationContext).also { it.soundOn = state.soundOn }
-        val voice = Voice(applicationContext).also {
-            it.locale = state.languageTag?.let(Locale::forLanguageTag) ?: Locale.getDefault()
-            it.rate = state.speechRate
-            it.init()
-        }
-        deps = Deps(state, feedback, voice)
+        // Shared with Floating Saathi: one Voice, so one speak / listen interlock for the whole app.
+        deps = SharedDeps.acquire(this)
+        val state = deps.state
+        val feedback = deps.feedback
+        val voice = deps.voice
         if (intent?.getBooleanExtra(EXTRA_TALK, false) == true) state.pendingTalk = true
         setContent {
             // Keep services in sync with Settings.
@@ -93,8 +88,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         if (current?.get() === this) current = null
-        deps.voice.shutdown()
-        deps.feedback.stopVibration()
+        SharedDeps.release() // speech engines shut down when the overlay doesn't use them either
         super.onDestroy()
     }
 }

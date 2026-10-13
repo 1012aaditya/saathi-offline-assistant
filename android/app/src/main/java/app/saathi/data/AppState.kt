@@ -29,7 +29,7 @@ enum class WalkSensitivity { Low, Medium, High }
  * Compose reads the `by mutableStateOf` fields directly, so screens update when they change.
  */
 class AppState(context: Context) {
-    private val prefs = context.getSharedPreferences("saathi", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     var setupDone by mutableStateOf(prefs.getBoolean("setupDone", false)); private set
     var theme by mutableStateOf(ThemeChoice.valueOf(prefs.getString("theme", ThemeChoice.System.name)!!)); private set
@@ -111,6 +111,13 @@ class AppState(context: Context) {
     var allowOrders by mutableStateOf(prefs.getBoolean("allowOrders", false)); private set
     fun updateAllowOrders(on: Boolean) { allowOrders = on; prefs.edit().putBoolean("allowOrders", on).apply() }
 
+    /**
+     * Settings > "Floating Saathi" (default ON): the round Saathi bubble over other apps, drawn by
+     * Saathi's accessibility service. The service watches this preference ([FLOATING_KEY]).
+     */
+    var floatingSaathi by mutableStateOf(prefs.getBoolean(FLOATING_KEY, true)); private set
+    fun updateFloatingSaathi(on: Boolean) { floatingSaathi = on; prefs.edit().putBoolean(FLOATING_KEY, on).apply() }
+
     fun updateAppLevel(app: String, level: AppLevel) {
         val i = appLevels.indexOfFirst { it.first == app }
         if (i >= 0) appLevels[i] = app to level
@@ -142,7 +149,7 @@ class AppState(context: Context) {
         trustedContacts.clear(); trustedContacts.addAll(listOf("Mom", "Dad"))
         setupDone = false; theme = ThemeChoice.System; soundOn = true; languageTag = null
         speechRate = 1.0f; spendingLimit = 500; walkSensitivity = WalkSensitivity.Medium
-        allowOrders = false
+        allowOrders = false; floatingSaathi = true
         listOf("WhatsApp" to AppLevel.AskFirst, "Grocery app" to AppLevel.AskFirst, "Payments" to AppLevel.Off)
             .forEach { (a, l) -> updateAppLevel(a, l) }
     }
@@ -159,5 +166,14 @@ class AppState(context: Context) {
         val arr = JSONArray()
         history.take(200).forEach { arr.put(JSONObject().put("t", it.title).put("o", it.outcome.name).put("m", it.timeMillis)) }
         prefs.edit().putString("history", arr.toString()).apply()
+    }
+
+    companion object {
+        const val PREFS = "saathi"
+        const val FLOATING_KEY = "floatingSaathi"
+
+        /** Read without an AppState (the accessibility service). */
+        fun floatingEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(FLOATING_KEY, true)
     }
 }

@@ -146,6 +146,10 @@ class GuideTexts(val lang: Lang) {
     val screenChanged get() = s("The screen changed.", "स्क्रीन बदल गई।")
     val couldNotPress get() = s("I couldn't do that on the screen.", "स्क्रीन पर यह नहीं हो पाया।")
     val couldNotReturn get() = s("I couldn't get back to the app.", "ऐप पर वापस नहीं जा पाया।")
+    val notInFront get() = s(
+        "That app isn't in front any more, so I won't press anything. Tap the Saathi bubble in the app you want.",
+        "वह ऐप अब सामने नहीं है, इसलिए कुछ नहीं दबाऊँगा। जिस ऐप में चाहिए, वहाँ Saathi बबल दबाइए।",
+    )
     val screenMoved get() = s("The screen changed before I could act, so I didn't press anything.", "दबाने से पूर्व स्क्रीन बदल गई, इसलिए कुछ नहीं दबाया।")
     val keptIt get() = s("OK, I've left it as it is.", "ठीक है, जैसा था वैसा छोड़ दिया।")
     fun outOfStockAsk(item: String) = s(

@@ -109,11 +109,12 @@ fun SaathiNavHost(deps: Deps) {
             deps.state.pendingTalk = false
             // Guide mode never goes to Listening (it listens by itself): back to the guide, which
             // listens only when the user presses Speak (a stale Volume-down here is not a press).
-            if (app.saathi.agent.TaskRunner.isGuiding) nav.go(Route.Guide) else nav.go(Route.Listening)
+            if (app.saathi.agent.TaskRunner.isAppGuiding) nav.go(Route.Guide) else nav.go(Route.Listening)
         }
         deps.state.talk.collect {
             // Guide mode: the key means "talk to the guide" (push-to-talk on the Guide screen).
-            if (app.saathi.agent.TaskRunner.isGuiding) {
+            // (A floating session is driven from its panel; here the key just opens Listening.)
+            if (app.saathi.agent.TaskRunner.isAppGuiding) {
                 if (nav.current() !in GUIDE_SHEETS) nav.go(Route.Guide)
                 app.saathi.agent.TaskRunner.requestGuideTalk()
             } else {

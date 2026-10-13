@@ -120,6 +120,8 @@ fun GuideScreen(nav: AppNav) {
     // Follow the session: answer sheets, the end.
     LaunchedEffect(st) {
         if (leaving) return@LaunchedEffect
+        // The floating panel took this session over (or runs its own): it is answered there, not here.
+        if (TaskRunner.isFloatingRun(st.runId) || TaskRunner.wasSuperseded(st.runId)) { leaving = true; listener.cancel(); nav.home(); return@LaunchedEffect }
         when (val s = st) {
             is TaskRunner.State.Confirming -> { leaving = true; listener.cancel(); nav.replace(Route.Confirm) }
             is TaskRunner.State.ChoosingItem -> { leaving = true; listener.cancel(); nav.replace(Route.OrderPick) }

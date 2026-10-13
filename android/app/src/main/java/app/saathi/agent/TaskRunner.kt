@@ -153,6 +153,16 @@ object TaskRunner {
      * [speak] is called on the main thread for each narration line.
      */
     fun start(context: Context, command: Command, lang: Lang, appState: AppState, speak: (String) -> Unit): Boolean {
+        if (isRunning && isFloatingGuiding) {
+            // A new request from Saathi's own screens ends the floating session first (never two drivers).
+            val previous = job
+            stop()
+            scope.launch {
+                previous?.join()
+                withContext(Dispatchers.Main) { start(context, command, lang, appState, speak) }
+            }
+            return true
+        }
         if (isRunning) return false
         val device = DeviceBridge.gated() ?: return false
         if (command is Command.Guide) return startGuide(context, command, lang, appState, speak)
@@ -255,6 +265,88 @@ object TaskRunner {
     /** A guide session is running (Volume-down then means "talk to the guide", not "stop"). */
     val isGuiding: Boolean get() = inbox != null && isRunning
 
+    /** The run of the guide session now running (0: none). */
+    @Volatile private var guideRun = 0
+
+    /**
+     * The run driven from Floating Saathi (the overlay), 0 if none. Such a run never brings
+     * Saathi's own screen forward: the app being worked on stays in front the whole time, and its
+     * questions (Confirm, "which one?") are asked on the floating panel.
+     */
+    @Volatile private var floatingRun = 0
+
+    /** The app the running guide session is about (the last one it looked at). */
+    @Volatile var guideTarget: String? = null
+        private set
+
+    /** A guide run ended because the floating panel started another: it ends quietly, in place. */
+    @Volatile private var supersededRun = 0
+
+    /** [runId] was a Guide-screen session ended by a floating one (its screens let go quietly). */
+    fun wasSuperseded(runId: Int): Boolean = runId != 0 && runId == supersededRun
+
+    /** True if [runId] is (or was) driven from the floating panel. */
+    fun isFloatingRun(runId: Int): Boolean = runId != 0 && runId == floatingRun
+
+    /** A guide session is running and the floating panel drives it. */
+    val isFloatingGuiding: Boolean get() = isGuiding && guideRun != 0 && guideRun == floatingRun
+
+    /** A guide session is running on Saathi's own Guide screen (the older way). */
+    val isAppGuiding: Boolean get() = isGuiding && !isFloatingGuiding
+
+    /**
+     * Floating Saathi: a guide session ON THE APP IN FRONT ([target]), driven from the overlay. No
+     * app is switched and Saathi's activity is never brought forward. Any running guide session is
+     * ended first (its job is awaited: never two drivers). False when the service is off or a
+     * scripted task is running (the panel shows that task and offers Stop instead).
+     */
+    fun startFloatingGuide(context: Context, target: String, lang: Lang, appState: AppState, speak: (String) -> Unit): Boolean {
+        if (DeviceBridge.gated() == null) return false
+        if (isRunning && !isGuiding) return false
+        val app = context.applicationContext
+        if (target == app.packageName) return false
+        if (isRunning) {
+            // The session being replaced must not pull Saathi's screen forward as it ends.
+            supersededRun = guideRun
+            stop()
+        }
+        val command = Command.Guide(null, "floating")
+        val id = ++runCounter
+        val title = title(command)
+        floatingRun = id
+        guideTarget = target
+        speaker = speak
+        lastLang = lang
+        val previous = job
+        val earlierCleanup = cleanupJob
+        Log.i(TAG, "start floating guide")
+        job = scope.launch {
+            previous?.join() // a stopped session says where it left things first
+            earlierCleanup?.join()
+            stopReason = StopReason.USER
+            _state.value = State.Running(id, command, title, appName(target), emptyList())
+            val out = runGuide(app, id, command, title, target, null, null, lang, appState)
+            finish(app, id, command, title, out, appState, front = false)
+            afterJob(app)
+        }
+        return true
+    }
+
+    /**
+     * The user pressed the floating bubble on the app a Guide-screen session is about: the panel
+     * takes that session over (same conversation, now without Saathi coming forward to talk).
+     */
+    fun adoptGuideForFloating(speak: (String) -> Unit): Boolean {
+        if (!isAppGuiding) return false
+        floatingRun = guideRun
+        speaker = speak
+        log("guide session moved to the floating panel")
+        // Re-publish so the panel picks up the conversation (and the Guide screen lets go of it).
+        val s = _state.value
+        if (s is State.Guiding) _state.value = s.copy(turns = s.turns.toList())
+        return true
+    }
+
     private val _guideTalk = MutableSharedFlow<Long>(extraBufferCapacity = 1)
 
     /**
@@ -356,6 +448,8 @@ object TaskRunner {
         val device = DeviceBridge.gated() ?: return Outcome.Failed(Texts(lang).serviceOff)
         val box = Channel<Heard>(capacity = 8)
         guideTurns = emptyList()
+        guideRun = id
+        guideTarget = target
         inbox = box
         val appLabel = target?.let(::appName) ?: open?.let { appName(Apps.APP_ALIASES.getValue(it)) } ?: "Saathi"
         val io = object : GuideIO {
@@ -367,9 +461,17 @@ object TaskRunner {
 
             override suspend fun next(timeoutMs: Long): Heard? = withTimeoutOrNull(timeoutMs) { box.receive() }
 
-            override suspend fun showApp(packageName: String): Boolean = bringAppForward(app, packageName, appState)
+            override suspend fun showApp(packageName: String): Boolean {
+                // Floating: never switch apps; the app is in front or it isn't.
+                guideTarget = packageName
+                if (isFloatingRun(id)) return device.snapshot()?.packageName == packageName
+                return bringAppForward(app, packageName, appState)
+            }
+
+            override val floating: Boolean get() = isFloatingRun(id)
 
             override suspend fun showSaathi() {
+                if (isFloatingRun(id)) return // the floating panel is already over the app
                 if (device.snapshot()?.packageName == app.packageName) return
                 bringSaathiToFront(app)
                 repeat(8) {
@@ -394,7 +496,7 @@ object TaskRunner {
             withContext(NonCancellable) {
                 inbox = null
                 val base = if (stopReason == StopReason.SERVICE_LOST) Texts(lang).stoppedServiceLost else Texts(lang).stopped
-                finish(app, id, command, title, Outcome.Stopped(base).withNote(session.leftNote()), appState, front = true)
+                finish(app, id, command, title, Outcome.Stopped(base).withNote(session.leftNote()), appState, front = !isFloatingRun(id))
             }
             throw e
         } catch (e: Exception) {
@@ -402,6 +504,7 @@ object TaskRunner {
             Outcome.Failed(Texts(lang).stuck).withNote(session.leftNote())
         } finally {
             inbox = null
+            if (guideRun == id) guideRun = 0
             box.close()
         }
     }
@@ -532,7 +635,7 @@ object TaskRunner {
         answer = d
         val lines = (_state.value as? State.Running)?.lines.orEmpty()
         _state.value = State.Confirming(id, command, title, req, lines)
-        bringSaathiToFront(context)
+        if (!isFloatingRun(id)) bringSaathiToFront(context) // floating: asked on the panel, over the app
         return try {
             d.await().also { log("confirm answered yes=${it == Answer.YES}") }
         } finally {
@@ -555,7 +658,7 @@ object TaskRunner {
         picked = d
         val lines = (_state.value as? State.Running)?.lines.orEmpty()
         _state.value = State.Picking(id, command, title, req, lines)
-        bringSaathiToFront(context)
+        if (!isFloatingRun(id)) bringSaathiToFront(context) // floating: asked on the panel, over the app
         return try {
             d.await()
         } finally {
@@ -578,7 +681,7 @@ object TaskRunner {
         itemPick = d
         val lines = (_state.value as? State.Running)?.lines.orEmpty()
         _state.value = State.ChoosingItem(id, command, title, req, lines)
-        bringSaathiToFront(context)
+        if (!isFloatingRun(id)) bringSaathiToFront(context) // floating: asked on the panel, over the app
         return try {
             d.await()
         } finally {
@@ -591,7 +694,7 @@ object TaskRunner {
         choice = d
         val lines = (_state.value as? State.Running)?.lines.orEmpty()
         _state.value = State.Choosing(id, command, title, req, lines)
-        bringSaathiToFront(context)
+        if (!isFloatingRun(id)) bringSaathiToFront(context) // floating: asked on the panel, over the app
         return try {
             d.await().also { log("draft choice answered: $it") } // the choice only, never text
         } finally {
@@ -608,7 +711,7 @@ object TaskRunner {
         Log.i(TAG, "finished ${outcome::class.simpleName}")
         _state.value = State.Finished(id, command, title, outcome)
         withContext(Dispatchers.Main) { record(appState, command, outcome) }
-        if (front) bringSaathiToFront(context)
+        if (front && !isFloatingRun(id) && id != supersededRun) bringSaathiToFront(context)
     }
 
     private fun record(appState: AppState, command: Command, outcome: Outcome) {

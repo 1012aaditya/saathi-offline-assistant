@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="a11y_service_summary">Reads your screen and taps for you when you ask. Hold Volume-down to talk.</string>
-    <string name="a11y_service_description">Saathi uses this to read what is on your screen and to open apps, tap and type in WhatsApp when you ask it to. It works offline: screen text stays on your phone and is not stored. Saathi always asks you before sending a message, never reads or types PINs, passwords or OTPs, and never grants permissions. Holding Volume-down from any app opens Saathi to listen; a short press still changes the volume.</string>
+    <string name="a11y_service_description">Saathi uses this to read what is on your screen and to open apps, tap and type in WhatsApp when you ask it to. It works offline: screen text stays on your phone and is not stored. Saathi always asks you before sending a message, never reads or types PINs, passwords or OTPs, and never grants permissions. Holding Volume-down from any app talks to Saathi; a short press still changes the volume. With Floating Saathi on (Saathi Settings), Saathi also shows a round button over your other apps so you can talk to it right there; it hides itself on password and PIN screens.</string>
 </resources>

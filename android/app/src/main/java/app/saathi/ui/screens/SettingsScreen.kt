@@ -125,6 +125,47 @@ fun SettingsScreen(nav: AppNav) {
     ) {
         LargeTitle("Settings")
 
+        // FLOATING SAATHI (the bubble over other apps, drawn by Saathi's accessibility service)
+        Column {
+            SectionHeader("Floating Saathi")
+            Group {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 64.dp)
+                        .toggleable(
+                            value = state.floatingSaathi,
+                            role = Role.Switch,
+                            onValueChange = { on ->
+                                state.updateFloatingSaathi(on)
+                                changed(if (on) "Floating Saathi on" else "Floating Saathi off")
+                            },
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RowTitle("Floating Saathi", "A round Saathi button over your other apps", Modifier.weight(1f))
+                    Switch(
+                        checked = state.floatingSaathi,
+                        onCheckedChange = null,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = c.onAccent,
+                            checkedTrackColor = c.accent,
+                            checkedBorderColor = c.accent,
+                            uncheckedThumbColor = c.secondary,
+                            uncheckedTrackColor = c.screen,
+                            uncheckedBorderColor = c.secondary,
+                        ),
+                    )
+                }
+            }
+            Footnote(
+                "Tap it in any app to do things together, right there: Saathi tells you what it sees and does each step you say. " +
+                    "Hold it to hide it. It hides itself on password and PIN screens. Needs Saathi on in Accessibility settings.",
+                Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            )
+        }
+
         // APPS
         Column {
             SectionHeader("Apps")
