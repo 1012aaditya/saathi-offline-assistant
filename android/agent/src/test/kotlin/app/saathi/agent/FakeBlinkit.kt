@@ -34,6 +34,8 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
         /** Other sizes of the same product: ADD opens a size picker sheet. */
         val variants: List<Pair<String, Int>> = emptyList(),
         val words: Set<String> = emptySet(),
+        /** "2 left" (inventory_info), real shapes only. */
+        val left: String? = null,
     ) {
         fun matches(q: String): Boolean {
             val ws = Blinkit.withoutSize(q).lowercase().split(" ").filter { it.isNotEmpty() }
@@ -69,6 +71,24 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
     var pinAfterOrder = false
     /** Snapshots that show the results page still loading (no cards yet). */
     var loadingSnapshots = 0
+
+    // -- real shapes from the owner's tablet (13 Oct, portrait), opt-in ----------------------------
+    /**
+     * Cards with tv_name / tv_uom_title / price / "Ad" / "2 left" children, the cart bar as
+     * view_cart "View cart" + tv_quantity "N items", and the real checkout: title desc "Checkout",
+     * "Delivering to Home" + the address, an out-of-stock block with suggestions, the shipment with
+     * cart rows (tv_name, tv_variant, stepper, total_item_price, "Move to wishlist"), "You might
+     * also like", and tv_action_text ("Place Order" / "Select Payment Method").
+     */
+    var realShapes = false
+    /** Snapshots of results drawn as shimmer placeholders (rids shimmer_image / shimmer_title / button1 / button2, no labels). */
+    var shimmerSnapshots = 0
+    /** Real checkout: an out-of-stock item (title, subtitle) and what Blinkit suggests instead. */
+    var outOfStockInCart: Pair<String, String>? = null
+    val suggestions = mutableListOf(Item("Mother Dairy Toned Milk", "500 ml", 28))
+    /** Made up. Must never be spoken or logged. */
+    val address = "Flat 4B, 12 Example Road, Pune 411001"
+    val wishlist = mutableListOf<String>()
 
     private val cart = linkedMapOf<Key, Int>()
     private var upsellShown = false
@@ -118,6 +138,11 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
         fun cartBar() {
             if (cart.isEmpty()) return
             val n = cart.values.sum()
+            if (realShapes) {
+                add(text = "View cart", rid = "view_cart", clickable = true, b = Bounds(300, height - 200, 780, height - 140)) { view = View.Checkout; scrolled = 0; true }
+                add(text = "$n item${if (n == 1) "" else "s"}", rid = "tv_quantity", b = Bounds(300, height - 140, 780, height - 80))
+                return
+            }
             add(text = "View cart · $n item${if (n == 1) "" else "s"}", rid = "container", clickable = true, b = Bounds(300, height - 200, 780, height - 80)) {
                 view = View.Checkout; scrolled = 0; true
             }
@@ -126,6 +151,11 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
             val key = Key(item.name, size)
             val qty = cart[key] ?: 0
             add(desc = "${item.name} is available for ₹$price, $size", cls = "ViewGroup", clickable = true, b = Bounds(x, y, x + 320, y + 600))
+            if (realShapes) {
+                add(text = item.name, rid = "tv_name", b = Bounds(x + 10, y + 340, x + 310, y + 400))
+                add(text = "₹$price", rid = "price", b = Bounds(x + 10, y + 470, x + 170, y + 500))
+                item.left?.let { add(text = it, rid = "inventory_info", b = Bounds(x + 10, y + 270, x + 120, y + 295)) }
+            }
             if (item.ad) add(desc = "Ad", rid = "bottom_left_overlay", b = Bounds(x + 10, y + 300, x + 50, y + 330))
             add(desc = size, rid = "tv_uom_title", b = Bounds(x + 10, y + 430, x + 170, y + 460))
             if (!item.inStock) {
@@ -188,7 +218,16 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
             }
             is View.Results -> {
                 searchBar()
-                if (loadingSnapshots > 0) {
+                if (shimmerSnapshots > 0) {
+                    shimmerSnapshots--
+                    for (i in 0 until 4) {
+                        val x = 10 + (i % 3) * 340
+                        add(rid = "shimmer_image", b = Bounds(x, 230, x + 320, 500))
+                        add(rid = "shimmer_title", b = Bounds(x, 510, x + 320, 540))
+                        add(rid = "button1", cls = "Button", b = Bounds(x, 550, x + 150, 600))
+                        add(rid = "button2", cls = "Button", b = Bounds(x + 160, 550, x + 320, 600))
+                    }
+                } else if (loadingSnapshots > 0) {
                     loadingSnapshots--
                 } else {
                     add(text = "Results for ${v.query}", rid = "tv_title", b = Bounds(10, 160, 600, 200))
@@ -211,7 +250,7 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
                 card(Item("Choco Cream Biscuits", "100 g", 30), "100 g", 30, 10, 600, inSheet = true)
                 card(Item("Salted Butter", "100 g", 58), "100 g", 58, 350, 600, inSheet = true)
             }
-            View.Checkout -> {
+            View.Checkout -> if (realShapes) realCheckout(::add, width, height) else {
                 add(desc = "Checkout", rid = "title", b = Bounds(10, 40, 400, 100))
                 val n = cart.values.sum()
                 if (n > 0) add(desc = "Shipment of $n item${if (n == 1) "" else "s"}", b = Bounds(10, 120, 600, 160))
@@ -265,6 +304,76 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
             View.Placed -> add(text = "Order placed", b = Bounds(0, 300, width, 360))
         }
         return Built(Screen(pkg, els, Normalizer.screenHash(pkg, els)), handlers)
+    }
+
+    private fun realCheckout(
+        add: (String, String, String, String, Boolean, Boolean, Bounds, (() -> Boolean)?) -> Unit,
+        width: Int,
+        height: Int,
+    ) {
+        fun el(text: String = "", desc: String = "", rid: String = "", cls: String = "View", clickable: Boolean = false, b: Bounds, onTap: (() -> Boolean)? = null) =
+            add(text, desc, rid, cls, clickable, false, b, onTap)
+        el(desc = "Checkout", rid = "title", b = Bounds(10, 40, 400, 100))
+        el(text = "Delivering to Home", rid = "header_title", b = Bounds(10, 110, 700, 150))
+        el(text = address, rid = "header_subtitle", b = Bounds(10, 150, 900, 190))
+        var y = 220
+        outOfStockInCart?.let { (title, subtitle) ->
+            el(desc = "1 item is not in stock", rid = "title", b = Bounds(10, y, 700, y + 40))
+            el(text = title, rid = "item_title", b = Bounds(10, y + 50, 700, y + 90))
+            el(text = subtitle, rid = "item_subtitle", b = Bounds(10, y + 90, 700, y + 120))
+            el(text = "Move to wishlist", rid = "promo_offer_tv", clickable = true, b = Bounds(700, y + 50, 1000, y + 110)) {
+                wishlist += title; outOfStockInCart = null; true
+            }
+            el(text = "Add these items instead", b = Bounds(10, y + 130, 700, y + 170))
+            var x = 10
+            for (s in suggestions) {
+                val k = Key(s.name, s.size)
+                el(desc = "${s.name} quantity ${s.size} ₹${s.price} rupees", cls = "ViewGroup", b = Bounds(x, y + 180, x + 320, y + 480))
+                el(text = s.name, rid = "tv_name", b = Bounds(x + 10, y + 190, x + 310, y + 240))
+                el(text = s.size, rid = "tv_variant", b = Bounds(x + 10, y + 250, x + 200, y + 280))
+                el(text = "₹${s.price}", rid = "tv_price", b = Bounds(x + 10, y + 290, x + 150, y + 320))
+                if ((cart[k] ?: 0) == 0) {
+                    el(desc = "ADD", rid = "tv_title", clickable = true, b = Bounds(x + 180, y + 400, x + 310, y + 460)) {
+                        addTaps += "${s.name} ${s.size}"; cart[k] = 1; true
+                    }
+                }
+                x += 340
+            }
+            y += 500
+        }
+        val n = cart.values.sum()
+        if (n > 0) el(desc = "Shipment of $n item${if (n == 1) "" else "s"}", rid = "subtitle", b = Bounds(10, y, 600, y + 40))
+        y += 60
+        for ((k, q) in cart.toList()) {
+            val rowY = y
+            val p = runCatching { price(k) }.getOrElse { suggestions.first { it.name == k.name }.price }
+            el(desc = "${k.name} is available for ₹$p", cls = "ViewGroup", b = Bounds(0, rowY, width, rowY + 180))
+            el(text = k.name, rid = "tv_name", b = Bounds(10, rowY + 10, 600, rowY + 50))
+            el(text = k.size, rid = "tv_variant", b = Bounds(10, rowY + 60, 300, rowY + 90))
+            el(desc = "Decrease quantity", rid = "icon_decrement", clickable = true, b = Bounds(700, rowY + 60, 780, rowY + 120)) {
+                if (q <= 1) cart.remove(k) else cart[k] = q - 1; true
+            }
+            el(desc = "quantity $q", rid = "tv_title", clickable = true, b = Bounds(780, rowY + 60, 860, rowY + 120))
+            el(desc = "Increase quantity", rid = "icon_increment", clickable = true, b = Bounds(860, rowY + 60, 940, rowY + 120)) {
+                addTaps += "+ ${k.name} ${k.size}"; cart[k] = q + 1; true
+            }
+            el(text = "₹${p * q}", rid = "total_item_price", b = Bounds(950, rowY + 60, 1070, rowY + 120))
+            el(text = "Move to wishlist", rid = "promo_offer_tv", clickable = true, b = Bounds(10, rowY + 120, 300, rowY + 170)) {
+                wishlist += k.name; cart.remove(k); true
+            }
+            y += 200
+        }
+        el(text = "You might also like", b = Bounds(10, y + 20, 600, y + 60))
+        val up = Item("Choco Cream Biscuits", "100 g", 30)
+        el(desc = "${up.name} is available for ₹${up.price}, ${up.size}", cls = "ViewGroup", b = Bounds(10, y + 80, 330, y + 680))
+        el(desc = "ADD", rid = "tv_title", clickable = true, b = Bounds(190, y + 500, 330, y + 550)) { addTaps += "${up.name} ${up.size}"; true }
+        if (cart.isNotEmpty()) {
+            val label = if (paymentSaved) "Place Order" else "Select Payment Method"
+            el(text = label, rid = "tv_action_text", clickable = true, b = Bounds(0, height - 200, width, height - 60)) {
+                if (paymentSaved) { orders += cart.mapKeys { "${it.key.name} ${it.key.size}" }; cart.clear(); view = View.Placed } else view = View.Payment
+                true
+            }
+        }
     }
 
     fun render(): Screen = build().screen

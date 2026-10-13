@@ -219,6 +219,14 @@ fun ConfirmScreen(nav: AppNav) {
     // time). Show and say what really happened to the typed text.
     val st by TaskRunner.state.collectAsState()
     LaunchedEffect(st) {
+        // Guide mode: after the answer the conversation goes on (Cancel = the tap didn't run).
+        val g = st as? TaskRunner.State.Guiding
+        if (g != null && confirming != null && g.runId == confirming.runId) {
+            finished = true
+            listener.cancel()
+            nav.replace(Route.Guide)
+            return@LaunchedEffect
+        }
         val f = st as? TaskRunner.State.Finished ?: return@LaunchedEffect
         if (asked == null || f.runId != confirming.runId) return@LaunchedEffect
         val first = result == null

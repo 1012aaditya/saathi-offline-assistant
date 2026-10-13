@@ -178,6 +178,14 @@ fun OrderPickScreen(nav: AppNav) {
     // The run ended elsewhere (no answer in time, the service went away): show what happened.
     val st by TaskRunner.state.collectAsState()
     LaunchedEffect(st) {
+        // Guide mode ("which one?" for a command): after the answer the conversation goes on.
+        val g = st as? TaskRunner.State.Guiding
+        if (g != null && choosing != null && g.runId == choosing.runId) {
+            finished = true
+            listener.cancel()
+            nav.replace(Route.Guide)
+            return@LaunchedEffect
+        }
         val f = st as? TaskRunner.State.Finished ?: return@LaunchedEffect
         if (choosing == null || f.runId != choosing.runId) return@LaunchedEffect
         finished = true

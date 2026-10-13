@@ -27,6 +27,7 @@ import app.saathi.ui.screens.BrailleLearnScreen
 import app.saathi.ui.screens.BrailleScreen
 import app.saathi.ui.screens.ConfirmScreen
 import app.saathi.ui.screens.DraftChoiceScreen
+import app.saathi.ui.screens.GuideScreen
 import app.saathi.ui.screens.OrderPickScreen
 import app.saathi.ui.screens.HandoverScreen
 import app.saathi.ui.screens.HomeScreen
@@ -42,7 +43,7 @@ import app.saathi.ui.screens.WorkingScreen
 import app.saathi.voice.Voice
 
 /** The 12 Clarity screens (DESIGN.md) + Braille + the unsent-text choice sheet. */
-enum class Route { Welcome, Setup, Home, Listening, Working, Confirm, DraftChoice, ContactChoice, AppApproval, Result, Handover, Walk, Activity, Settings, Safety, Braille, BrailleLearn, Photo, OrderPick }
+enum class Route { Welcome, Setup, Home, Listening, Working, Confirm, DraftChoice, ContactChoice, AppApproval, Result, Handover, Walk, Activity, Settings, Safety, Braille, BrailleLearn, Photo, OrderPick, Guide }
 
 /** Shared services, available to every screen via [LocalDeps]. */
 class Deps(val state: AppState, val feedback: Feedback, val voice: Voice)
@@ -75,6 +76,9 @@ class AppNav(private val controller: NavHostController) {
     }
 }
 
+/** Screens a guide session may be showing (the Guide screen and the answer sheets it opens). */
+private val GUIDE_SHEETS = setOf(Route.Guide, Route.Confirm, Route.OrderPick)
+
 /** Global voice phrases that work on every screen ("Go home", "Walk mode", …). English for now. */
 fun routeForPhrase(text: String): Route? {
     val t = text.lowercase()
@@ -105,7 +109,15 @@ fun SaathiNavHost(deps: Deps) {
             deps.state.pendingTalk = false
             nav.go(Route.Listening)
         }
-        deps.state.talk.collect { nav.go(Route.Listening) }
+        deps.state.talk.collect {
+            // Guide mode: the key means "talk to the guide" (push-to-talk on the Guide screen).
+            if (app.saathi.agent.TaskRunner.isGuiding) {
+                if (nav.current() !in GUIDE_SHEETS) nav.go(Route.Guide)
+                app.saathi.agent.TaskRunner.requestGuideTalk()
+            } else {
+                nav.go(Route.Listening)
+            }
+        }
     }
 
     // Debug builds only: a typed command from `adb shell` (DebugCommandReceiver), handled exactly
@@ -146,6 +158,7 @@ fun SaathiNavHost(deps: Deps) {
             composable(Route.Braille.name) { BrailleScreen(nav) }
             composable(Route.BrailleLearn.name) { BrailleLearnScreen(nav) }
             composable(Route.Photo.name) { PhotoScreen(nav) }
+            composable(Route.Guide.name) { GuideScreen(nav) }
         }
     }
 }

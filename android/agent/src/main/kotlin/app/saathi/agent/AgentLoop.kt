@@ -48,7 +48,8 @@ sealed interface Outcome {
     data class Cancelled(override val message: String, val draftCleared: Boolean = false, val restored: Boolean = false) : Outcome
     data class HandedOver(override val message: String) : Outcome
     data class Asked(override val message: String) : Outcome
-    data class Failed(override val message: String) : Outcome
+    /** [offer]: Saathi got stuck on another app's screen; the user may carry on together in guide mode. */
+    data class Failed(override val message: String, val offer: GuideOffer? = null) : Outcome
     data class Stopped(override val message: String) : Outcome
 }
 
@@ -232,10 +233,18 @@ class AgentLoop(
     ): Outcome {
         var failures = 0
         val recent = ArrayDeque<String>()
+        var lastPackage: String? = null
 
         suspend fun fail(message: String): Outcome {
             cleanupDraft(flow, "fail")
             return Outcome.Failed(message)
+        }
+
+        /** Stuck on another app's screen: offer to carry on together (guide mode) instead of just failing. */
+        suspend fun unsure(message: String, intro: String? = null): Outcome {
+            val out = fail(message)
+            val pkg = lastPackage?.takeIf { it != ownPackage && !flow.readOnly } ?: return out
+            return (out as Outcome.Failed).copy(offer = GuideOffer(pkg, intro))
         }
 
         for (step in 1..maxSteps) {
@@ -247,6 +256,7 @@ class AgentLoop(
                 device.waitForChange("", 500)
                 continue
             }
+            lastPackage = screen.packageName
             if (!flow.readOnly) {
                 if (device.gate.isPinScreen(screen)) return Outcome.HandedOver(t.verdict(pinVerdict()))
                 if (isCaptcha(screen)) return Outcome.HandedOver(t.verdict(captchaVerdict()))
@@ -268,6 +278,7 @@ class AgentLoop(
                 }
                 is Plan.HandOver -> return Outcome.HandedOver(plan.reason)
                 is Plan.Fail -> return fail(plan.reason)
+                is GuidePlan -> return unsure(plan.message, plan.intro)
                 is Plan.ChooseDraft -> {
                     if (flow.readOnly) return Outcome.Failed(t.readOnly)
                     chooseDraft(flow, plan, screen, ctx, choose)?.let { return it }
@@ -320,7 +331,7 @@ class AgentLoop(
                             while (recent.size > LOOP_WINDOW) recent.removeFirst()
                             val looping = recent.count { it == sig } >= LOOP_REPEATS
                             failures = if (r.ok && changed && !looping) 0 else failures + 1
-                            if (failures >= maxFailures) return fail(t.stuck)
+                            if (failures >= maxFailures) return unsure(t.stuck)
                         }
                         is Exec.Held -> {
                             val shop = flow as? OrderAware
@@ -366,7 +377,7 @@ class AgentLoop(
                 }
             }
         }
-        return fail(t.tooManySteps)
+        return unsure(t.tooManySteps)
     }
 
     /** What a No on the send confirmation leaves the user with, from what the cleanup really did. */

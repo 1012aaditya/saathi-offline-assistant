@@ -240,10 +240,13 @@ class OrderFlowTest {
     }
 
     @Test
-    fun `payment method page after the order tap - handed over`() {
+    fun `Select Payment Method - handed over before any tap, Saathi never chooses how to pay`() {
         val fake = shop().apply { paymentSaved = false }
         val r = run(fake, parse("order Amul milk")) { Answer.YES }
-        assertEquals(Outcome.HandedOver(t.payYourself), r.outcome)
+        assertTrue(r.outcome is Outcome.HandedOver && r.outcome.message.startsWith(t.payYourself), r.outcome.message)
+        assertTrue("still has" in r.outcome.message, r.outcome.message) // where things are left
+        assertTrue(r.confirms.isEmpty())
+        assertTrue(fake.orders.isEmpty())
     }
 
     @Test

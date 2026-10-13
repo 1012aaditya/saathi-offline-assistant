@@ -172,6 +172,7 @@ object CommandParser {
         }
 
         if (STOP.matches(lower)) return Command.Stop(raw)
+        guide(t)?.let { return Command.Guide(it.ifEmpty { null }, raw) }
         if (wordCount(t) <= 6 && HELP.containsMatchIn(lower)) return Command.Help(raw)
         photo(t)?.let { return Command.Photo(it, raw) } // before SCREEN: "saamne kya dikh raha hai" is the camera
         if (SCREEN.containsMatchIn(t)) return Command.ScreenSummary(raw)
@@ -186,6 +187,28 @@ object CommandParser {
             NAV.firstOrNull { (_, rx) -> rx.containsMatchIn(t) }?.let { return Command.Navigate(it.first, raw) }
         }
         return Command.Unsupported(raw)
+    }
+
+    // -- guide mode ("let's do it together") ------------------------------------------------------
+
+    private val GUIDE = Regex(
+        "let'?s do (it|this) together|do (it|this) together|together step by step|step by step|step-by-step|guide me|" +
+            "walk me through|saath (mein|me|main) karte (hain|hai|he)|saath (mein|me|main) karo|milkar karte (hain|hai)|" +
+            "ek ek karke|ek-ek karke|मिलकर करते|मिल कर करते|साथ में करते|साथ में करो|एक एक करके|एक-एक करके",
+        I,
+    )
+    private val GUIDE_IN = Regex("\\b(?:in|on|inside|with)\\s+(?:the\\s+)?(.+?)(?:\\s+app)?$", I)
+    private val GUIDE_HI_APP = Regex("^(.+?)\\s+(?:mein|me|main|में|par|pe|पर|पे)(?=\\s|$)", I)
+
+    /** Guide mode: the app named ("" = none), or null when this isn't a guide request. */
+    private fun guide(t: String): String? {
+        if (!GUIDE.containsMatchIn(t)) return null
+        val rest = GUIDE.replace(t, " ").trim().trim(',', '.', '!', '?')
+        val lower = rest.lowercase()
+        Apps.APP_ALIASES.keys.firstOrNull { k -> Regex("(?<![\\p{L}])${Regex.escape(k)}(?![\\p{L}])").containsMatchIn(lower) }?.let { return it }
+        GUIDE_IN.find(rest)?.let { m -> return m.groupValues[1].trim().ifEmpty { null } ?: "" }
+        GUIDE_HI_APP.find(rest)?.let { m -> return m.groupValues[1].trim() }
+        return ""
     }
 
     private fun reply(t: String, session: Session?, known: List<String>): Command.Reply? {

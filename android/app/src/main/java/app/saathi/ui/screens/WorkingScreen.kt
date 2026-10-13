@@ -135,6 +135,7 @@ fun WorkingScreen(nav: AppNav) {
                 leaving = true
                 nav.replace(if (s.outcome is Outcome.HandedOver) Route.Handover else Route.Result)
             }
+            is TaskRunner.State.Guiding -> { leaving = true; nav.replace(Route.Guide) }
             is TaskRunner.State.Running -> if (s.lines.isNotEmpty()) deps.feedback.cue(Cue.Tick)
             TaskRunner.State.Idle -> Unit
         }

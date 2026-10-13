@@ -64,6 +64,15 @@ sealed interface Command {
         override val isTask: Boolean get() = true
     }
 
+    /**
+     * "Let's do it together", "step by step", "guide me", "saath mein karte hain", "मिलकर करते
+     * हैं": guide mode, a step-by-step conversation about the app ([GuideSession]). [app]: the app
+     * named ("… in Blinkit"), or null = the app the user was in.
+     */
+    data class Guide(val app: String?, override val utterance: String) : Command {
+        override val isTask: Boolean get() = true
+    }
+
     data class Stop(override val utterance: String) : Command
 
     data class Help(override val utterance: String) : Command

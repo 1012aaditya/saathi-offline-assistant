@@ -18,12 +18,25 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** Set by the accessibility service: Volume-down was held in another app -> listen. */
         const val EXTRA_TALK = "app.saathi.TALK"
+
+        @Volatile private var current: java.lang.ref.WeakReference<MainActivity>? = null
+
+        /**
+         * Guide mode: Saathi steps back so the app the user was in shows again, exactly as they left
+         * it (Saathi's task goes behind it). Main thread. False when Saathi has no activity.
+         */
+        fun sendToBack(): Boolean {
+            val a = current?.get() ?: return false
+            if (a.isFinishing) return false
+            return a.moveTaskToBack(true)
+        }
     }
 
     private lateinit var deps: Deps
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        current = java.lang.ref.WeakReference(this)
         enableEdgeToEdge()
         val state = AppState(applicationContext)
         val feedback = Feedback(applicationContext).also { it.soundOn = state.soundOn }
@@ -77,6 +90,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (current?.get() === this) current = null
         deps.voice.shutdown()
         deps.feedback.stopVibration()
         super.onDestroy()

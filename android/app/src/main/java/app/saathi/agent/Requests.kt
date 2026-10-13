@@ -15,6 +15,13 @@ object Requests {
     fun lang(deps: Deps): Lang = if (deps.voice.locale.language == "hi") Lang.HI else Lang.EN
 
     fun handle(text: String, deps: Deps, nav: AppNav) {
+        // Guide mode: everything said (or a debug `--es text` command) goes to the conversation.
+        // It still can't answer a Confirm sheet: the guide grammar has no yes.
+        if (TaskRunner.isGuiding) {
+            TaskRunner.guideCommand(Heard(text), "request")
+            if (nav.current() != Route.Guide) nav.replace(Route.Guide)
+            return
+        }
         deps.voice.stopSpeaking()
         val t = Texts(lang(deps))
         // Saved names (trusted contacts, and the phone's contacts if the user allowed them) keep

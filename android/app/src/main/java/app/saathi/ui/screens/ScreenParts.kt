@@ -376,6 +376,25 @@ object ScreenParts {
     }
 
     /**
+     * Guide mode's push-to-talk: the transcript WITH how long after Saathi's speech it was heard
+     * ([Heard.msAfterSpeech]), so the session can refuse anything heard under
+     * [EchoGuard.MIN_HEARD_AFTER_SPEECH_MS] (and long echoes of its own description). Only ever
+     * started by the user (Speak button, Volume-down): the guide never listens by itself.
+     * Never for an answer sheet (those use [rememberAnswerListener]).
+     */
+    @Composable
+    fun rememberCommandListener(
+        onFailed: (String) -> Unit = {},
+        onHeard: (Heard) -> Unit,
+    ): ScreenListener {
+        val heard by rememberUpdatedState(onHeard)
+        return rememberListener(onFailed) { l ->
+            heard(Heard(l.text, l.msAfterSpeech))
+            null
+        }
+    }
+
+    /**
      * THE way an answer sheet (Confirm, order / empty-cart confirm, Draft choice, "Which Rahul?",
      * "Open Camera?", grocery "which one?") hears its answer. Listening goes through Voice's
      * interlock (never while Saathi speaks, and only [EchoGuard.LISTEN_AFTER_SPEECH_MS] after);

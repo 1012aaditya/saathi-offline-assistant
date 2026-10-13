@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import app.saathi.MainActivity
+import app.saathi.data.AppLevel
 import app.saathi.data.AppState
 import app.saathi.data.Outcome as HistoryOutcome
 import app.saathi.safety.Answer
@@ -16,7 +17,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,7 +59,13 @@ object TaskRunner {
         data class ChoosingItem(override val runId: Int, val command: Command, val title: String, val request: PickRequest, val lines: List<String>) : State
 
         data class Finished(override val runId: Int, val command: Command?, val title: String, val outcome: Outcome) : State
+
+        /** Guide mode ("let's do it together"): the conversation so far, newest last. Waiting for the user. */
+        data class Guiding(override val runId: Int, val command: Command, val title: String, val app: String, val turns: List<GuideLine>) : State
     }
+
+    /** One line of the guide conversation: Saathi's ([fromUser] false) or what the user said. */
+    data class GuideLine(val fromUser: Boolean, val text: String, val kind: GuideTurn.Kind? = null)
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -113,6 +124,7 @@ object TaskRunner {
         is Command.OpenApp -> "Open ${appName(command.packageName)}"
         is Command.LaunchApp -> "Open ${command.name}"
         is Command.Help -> "Help"
+        is Command.Guide -> "Do it together"
         is GroceryCommand -> OrderTexts(Lang.EN).title(command)
         else -> "Couldn't do: ${command.utterance.trim().take(40)}"
     }
@@ -139,6 +151,7 @@ object TaskRunner {
     fun start(context: Context, command: Command, lang: Lang, appState: AppState, speak: (String) -> Unit): Boolean {
         if (isRunning) return false
         val device = DeviceBridge.gated() ?: return false
+        if (command is Command.Guide) return startGuide(context, command, lang, appState, speak)
         val app = context.applicationContext
         val t = Texts(lang)
         val cap = captured?.takeIf { System.currentTimeMillis() - it.atMillis < CAPTURE_MAX_AGE_MS }
@@ -212,6 +225,15 @@ object TaskRunner {
                 Log.w(TAG, "task error: ${e::class.simpleName} draftCleanup=${loop.lastCleanup}") // no screen text in logs
                 Outcome.Failed(t.stuck).withNote(loop.lastNote)
             }
+            // Stuck on another app's screen: carry on together (guide mode) instead of just failing.
+            val offer = (outcome as? Outcome.Failed)?.offer
+            if (offer != null && offer.packageName != app.packageName) {
+                log("flow handed off to guide mode")
+                val guided = runGuide(app, id, command, title, offer.packageName, offer.intro ?: GuideTexts(lang).notSure, null, lang, appState)
+                finish(app, id, command, title, guided, appState, front = true)
+                afterJob(app)
+                return@launch
+            }
             // "Open WhatsApp" leaves the user in that app; everything else comes back to Saathi.
             val front = !(command is Command.OpenApp && outcome is Outcome.Answered)
             if (!front) withContext(Dispatchers.Main) { speak(outcome.message) }
@@ -219,6 +241,182 @@ object TaskRunner {
             afterJob(app)
         }
         return true
+    }
+
+    // -- guide mode ("let's do it together") --------------------------------------------------------
+
+    @Volatile private var inbox: Channel<Heard>? = null
+    @Volatile private var guideTurns: List<GuideLine> = emptyList()
+
+    /** A guide session is running (Volume-down then means "talk to the guide", not "stop"). */
+    val isGuiding: Boolean get() = inbox != null && isRunning
+
+    private val _guideTalk = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Volume-down held while guiding: the Guide screen starts listening (the user's own press). */
+    val guideTalk: SharedFlow<Unit> get() = _guideTalk
+
+    fun requestGuideTalk() { _guideTalk.tryEmit(Unit) }
+
+    /**
+     * What the user said (or a Repeat / Read more / Stop button, or a debug-build `--es text`
+     * command) for the running guide session. [source] is logged, never the words. Nothing here
+     * can answer a Confirm sheet: the guide grammar has no yes.
+     */
+    fun guideCommand(heard: Heard, source: String): Boolean {
+        val box = inbox ?: return false
+        log("guide command from $source (${heard.text.length} chars)")
+        val s = _state.value
+        guideTurns = guideTurns + GuideLine(true, heard.text)
+        if (s is State.Guiding) _state.value = s.copy(turns = guideTurns)
+        return box.trySend(heard).isSuccess
+    }
+
+    private fun guidePolicy(state: AppState): GuidePolicy {
+        fun access(name: String, default: AppLevel) = when (state.appLevels.firstOrNull { it.first == name }?.second ?: default) {
+            AppLevel.Off -> AppAccess.OFF
+            AppLevel.ReadOnly -> AppAccess.READ_ONLY
+            AppLevel.AskFirst -> AppAccess.ASK_FIRST
+        }
+        return GuidePolicy(
+            grocery = GroceryTasks.policy(state),
+            whatsapp = access("WhatsApp", AppLevel.AskFirst),
+            payments = access("Payments", AppLevel.Off),
+        )
+    }
+
+    /**
+     * "Let's do it together [in <app>]". The app: the one named (WhatsApp / Blinkit / … opened
+     * through the gate; any other app only if the user already allowed Saathi to open it), or the
+     * app the user was in when they held Volume-down.
+     */
+    private fun startGuide(context: Context, command: Command.Guide, lang: Lang, appState: AppState, speak: (String) -> Unit): Boolean {
+        val app = context.applicationContext
+        val gt = GuideTexts(lang)
+        val named = command.app?.lowercase()?.trim()
+        var open: String? = null
+        var target: String? = null
+        when {
+            named != null && named in Apps.APP_ALIASES -> open = named
+            named != null -> {
+                when (val r = AppResolver.resolve(named, AppLauncher.installed(app), app.packageName)) {
+                    is AppResolver.Result.One -> if (AppLauncher.decide(app, r.app, appState) == LaunchDecision.Launch) target = r.app.packageName
+                    else -> Unit
+                }
+                if (target == null) {
+                    showResult(command, Outcome.Asked(gt.noTarget))
+                    return true
+                }
+            }
+            else -> target = captured?.takeIf { System.currentTimeMillis() - it.atMillis < CAPTURE_MAX_AGE_MS }?.screen?.packageName
+        }
+        if (open == null && target == null) {
+            showResult(command, Outcome.Asked(gt.noTarget))
+            return true
+        }
+        val id = ++runCounter
+        val title = title(command)
+        speaker = speak
+        lastLang = lang
+        stopReason = StopReason.USER
+        _state.value = State.Running(id, command, title, target?.let(::appName) ?: appName(Apps.APP_ALIASES.getValue(open!!)), emptyList())
+        Log.i(TAG, "start guide")
+        val previous = job
+        val earlierCleanup = cleanupJob
+        job = scope.launch {
+            previous?.join()
+            earlierCleanup?.join()
+            val out = runGuide(app, id, command, title, target, null, open, lang, appState)
+            finish(app, id, command, title, out, appState, front = true)
+            afterJob(app)
+        }
+        return true
+    }
+
+    /** One guide session on [target] (or the app [open] names), in the calling job. Never throws except cancellation. */
+    private suspend fun runGuide(
+        app: Context,
+        id: Int,
+        command: Command,
+        title: String,
+        target: String?,
+        intro: String?,
+        open: String?,
+        lang: Lang,
+        appState: AppState,
+    ): Outcome {
+        val device = DeviceBridge.gated() ?: return Outcome.Failed(Texts(lang).serviceOff)
+        val box = Channel<Heard>(capacity = 8)
+        guideTurns = emptyList()
+        inbox = box
+        val appLabel = target?.let(::appName) ?: open?.let { appName(Apps.APP_ALIASES.getValue(it)) } ?: "Saathi"
+        val io = object : GuideIO {
+            override suspend fun say(turn: GuideTurn) {
+                guideTurns = guideTurns + GuideLine(false, turn.text, turn.kind)
+                _state.value = State.Guiding(id, command, title, appLabel, guideTurns)
+                speaker?.let { s -> withContext(Dispatchers.Main) { s(turn.text) } }
+            }
+
+            override suspend fun next(timeoutMs: Long): Heard? = withTimeoutOrNull(timeoutMs) { box.receive() }
+
+            override suspend fun showApp(packageName: String): Boolean = bringAppForward(app, packageName, appState)
+
+            override suspend fun showSaathi() {
+                if (device.snapshot()?.packageName == app.packageName) return
+                bringSaathiToFront(app)
+                repeat(8) {
+                    delay(250)
+                    if (device.snapshot()?.packageName == app.packageName) return
+                }
+            }
+
+            override suspend fun confirm(request: ConfirmRequest): Answer = awaitAnswer(app, id, command, title, request)
+
+            override suspend fun pick(request: PickRequest): Int? = awaitItemPick(app, id, command, title, request)
+
+            override fun appLabel(packageName: String): String = appName(packageName)
+        }
+        val session = GuideSession(device, lang, io, guidePolicy(appState), target, app.packageName, ::log)
+        return try {
+            session.run(intro, open)
+        } catch (e: CancellationException) {
+            // Stop / service lost: say where things are left, and come back to Saathi.
+            withContext(NonCancellable) {
+                inbox = null
+                val base = if (stopReason == StopReason.SERVICE_LOST) Texts(lang).stoppedServiceLost else Texts(lang).stopped
+                finish(app, id, command, title, Outcome.Stopped(base).withNote(session.leftNote()), appState, front = true)
+            }
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "guide error: ${e::class.simpleName}") // no screen text in logs
+            Outcome.Failed(Texts(lang).stuck).withNote(session.leftNote())
+        } finally {
+            inbox = null
+            box.close()
+        }
+    }
+
+    /**
+     * Bring the app the guide works in to the front: Saathi steps back (its task goes behind, so the
+     * app the user came from shows again, exactly as they left it). If that isn't the app, an app the
+     * user allowed Saathi to open is started by its launcher; the safety-list apps are opened by the
+     * session itself through the gate (gated OpenApp).
+     */
+    private suspend fun bringAppForward(app: Context, pkg: String, appState: AppState): Boolean {
+        val device = DeviceBridge.gated() ?: return false
+        suspend fun inFront(): Boolean {
+            repeat(12) {
+                if (device.snapshot()?.packageName == pkg) { delay(300); return true }
+                delay(250)
+            }
+            return false
+        }
+        if (device.snapshot()?.packageName == pkg) return true
+        if (withContext(Dispatchers.Main) { MainActivity.sendToBack() } && inFront()) return true
+        if (pkg in Apps.APP_ALIASES.values) return false
+        val launchable = AppLauncher.installed(app).firstOrNull { it.packageName == pkg } ?: return false
+        if (!withContext(Dispatchers.Main) { AppLauncher.launch(app, launchable, appState) }) return false
+        return inFront()
     }
 
     /** The accessibility service is going away (unbind / destroy): stop; a typed draft stays recorded. */

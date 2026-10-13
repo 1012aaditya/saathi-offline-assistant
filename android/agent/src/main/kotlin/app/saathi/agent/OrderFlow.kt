@@ -152,6 +152,7 @@ class OrderFlow(
     private var removeTaps = 0
     private var scrolls = 0
     private var emptyWaits = 0
+    private var shimmerWaits = 0 // guide hand-off hook: results drawn as shimmer placeholders
 
     /** Units Saathi added in this run (seen on screen, never assumed). */
     val addedUnits: Int get() = added
@@ -208,6 +209,11 @@ class OrderFlow(
         if (!searched) {
             searched = true
             return Plan.Act(Search(query), t.searching(query))
+        }
+        // Real Blinkit (13 Oct): results show shimmer placeholders first. Still loading: wait, don't fail.
+        if (GuideHooks.loading(screen) && shimmerWaits < 6) {
+            shimmerWaits++
+            return WaitPlan(LOAD_WAIT_MS, t.waiting)
         }
         if (waits < 2) {
             waits++
@@ -285,7 +291,8 @@ class OrderFlow(
         if (start > 0 && addTaps == 0) {
             // Already in the cart before Saathi touched it: never add more on top (prototype rule).
             alreadyHad = true
-            return toCartAfterAdding(screen)
+            // Owner, 13 Oct: an item already in the cart -> ask, don't guess (guide mode takes over).
+            return GuideHooks.alreadyInCart(card, screen, t.lang)
         }
         added = maxOf(0, card.qty - start)
         ctx.itemsAdded = added
@@ -321,7 +328,7 @@ class OrderFlow(
             else -> null
         }
         if (choice == null) {
-            if (sizeAsked) return Plan.Fail(t.stuck)
+            if (sizeAsked) return GuidePlan(t.stuck)
             sizeAsked = true
             val options = variants.take(3).map(Product::of)
             return PickPlan(PickRequest(t.whichSize(options), options.map(t::option), t.pickHint), t.pickCancelled) { i ->
@@ -338,7 +345,7 @@ class OrderFlow(
     private fun toCartAfterAdding(screen: Screen): Plan {
         val bar = Blinkit.cartBar(screen)
         if (bar != null) {
-            if (++cartTaps > 3) return Plan.Fail(t.stuck)
+            if (++cartTaps > 3) return GuidePlan(t.stuck)
             return Plan.Act(Tap(bar.index), t.openingCart)
         }
         if (Blinkit.cards(screen).isNotEmpty() && cartWaits == 0 && !expectSheet) {
@@ -350,7 +357,7 @@ class OrderFlow(
     }
 
     private fun back(): Plan {
-        if (++backs > 4) return Plan.Fail(t.stuck)
+        if (++backs > 4) return GuidePlan(t.stuck)
         return Plan.Act(Back, t.closingSheet)
     }
 
@@ -359,7 +366,7 @@ class OrderFlow(
     private fun toCart(screen: Screen): Plan {
         val bar = Blinkit.cartBar(screen)
         if (bar != null) {
-            if (++cartTaps > 3) return Plan.Fail(t.stuck)
+            if (++cartTaps > 3) return GuidePlan(t.stuck)
             return Plan.Act(Tap(bar.index), t.openingCart)
         }
         if (emptyConfirmed) {
@@ -382,6 +389,8 @@ class OrderFlow(
     private fun checkout(screen: Screen): Plan {
         val summary = OrderSummary.from(screen)
         if (mode == Mode.EMPTY) return emptyStep(screen, summary)
+        // An out-of-stock block in the cart: the user decides (guide mode), never Saathi.
+        if (mode != Mode.READ_CART) GuideHooks.checkoutProblem(screen, t.lang)?.let { return it }
         if (summary == null) {
             if (added > 0 || alreadyHad) return Plan.Fail(t.cartChanged)
             return Plan.Done(t.cartEmpty, title = "Blinkit")
@@ -413,6 +422,8 @@ class OrderFlow(
             return Plan.Done("${t.readback(summary)} ${t.orderingOff}", quotes = summary.quotes, title = "Blinkit cart")
         }
         val btn = Blinkit.orderButton(screen) ?: return Plan.Fail(t.noOrderButton)
+        // "Select Payment Method": choosing how to pay is the user's job; hand over before any tap.
+        if (GuideHooks.choosesPayment(btn)) return Plan.HandOver(t.payYourself)
         // The gate must treat this tap as the R3 order HOLD; anything else and we don't tap.
         val v = gate.check(Tap(btn.index), screen, ctx)
         if (v.kind == Kind.HANDOFF) return Plan.HandOver(v.message.ifEmpty { t.payYourself })

@@ -153,8 +153,9 @@ class SaathiAccessibilityService : AccessibilityService() {
 
     private fun onTalkKey() {
         longFired = true
-        // A running task stops at once (Stop); then Saathi listens.
-        if (TaskRunner.isRunning) TaskRunner.stop(TaskRunner.StopReason.TALK_KEY)
+        // A running task stops at once (Stop); then Saathi listens. In guide mode the key is how the
+        // user talks to the guide: the session keeps going and the Guide screen listens.
+        if (TaskRunner.isRunning && !TaskRunner.isGuiding) TaskRunner.stop(TaskRunner.StopReason.TALK_KEY)
         TaskRunner.captured = runCatching { captureForeground() }.getOrNull()
         val i = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)

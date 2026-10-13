@@ -246,7 +246,7 @@ internal class ChatOpener(
      * then WhatsApp's own Up button, or an honest stop.
      */
     private fun leave(screen: Screen, say: String): Plan {
-        if (++backs > 4) return Plan.Fail(t.stuck)
+        if (++backs > 4) return GuidePlan(t.stuck)
         if (backClosedWhatsApp) {
             val up = screen.elements.firstOrNull { it.clickable && it.desc.trim().lowercase() in UP_LABELS }
                 ?: return Plan.Fail(t.whatsappStuck)
@@ -447,7 +447,7 @@ class UnreadFlow(private val t: Texts) : Flow {
             return Plan.Act(OpenApp("whatsapp"), t.opening("WhatsApp"))
         }
         if (!WhatsApp.onChatList(screen)) {
-            if (++backs > 4) return Plan.Fail(t.stuck)
+            if (++backs > 4) return GuidePlan(t.stuck)
             return Plan.Act(Back, t.backToChats) // inside a chat / contact info / search
         }
         val chip = WhatsApp.unreadFilter(screen)
