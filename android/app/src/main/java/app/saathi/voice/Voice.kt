@@ -405,9 +405,15 @@ class Voice(private val context: Context) {
         recognizer?.cancel()
         val id = interlock.requestListen()
         sessionId = id
+        val requestedAt = SystemClock.elapsedRealtime()
         fun tryOpen() {
             openRunnable = null
             if (!interlock.isCurrent(id)) return // Saathi spoke meanwhile, or cancelled
+            // stop() doesn't silence every engine at once (buffered audio plays on): while the
+            // engine is still audible, the speech hasn't really ended, so the gap starts later.
+            // (At most 3 s, so an engine that never reports silence can't block the mic forever.)
+            val audible = runCatching { tts?.isSpeaking == true }.getOrDefault(false)
+            if (audible && SystemClock.elapsedRealtime() - requestedAt < 3_000L) interlock.stillAudible()
             val wait = interlock.msUntilMicMayOpen()
             if (wait == null) return // speaking: speak() already cancelled this session
             if (wait > 0L || !interlock.open(id)) {

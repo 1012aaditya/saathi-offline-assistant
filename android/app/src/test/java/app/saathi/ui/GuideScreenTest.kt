@@ -26,11 +26,25 @@ class GuideScreenTest {
     fun `listening starts only from the user's own press (Speak, talk button, Volume-down)`() {
         val c = code(src)
         val starts = c.lines().filter { "listener.start()" in it }
-        assertEquals("only the Volume-down push-to-talk may call start()", 1, starts.size)
-        assertTrue(starts.single().contains("TaskRunner.guideTalk.collect"))
+        assertEquals("one place may call start(): the push-to-talk gate", 1, starts.size)
+        assertTrue("start() only after a fresh press", starts.single().contains("if (ptt.mayListen()) listener.start()"))
+        assertTrue("a press arms the gate", "ptt.press(at)" in c)
+        assertFalse("toggle() would start listening without the gate", "listener.toggle()" in c)
+        assertTrue("Speak and the talk button press through talk()", Regex("SpeakButton\\(listener.active\\) \\{ talk\\(\\) }").containsMatchIn(c) && "onTalk = { talk() }" in c)
+        assertTrue("Volume-down presses through talk() with its own time", "TaskRunner.guideTalk.collect { at -> if (!listener.active) talk(at) }" in c)
         assertFalse("must not wait for Saathi's speech and then listen", "awaitSpeechEnd(" in c)
         assertFalse("must not open the microphone itself", "startListening(" in c)
-        assertTrue("Speak toggles listening", "listener.toggle()" in c)
+    }
+
+    @Test
+    fun `no listening survives into Saathi's next turn (14 Oct 00-40, 'read more' heard back)`() {
+        val c = code(src)
+        assertTrue(
+            "each new Saathi turn disarms the press and cancels listening",
+            Regex("if \\(!last\\.fromUser\\) \\{\\s*ptt\\.turnSpoken\\(\\)\\s*listener\\.cancel\\(\\)").containsMatchIn(c),
+        )
+        assertTrue("the read-more hint is shown on screen", "lastSaathi?.hint" in c)
+        assertFalse("the screen never speaks by itself", Regex("voice\\.speak\\(").containsMatchIn(c))
     }
 
     @Test

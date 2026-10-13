@@ -212,6 +212,40 @@ class EchoGuardTest {
     }
 
     @Test
+    fun `stopped speech that is still audible (TTS buffer) restarts the gap - the mic waits for real silence`() {
+        val c = Clock()
+        val v = VoiceInterlock(c::now)
+        v.speechStarted("And 42 more.")
+        c.t = 1_000; v.speechEnded() // the user pressed Speak: Voice stopped the speech
+        val id = v.requestListen()
+        c.t = 1_500; v.stillAudible() // ...but the engine is still playing "read more"
+        c.t = 1_700; assertEquals(500L, v.msUntilMicMayOpen())
+        assertFalse(v.open(id))
+        c.t = 2_200; assertTrue(v.open(id))
+        // A transcript is timed from when the sound really stopped.
+        c.t = 2_900; assertEquals(EchoGuard.Reason.TOO_SOON_AFTER_SPEECH, v.judge(id))
+    }
+
+    @Test
+    fun `push-to-talk - only a fresh press opens the mic, once, a Saathi turn disarms it (14 Oct 00-40)`() {
+        val c = Clock(10_000)
+        val p = PushToTalk(c::now)
+        // Saathi speaks a turn: nothing was pressed, so nothing may listen (no auto-listen after a turn).
+        p.turnSpoken()
+        assertFalse(p.mayListen())
+        c.t = 15_000; assertFalse(p.mayListen()) // nor later, by itself
+        // The user presses Speak: one session.
+        p.press(); assertTrue(p.mayListen())
+        assertFalse(p.mayListen(), "a press is used once")
+        // A press, then Saathi's next turn before it was used: disarmed.
+        c.t = 20_000; p.press(); c.t = 20_100; p.turnSpoken(); assertFalse(p.mayListen())
+        // A Volume-down hold delivered late (made before the latest turn, or too old): never counts.
+        c.t = 30_000; p.turnSpoken(); p.press(at = 29_900); assertFalse(p.mayListen())
+        c.t = 40_000; p.press(at = 37_000); assertFalse(p.mayListen())
+        c.t = 41_000; p.press(at = 40_500); assertTrue(p.mayListen())
+    }
+
+    @Test
     fun `Saathi speaking during a session cancels it and its result is discarded`() {
         val c = Clock()
         val v = VoiceInterlock(c::now)

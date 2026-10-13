@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import app.saathi.MainActivity
+import app.saathi.brain.BrainHooks
 import app.saathi.data.AppLevel
 import app.saathi.data.AppState
 import app.saathi.data.Outcome as HistoryOutcome
@@ -64,8 +65,11 @@ object TaskRunner {
         data class Guiding(override val runId: Int, val command: Command, val title: String, val app: String, val turns: List<GuideLine>) : State
     }
 
-    /** One line of the guide conversation: Saathi's ([fromUser] false) or what the user said. */
-    data class GuideLine(val fromUser: Boolean, val text: String, val kind: GuideTurn.Kind? = null)
+    /**
+     * One line of the guide conversation: Saathi's ([fromUser] false) or what the user said.
+     * [hint]: shown under Saathi's line, never spoken ("Say “read more” to hear the rest.").
+     */
+    data class GuideLine(val fromUser: Boolean, val text: String, val kind: GuideTurn.Kind? = null, val hint: String? = null)
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -251,12 +255,16 @@ object TaskRunner {
     /** A guide session is running (Volume-down then means "talk to the guide", not "stop"). */
     val isGuiding: Boolean get() = inbox != null && isRunning
 
-    private val _guideTalk = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val _guideTalk = MutableSharedFlow<Long>(extraBufferCapacity = 1)
 
-    /** Volume-down held while guiding: the Guide screen starts listening (the user's own press). */
-    val guideTalk: SharedFlow<Unit> get() = _guideTalk
+    /**
+     * Volume-down held while guiding: the Guide screen starts listening (the user's own press).
+     * Carries when the key was held (elapsedRealtime), so a late / buffered request never opens
+     * the mic after Saathi's next turn ([app.saathi.agent.PushToTalk]).
+     */
+    val guideTalk: SharedFlow<Long> get() = _guideTalk
 
-    fun requestGuideTalk() { _guideTalk.tryEmit(Unit) }
+    fun requestGuideTalk(at: Long = android.os.SystemClock.elapsedRealtime()) { _guideTalk.tryEmit(at) }
 
     /**
      * What the user said (or a Repeat / Read more / Stop button, or a debug-build `--es text`
@@ -352,7 +360,7 @@ object TaskRunner {
         val appLabel = target?.let(::appName) ?: open?.let { appName(Apps.APP_ALIASES.getValue(it)) } ?: "Saathi"
         val io = object : GuideIO {
             override suspend fun say(turn: GuideTurn) {
-                guideTurns = guideTurns + GuideLine(false, turn.text, turn.kind)
+                guideTurns = guideTurns + GuideLine(false, turn.text, turn.kind, turn.hint)
                 _state.value = State.Guiding(id, command, title, appLabel, guideTurns)
                 speaker?.let { s -> withContext(Dispatchers.Main) { s(turn.text) } }
             }
@@ -376,7 +384,9 @@ object TaskRunner {
 
             override fun appLabel(packageName: String): String = appName(packageName)
         }
-        val session = GuideSession(device, lang, io, guidePolicy(appState), target, app.packageName, ::log)
+        // [brain hook] Smart understanding (on-device AI): null when off / no model file = rules only.
+        val brain = BrainHooks.forGuide(app, lang, ::log)
+        val session = GuideSession(device, lang, io, guidePolicy(appState), target, app.packageName, ::log, brain = brain)
         return try {
             session.run(intro, open)
         } catch (e: CancellationException) {

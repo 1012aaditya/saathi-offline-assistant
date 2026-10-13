@@ -176,6 +176,17 @@ class VoiceInterlock(private val now: () -> Long) {
         history.forEach { if (it.endMs == null) it.endMs = t }
     }
 
+    /**
+     * The speech engine is still making sound although Saathi's speech was stopped (a TTS
+     * engine finishing its buffered audio after stop(), 14 Oct): count the speech as ending now,
+     * so the mic waits the full gap after the sound really stops, and timings measure from there.
+     */
+    @Synchronized
+    fun stillAudible() {
+        val last = history.lastOrNull() ?: return
+        if (last.endMs != null) last.endMs = now()
+    }
+
     /** Null while speaking; else ms to wait before the mic may open (0 = now). */
     @Synchronized
     fun msUntilMicMayOpen(): Long? {
@@ -257,5 +268,48 @@ class VoiceInterlock(private val now: () -> Long) {
     companion object {
         const val MAX_HISTORY = 12
         const val RECENT_MS = 90_000L
+    }
+}
+
+/**
+ * Guide mode listens ONLY after the user's own press: Speak, the talk button, or Volume-down held.
+ * 14 Oct 00:40: right after Saathi said 'Say "read more"', the guide got "read more" from the
+ * voice path. Whatever opened the mic, this makes "Saathi's turn opened the mic" impossible:
+ *  - [press] arms ONE listening session; [mayListen] uses it up.
+ *  - It must be used within [PRESS_VALID_MS] of the press (a stale, buffered press never counts).
+ *  - Every new Saathi turn ([turnSpoken]) disarms a press not used yet, and a press made before
+ *    the latest turn never counts. Nothing but a press arms it: a turn, a timer or the end of
+ *    Saathi's speech can't.
+ */
+class PushToTalk(private val now: () -> Long) {
+    private var pressedAt: Long? = null
+    private var lastTurnAt: Long? = null
+
+    /** The user pressed Speak / the talk button / held Volume-down at [at] (same clock as [now]). */
+    @Synchronized
+    fun press(at: Long = now()) {
+        pressedAt = at
+    }
+
+    /** Saathi said a new turn: a press not used yet no longer counts. */
+    @Synchronized
+    fun turnSpoken() {
+        lastTurnAt = now()
+        pressedAt = null
+    }
+
+    /** True once per fresh press, made after the latest turn: the mic may open now. */
+    @Synchronized
+    fun mayListen(): Boolean {
+        val p = pressedAt ?: return false
+        pressedAt = null
+        val age = now() - p
+        if (age < 0 || age > PRESS_VALID_MS) return false
+        val turn = lastTurnAt
+        return turn == null || p >= turn
+    }
+
+    companion object {
+        const val PRESS_VALID_MS = 2_000L
     }
 }

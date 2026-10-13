@@ -336,6 +336,11 @@ object ScreenParts {
             if (active) voice.stopListening() else start()
         }
 
+        /** Finish the current utterance (never starts listening). */
+        fun finish() {
+            if (active) voice.stopListening()
+        }
+
         fun cancel() {
             if (active) {
                 active = false

@@ -63,6 +63,13 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 
+    // Smart understanding: Gemma 3 1B (.task) run on the phone's CPU by MediaPipe LLM Inference,
+    // fully offline (no INTERNET permission). The model file is NOT in the APK: the owner pushes it to
+    // Android/data/app.saathi/files/models/ (brain/LlmEngine.kt). 0.10.35 = latest release on Google
+    // Maven (Apr 2026); Gemma 3 .task support since 0.10.22; has session options (temperature, topK),
+    // Backend.CPU and cancelGenerateResponseAsync, which the engine uses for its timeout.
+    implementation("com.google.mediapipe:tasks-genai:0.10.35")
+
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")

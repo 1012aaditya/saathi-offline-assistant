@@ -83,6 +83,15 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
     var realShapes = false
     /** Snapshots of results drawn as shimmer placeholders (rids shimmer_image / shimmer_title / button1 / button2, no labels). */
     var shimmerSnapshots = 0
+    /**
+     * The owner's tablet, 14 Oct 00:40 (with [realShapes]): screen chrome around the content — a
+     * "Navigate up" / "Search" / "펩 Share" toolbar (an icon-font glyph in front of "Share"), the
+     * search box with what was typed, "Clear all", "Double tap to voice search", "Voice search
+     * button", rating / delivery-time / wishlist-heart badges in cards, the cart bar as "View cart
+     * · N items" + "N items", the address with "Change", and the out-of-stock row inside a
+     * clickable, unlabelled container (which made the old guide say "1 item is not in stock: .").
+     */
+    var deviceChrome = false
     /** Real checkout: an out-of-stock item (title, subtitle) and what Blinkit suggests instead. */
     var outOfStockInCart: Pair<String, String>? = null
     val suggestions = mutableListOf(Item("Mother Dairy Toned Milk", "500 ml", 28))
@@ -138,6 +147,11 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
         fun cartBar() {
             if (cart.isEmpty()) return
             val n = cart.values.sum()
+            if (realShapes && deviceChrome) {
+                add(desc = "View cart · $n item${if (n == 1) "" else "s"}", rid = "view_cart", clickable = true, b = Bounds(300, height - 200, 780, height - 140)) { view = View.Checkout; scrolled = 0; true }
+                add(text = "$n item${if (n == 1) "" else "s"}", rid = "tv_quantity", b = Bounds(300, height - 140, 780, height - 80))
+                return
+            }
             if (realShapes) {
                 add(text = "View cart", rid = "view_cart", clickable = true, b = Bounds(300, height - 200, 780, height - 140)) { view = View.Checkout; scrolled = 0; true }
                 add(text = "$n item${if (n == 1) "" else "s"}", rid = "tv_quantity", b = Bounds(300, height - 140, 780, height - 80))
@@ -151,6 +165,12 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
             val key = Key(item.name, size)
             val qty = cart[key] ?: 0
             add(desc = "${item.name} is available for ₹$price, $size", cls = "ViewGroup", clickable = true, b = Bounds(x, y, x + 320, y + 600))
+            if (realShapes && deviceChrome) {
+                add(desc = "Add to wishlist", rid = "wishlist_icon", clickable = true, b = Bounds(x + 270, y + 10, x + 310, y + 50)) { true }
+                add(text = "4.3", rid = "rating", b = Bounds(x + 10, y + 405, x + 60, y + 425))
+                add(text = "(12.4k)", rid = "rating_count", b = Bounds(x + 60, y + 405, x + 140, y + 425))
+                add(text = "10 MINS", rid = "eta", b = Bounds(x + 10, y + 300, x + 120, y + 330))
+            }
             if (realShapes) {
                 add(text = item.name, rid = "tv_name", b = Bounds(x + 10, y + 340, x + 310, y + 400))
                 add(text = "₹$price", rid = "price", b = Bounds(x + 10, y + 470, x + 170, y + 500))
@@ -217,7 +237,16 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
                 add(text = typed, desc = Blinkit.HIDDEN_FIELD, cls = "EditText", editable = true, b = Bounds(0, 0, 0, 0))
             }
             is View.Results -> {
-                searchBar()
+                if (realShapes && deviceChrome) {
+                    add(desc = "Search for atta, dal, coke and more", rid = "fl_search_bar", cls = "FrameLayout", clickable = true, b = Bounds(0, 40, width, 140)) { view = View.SearchBox; typed = ""; true }
+                    add(desc = "Navigate up", rid = "back", cls = "ImageButton", clickable = true, b = Bounds(0, 150, 80, 210)) { view = View.Home; true }
+                    add(text = v.query, desc = "Search for atta…", rid = "search_edit_text", cls = "EditText", editable = true, clickable = true, b = Bounds(80, 150, 800, 210))
+                    add(desc = "Clear all", rid = "clear", cls = "ImageButton", clickable = true, b = Bounds(800, 150, 880, 210)) { true }
+                    add(desc = "Double tap to voice search", rid = "voice_hint", b = Bounds(880, 150, 960, 210))
+                    add(desc = "Voice search button", rid = "voice_search", cls = "ImageButton", clickable = true, b = Bounds(960, 150, 1040, 210)) { true }
+                } else {
+                    searchBar()
+                }
                 if (shimmerSnapshots > 0) {
                     shimmerSnapshots--
                     for (i in 0 until 4) {
@@ -230,7 +259,7 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
                 } else if (loadingSnapshots > 0) {
                     loadingSnapshots--
                 } else {
-                    add(text = "Results for ${v.query}", rid = "tv_title", b = Bounds(10, 160, 600, 200))
+                    if (!deviceChrome) add(text = "Results for ${v.query}", rid = "tv_title", b = Bounds(10, 160, 600, 200))
                     val hits = catalog.filter { it.matches(v.query) }
                     if (hits.isEmpty()) add(text = "No results found for ${v.query}", b = Bounds(10, 300, width, 360))
                     hits.forEachIndexed { i, item ->
@@ -313,12 +342,20 @@ class FakeBlinkit(val catalog: List<Item>) : Actuator {
     ) {
         fun el(text: String = "", desc: String = "", rid: String = "", cls: String = "View", clickable: Boolean = false, b: Bounds, onTap: (() -> Boolean)? = null) =
             add(text, desc, rid, cls, clickable, false, b, onTap)
+        if (deviceChrome) {
+            el(desc = "Navigate up", rid = "back", cls = "ImageButton", clickable = true, b = Bounds(0, 40, 80, 100)) { view = lastResults ?: View.Home; true }
+            el(desc = "Search", rid = "search", cls = "ImageButton", clickable = true, b = Bounds(800, 40, 880, 100)) { true }
+            el(text = "\uD3A9 Share", rid = "share", clickable = true, b = Bounds(880, 40, 1070, 100)) { true }
+        }
         el(desc = "Checkout", rid = "title", b = Bounds(10, 40, 400, 100))
         el(text = "Delivering to Home", rid = "header_title", b = Bounds(10, 110, 700, 150))
         el(text = address, rid = "header_subtitle", b = Bounds(10, 150, 900, 190))
+        if (deviceChrome) el(text = "Change", rid = "change_button", clickable = true, b = Bounds(900, 110, 1070, 190)) { true }
         var y = 220
         outOfStockInCart?.let { (title, subtitle) ->
             el(desc = "1 item is not in stock", rid = "title", b = Bounds(10, y, 700, y + 40))
+            // On the device the row is a clickable container without a label of its own.
+            if (deviceChrome) el(cls = "ViewGroup", clickable = true, b = Bounds(0, y + 45, width, y + 125)) { true }
             el(text = title, rid = "item_title", b = Bounds(10, y + 50, 700, y + 90))
             el(text = subtitle, rid = "item_subtitle", b = Bounds(10, y + 90, 700, y + 120))
             el(text = "Move to wishlist", rid = "promo_offer_tv", clickable = true, b = Bounds(700, y + 50, 1000, y + 110)) {

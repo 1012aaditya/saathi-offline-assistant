@@ -39,6 +39,8 @@ class MainActivity : ComponentActivity() {
         current = java.lang.ref.WeakReference(this)
         enableEdgeToEdge()
         val state = AppState(applicationContext)
+        // [brain hook] Find the on-device AI model file (if any) at startup; it loads only when guide mode starts.
+        app.saathi.brain.LlmEngine.attach(applicationContext)
         val feedback = Feedback(applicationContext).also { it.soundOn = state.soundOn }
         val voice = Voice(applicationContext).also {
             it.locale = state.languageTag?.let(Locale::forLanguageTag) ?: Locale.getDefault()

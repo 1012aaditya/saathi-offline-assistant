@@ -163,6 +163,9 @@ fun SettingsScreen(nav: AppNav) {
         // OTHER APPS (opened only with the user's approval) + phone contacts for "message anyone"
         OtherAppsSection(changed = { changed(it) }, say = { msg = it })
 
+        // [brain hook] SMART UNDERSTANDING (on-device AI): status, switch, remove model (BrainSettings.kt).
+        SmartUnderstandingSection(changed = { changed(it) }, say = { msg = it })
+
         // MONEY
         Column {
             SectionHeader("Money")
@@ -477,7 +480,8 @@ fun SettingsScreen(nav: AppNav) {
         )
         SettingsSheet.DeleteAll -> ConfirmSheet(
             title = "Delete all data?",
-            body = "This removes your history, settings and trusted contacts from this phone. It can't be undone.",
+            body = "This removes your history, settings and trusted contacts from this phone. It can't be undone. " +
+                "The on-device AI model file stays; remove it under Smart understanding.",
             confirmLabel = "Delete all data",
             onCancel = {
                 sheet = null
@@ -490,6 +494,7 @@ fun SettingsScreen(nav: AppNav) {
                 app.saathi.agent.SaathiContext.app?.let {
                     app.saathi.agent.AppApprovals.clear(it)
                     app.saathi.agent.PhoneBook.forget(it)
+                    app.saathi.brain.LlmEngine.resetSetting(it) // [brain hook] the switch, not the model file
                 }
                 deps.feedback.soundOn = state.soundOn
                 deps.feedback.cue(Cue.Done)

@@ -1,5 +1,6 @@
 package app.saathi.ui.screens
 
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import app.saathi.agent.GuideTurn
 import app.saathi.agent.Heard
 import app.saathi.agent.Outcome
+import app.saathi.agent.PushToTalk
 import app.saathi.agent.TaskRunner
 import app.saathi.feedback.Cue
 import app.saathi.ui.AppNav
@@ -55,10 +57,13 @@ import app.saathi.ui.theme.Clarity
  * forward only for each action (the session brings it back and forth).
  *
  * Push-to-talk ONLY: listening starts when the user presses Speak (or the small talk button, or
- * holds Volume-down). Saathi never opens the microphone after speaking, because its description
- * contains the very words a command uses (13 Oct incidents). Each transcript carries its timing;
- * the session refuses anything heard under 1.5 s after Saathi spoke. Not an answer sheet: send /
- * order still go to the Confirm sheet, and nothing said here can answer it.
+ * holds Volume-down). Saathi never opens the microphone after speaking, because what it says
+ * contains the very words a command uses (13 Oct incidents; 14 Oct 00:40 "read more"). Every
+ * start goes through [PushToTalk]: a press arms one session, a new Saathi turn disarms it and
+ * cancels any listening still open, so no listener survives into the next turn. Each transcript
+ * carries its timing; the session refuses anything heard under 1.5 s after Saathi spoke. The
+ * "read more" hint is shown here, never spoken. Not an answer sheet: send / order still go to
+ * the Confirm sheet, and nothing said here can answer it.
  */
 @Composable
 fun GuideScreen(nav: AppNav) {
@@ -73,8 +78,19 @@ fun GuideScreen(nav: AppNav) {
     val lastSaathi = turns.lastOrNull { !it.fromUser }
     val lastUser = turns.lastOrNull { it.fromUser }
     val working = st is TaskRunner.State.Running
+    // [brain hook] The on-device AI is working out what the user meant: "Thinking…" + a soft tick.
+    val thinking by app.saathi.brain.LlmEngine.thinking.collectAsState()
+    LaunchedEffect(thinking) { if (thinking) deps.feedback.tick() }
 
     val listener = ScreenParts.rememberCommandListener { heard -> TaskRunner.guideCommand(heard, "voice") }
+    val ptt = remember { PushToTalk { SystemClock.elapsedRealtime() } }
+
+    /** The user's own press (Speak, talk button, Volume-down at [at]): listen once, or finish listening. */
+    fun talk(at: Long = SystemClock.elapsedRealtime()) {
+        if (listener.active) { listener.finish(); return }
+        ptt.press(at)
+        if (ptt.mayListen()) listener.start()
+    }
 
     fun send(text: String, source: String) {
         listener.cancel()
@@ -88,13 +104,18 @@ fun GuideScreen(nav: AppNav) {
         send("done", "stop button")
     }
 
-    // A new Saathi turn: it waits for the user (the cue; the words are spoken by the runner).
+    // A new Saathi turn: it waits for the user (the cue; the words are spoken by the runner). No
+    // listening survives into it, and a press made before it no longer counts.
     LaunchedEffect(turns.size) {
         val last = turns.lastOrNull() ?: return@LaunchedEffect
-        if (!last.fromUser) deps.feedback.cue(if (last.kind == GuideTurn.Kind.REFUSED) Cue.Cancelled else Cue.NeedsAnswer)
+        if (!last.fromUser) {
+            ptt.turnSpoken()
+            listener.cancel()
+            deps.feedback.cue(if (last.kind == GuideTurn.Kind.REFUSED) Cue.Cancelled else Cue.NeedsAnswer)
+        }
     }
-    // Volume-down held while guiding: the user's own push-to-talk.
-    LaunchedEffect(Unit) { TaskRunner.guideTalk.collect { if (!listener.active) listener.start() } }
+    // Volume-down held while guiding: the user's own push-to-talk (only a fresh hold counts).
+    LaunchedEffect(Unit) { TaskRunner.guideTalk.collect { at -> if (!listener.active) talk(at) } }
 
     // Follow the session: answer sheets, the end.
     LaunchedEffect(st) {
@@ -116,6 +137,7 @@ fun GuideScreen(nav: AppNav) {
 
     val status = when {
         listener.active -> "Listening"
+        thinking -> "Thinking…" // [brain hook]
         working -> "Working in ${guiding?.app ?: "the app"}."
         else -> "Doing it together. Press Speak to tell Saathi what to do."
     }
@@ -123,13 +145,13 @@ fun GuideScreen(nav: AppNav) {
     SaathiScreen(
         status = status,
         youCanSay = listOf("Add …", "Tap …", "Scroll down", "Read more", "Done"),
-        onTalk = { listener.toggle() },
+        onTalk = { talk() },
         talkLabel = "Speak",
         listening = listener.active,
         bottom = {
             ScreenParts.ListenHint(listener)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                SpeakButton(listener.active) { listener.toggle() }
+                SpeakButton(listener.active) { talk() }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SecondaryButton("Repeat", { send("repeat", "repeat button") }, description = "Repeat what Saathi said")
                     SecondaryButton("Read more", { send("read more", "read more button") }, description = "Read more of the screen")
@@ -151,6 +173,10 @@ fun GuideScreen(nav: AppNav) {
             color = c.label,
             modifier = ScreenParts.rise(1, still).semantics { contentDescription = "Saathi: ${lastSaathi?.text ?: "getting ready"}" },
         )
+        // How to hear the rest ("Say “read more” …"): shown, never spoken, so it can't be heard back.
+        lastSaathi?.hint?.let { hint ->
+            Text(hint, style = Clarity.type.body, color = c.secondary, modifier = ScreenParts.rise(2, still))
+        }
         if (lastUser != null) {
             Text(
                 "You: “${lastUser.text}”",

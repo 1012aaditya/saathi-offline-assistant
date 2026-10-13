@@ -71,8 +71,11 @@ object GuideHooks {
 
 // -- what guide mode needs from the app -----------------------------------------------------------
 
-/** One thing Saathi says in the conversation. Every turn waits for the user (cue: NeedsAnswer). */
-data class GuideTurn(val text: String, val kind: Kind) {
+/**
+ * One thing Saathi says in the conversation. Every turn waits for the user (cue: NeedsAnswer).
+ * [hint]: shown on the Guide screen under the turn, never spoken ("Say “read more” …").
+ */
+data class GuideTurn(val text: String, val kind: Kind, val hint: String? = null) {
     enum class Kind { DESCRIBE, RESULT, INFO, REFUSED }
 }
 
@@ -197,16 +200,19 @@ object GuideTargets {
 // -- the session ----------------------------------------------------------------------------------
 
 /**
- * "Let's do it together": a conversation about the app in front. Saathi DESCRIBES the screen
- * (verbatim labels), the user says what to do (push-to-talk only), Saathi UNDERSTANDS it offline
- * ([GuideGrammar] + [GuideTargets]), ACTS through the safety gate ([GatedDevice]: ALLOW runs;
- * HOLD -> the Confirm sheet with the verbatim read-back; BLOCK -> says why; HANDOFF -> the
- * Handover screen), then says what changed. Repeat until the user says done / stop / bas, or 3
- * minutes pass without a command. The end message always says where things are left.
+ * "Let's do it together": a conversation about the app in front, like talking to a helpful
+ * friend. Saathi SUMMARISES the screen (what's on it, not its controls; verbatim names and
+ * prices), the user says what to do (push-to-talk only), Saathi UNDERSTANDS it offline
+ * ([GuideGrammar] + [GuideTargets]; recogniser slips only ever lead to a question), ACTS through
+ * the safety gate ([GatedDevice]: ALLOW runs; HOLD -> the Confirm sheet with the verbatim
+ * read-back; BLOCK -> says why; HANDOFF -> the Handover screen), then says what changed first.
+ * Repeat until the user says done / stop / bas, or 3 minutes pass without a command. The end
+ * message always says where things are left.
  *
  * Extra care on top of the gate (never instead of it): in apps the gate doesn't know, a button
  * that looks like it sends, pays or buys is never pressed; Saathi never chooses a payment method;
- * never types codes / PINs / passwords; never acts on Saathi's own screen; Settings levels apply.
+ * never types codes / PINs / passwords; never acts on Saathi's own screen; never adds a product
+ * it only guessed (a "which one?" sheet first); Settings levels apply.
  */
 class GuideSession(
     private val device: GatedDevice,
@@ -216,6 +222,8 @@ class GuideSession(
     private var target: String? = null,
     private val ownPackage: String = "app.saathi",
     private val log: (String) -> Unit = {},
+    /** [brain hook] On-device understanding for what the rules don't catch; null = rules only. */
+    private val brain: GuideBrain? = null,
 ) {
     companion object {
         const val IDLE_MS = 3 * 60_000L
@@ -230,13 +238,25 @@ class GuideSession(
         /** Echo defence for long transcripts (commands are short): this many words or more are checked. */
         const val ECHO_MIN_WORDS = 6
 
+        /**
+         * A transcript that is exactly one of the commands Saathi just suggested ("add Amul Taaza"),
+         * heard this soon after Saathi's speech ended, may be Saathi's own voice: asked again once.
+         */
+        const val SUGGESTION_ECHO_MS = 2_500L
+
+        /** Product names remembered from earlier screens (for "did you mean …?"). */
+        const val SEEN_NAMES = 80
+
         private val RISKY_ELSEWHERE = Regex(
             "\\b(send|pay|buy|order|purchase|place order|checkout|check out|confirm|book|submit|transfer|subscribe|donate|post|publish|upload)\\b|भेजें|भुगतान|खरीदें|ऑर्डर",
             RegexOption.IGNORE_CASE,
         )
         private val LOGIN_FIELD = Regex("(mobile|phone) number|\\botp\\b|password|passcode|verification code|मोबाइल नंबर", RegexOption.IGNORE_CASE)
         private val LOGIN_TEXT = Regex("\\b(log ?in|sign ?in|sign ?up|verify)\\b|लॉग ?इन", RegexOption.IGNORE_CASE)
+        private val PRICE_NUM = Regex("[\\d,]+(?:\\.\\d+)?")
     }
+
+    private enum class Mode { SUMMARY, EVERYTHING }
 
     private val t = GuideTexts(lang)
     private val texts = Texts(lang)
@@ -245,10 +265,15 @@ class GuideSession(
     private var screen: Screen? = null
     private var view: ScreenView? = null
     private var page = 0
+    private var mode = Mode.SUMMARY
     private var lastSaid = ""
+    private var lastHint: String? = null
+    private var lastSuggestions: List<String> = emptyList()
     private var lastCard: GuideCard? = null
+    private val seenNames = LinkedHashSet<String>()
     private var ordered = false
     private var sent = 0
+    private var lastActRan = false
 
     /** The last command's kind, for logs/tests (never the words). */
     var lastCommand: String = ""
@@ -256,23 +281,38 @@ class GuideSession(
 
     private fun label(pkg: String) = io.appLabel(pkg)
 
-    private suspend fun say(text: String, kind: GuideTurn.Kind = GuideTurn.Kind.INFO) {
+    private suspend fun say(text: String, kind: GuideTurn.Kind = GuideTurn.Kind.INFO, hint: String? = null) {
         io.showSaathi()
         lastSaid = text
-        io.say(GuideTurn(text, kind))
+        lastHint = hint
+        lastSuggestions = emptyList()
+        io.say(GuideTurn(text, kind, hint))
     }
 
-    private fun describe(page: Int = 0): String {
-        val v = view ?: return t.nothingVisible
-        return GuideView.describe(v, label(v.packageName), t, page)
+    private suspend fun say(s: Spoken, kind: GuideTurn.Kind) {
+        say(s.text, kind, s.hint)
+        lastSuggestions = s.suggestions
+    }
+
+    private fun summary(): Spoken {
+        val v = view ?: return Spoken(t.nothingVisible)
+        return GuideView.summary(v, label(v.packageName), t)
     }
 
     private fun setScreen(s: Screen) {
         screen = s
         view = GuideView.of(s, label(s.packageName), t)
         page = 0
+        mode = Mode.SUMMARY
+        for (c in view!!.cards) {
+            seenNames.remove(c.name)
+            seenNames += c.name
+        }
+        while (seenNames.size > SEEN_NAMES) seenNames.remove(seenNames.first())
         if (s.packageName != ownPackage) target = s.packageName
     }
+
+    private val inShop: Boolean get() = (view?.packageName ?: target) in Apps.ORDER_APPS
 
     /**
      * Run the conversation. [open]: an app alias to open first (gated OpenApp). [intro]: said
@@ -291,8 +331,9 @@ class GuideSession(
             val s = look(settle = true) ?: return Outcome.Failed(t.couldNotReturn)
             handover(s)?.let { return it }
             setScreen(s)
-            val first = listOfNotNull(intro ?: t.start, if (intro != null) t.hereIsWhat else null, describe(0), t.pressSpeak)
-            say(first.joinToString(" "), GuideTurn.Kind.DESCRIBE)
+            val sum = summary()
+            val first = listOfNotNull(intro ?: t.start, if (intro != null) t.hereIsWhat else null, sum.text, t.pressSpeak)
+            say(Spoken(first.joinToString(" "), sum.hint, sum.suggestions), GuideTurn.Kind.DESCRIBE)
             while (true) {
                 coroutineContext.ensureActive()
                 val heard = io.next(IDLE_MS) ?: return end(t.idle)
@@ -306,7 +347,17 @@ class GuideSession(
                     say(t.echo, GuideTurn.Kind.REFUSED)
                     continue
                 }
-                val cmd = GuideGrammar.parse(heard.text)
+                if (heard.msAfterSpeech < SUGGESTION_ECHO_MS && lastSuggestions.any { EchoGuard.tokens(it) == EchoGuard.tokens(heard.text) }) {
+                    log("guide: transcript was one of Saathi's own suggestions, heard ${heard.msAfterSpeech} ms after speech; asked again")
+                    say(t.echo, GuideTurn.Kind.REFUSED)
+                    continue
+                }
+                val parsed = GuideGrammar.parse(heard.text)
+                val cmd = if (brain == null) parsed else brain.understand(
+                    heard.text, parsed, view, view?.let { label(it.packageName) } ?: "", lastSaid,
+                    say = { line -> say(line, GuideTurn.Kind.INFO) },
+                    pick = { req -> io.showSaathi(); withTimeoutOrNull(CONFIRM_TIMEOUT_MS) { io.pick(req) } },
+                ) ?: continue // the brain already answered this turn
                 lastCommand = cmd::class.simpleName.orEmpty()
                 log("guide: command $lastCommand")
                 handle(cmd, heard.text)?.let { return it }
@@ -318,48 +369,83 @@ class GuideSession(
 
     // -- commands ---------------------------------------------------------------------------------
 
+    /** Look again (fresh screen) before answering a question about it. False: already said why. */
+    private suspend fun refresh(): Pair<Boolean, Outcome?> {
+        val s = look(settle = true) ?: return false to sayCantReturn()
+        handover(s)?.let { return false to it }
+        setScreen(s)
+        return true to null
+    }
+
     private suspend fun handle(cmd: GuideCommand, utterance: String): Outcome? {
         when (cmd) {
             GuideCommand.Done -> return end(t.bye)
-            GuideCommand.Repeat -> say(lastSaid.ifEmpty { describe() }, GuideTurn.Kind.DESCRIBE)
-            GuideCommand.More -> { page++; say(describe(page), GuideTurn.Kind.DESCRIBE) }
+            GuideCommand.Repeat -> say(lastSaid.ifEmpty { summary().text }, GuideTurn.Kind.DESCRIBE, lastHint)
+            GuideCommand.More -> {
+                val v = view ?: return null
+                page++
+                val app = label(v.packageName)
+                say(if (mode == Mode.EVERYTHING) GuideView.everything(v, app, t, page) else GuideView.more(v, app, t, page), GuideTurn.Kind.DESCRIBE)
+            }
             GuideCommand.Help -> say("${t.help} ${t.whatNext}")
             GuideCommand.Keep -> say("${t.keptIt} ${t.whatNext}")
             GuideCommand.WhatsOnScreen -> {
-                val s = look(settle = true) ?: return sayCantReturn()
-                handover(s)?.let { return it }
-                setScreen(s)
-                say(describe(0), GuideTurn.Kind.DESCRIBE)
+                val (ok, out) = refresh(); if (!ok) return out
+                say(summary(), GuideTurn.Kind.DESCRIBE)
+            }
+            GuideCommand.Everything -> {
+                val (ok, out) = refresh(); if (!ok) return out
+                mode = Mode.EVERYTHING
+                val v = view!!
+                say(GuideView.everything(v, label(v.packageName), t, 0), GuideTurn.Kind.DESCRIBE)
             }
             GuideCommand.Cart -> {
-                val s = look(settle = true) ?: return sayCantReturn()
-                handover(s)?.let { return it }
-                setScreen(s)
-                say("${cartText()} ${t.whatNext}")
+                val (ok, out) = refresh(); if (!ok) return out
+                say(cartText())
+            }
+            GuideCommand.Total -> {
+                val (ok, out) = refresh(); if (!ok) return out
+                say(totalText())
+            }
+            is GuideCommand.Price -> {
+                val (ok, out) = refresh(); if (!ok) return out
+                say(priceText(cmd.item))
+            }
+            is GuideCommand.Available -> {
+                val (ok, out) = refresh(); if (!ok) return out
+                say(availableText(cmd.item))
+            }
+            GuideCommand.Cheaper -> {
+                val (ok, out) = refresh(); if (!ok) return out
+                say(cheaperText())
+            }
+            GuideCommand.NewestMessage -> {
+                val (ok, out) = refresh(); if (!ok) return out
+                say(newestText())
             }
             GuideCommand.OpenCart, GuideCommand.Checkout -> {
-                val s = look(settle = true) ?: return sayCantReturn()
-                handover(s)?.let { return it }
-                setScreen(s)
+                val (ok, out) = refresh(); if (!ok) return out
+                val s = screen!!
                 val v = view!!
                 val bar = v.cartBar
-                if (bar != null) return tap(bar, null, GuideView.label(bar), utterance)
+                if (bar != null) return tap(bar, null, GuideView.label(bar), utterance, doneText = "")
                 if (cmd == GuideCommand.Checkout) {
                     val btn = if (s.packageName in Apps.ORDER_APPS) Blinkit.orderButton(s) else null
                     if (btn != null) return tap(btn, null, GuideView.label(btn), utterance)
                     return tapNamed("checkout", utterance, true)
                 }
-                say("${t.noCart} ${t.whatNext}")
+                say("${if (v.kind == ScreenKind.CHECKOUT) cartText() else t.noCart} ${if (v.kind == ScreenKind.CHECKOUT) "" else t.whatNext}".trim())
             }
             is GuideCommand.Scroll -> return act(Scroll(if (cmd.down) Direction.DOWN else Direction.UP), if (cmd.down) t.scrolledDown else t.scrolledUp, CommandContext(utterance))
             GuideCommand.Back -> return act(Back, t.wentBack, CommandContext(utterance))
             is GuideCommand.Search -> return search(cmd.query, utterance)
             is GuideCommand.Type -> return type(cmd.text, cmd.field, utterance)
             is GuideCommand.Add -> return add(cmd.item, cmd.count, utterance)
+            is GuideCommand.Want -> return if (inShop) add(cmd.item, 1, utterance) else tapNamed(cmd.item, utterance, true)
             is GuideCommand.Remove -> return step(cmd.item, plus = false, utterance)
             is GuideCommand.Increase -> return step(cmd.item, plus = true, utterance)
             is GuideCommand.Tap -> return tapNamed(cmd.target, utterance, cmd.explicit)
-            is GuideCommand.Unknown -> say(t.didntUnderstand, GuideTurn.Kind.REFUSED)
+            is GuideCommand.Unknown -> reflect(utterance)
         }
         return null
     }
@@ -369,16 +455,114 @@ class GuideSession(
         return null
     }
 
+    /**
+     * Something Saathi didn't understand: say back what was heard, and the likeliest meaning from
+     * the screen (or the session's earlier screens) as a question. Never acted on: the user says
+     * the command if that's what they meant. Private-looking words are never said back.
+     */
+    private suspend fun reflect(heard: String) {
+        val v = view
+        val words = GuideGuess.productWords(heard)
+        val cartish = GuideGuess.mentionsCart(heard) || GuideGuess.soundsLikeAdd(heard)
+        val visible = GuideGuess.match(words, v?.cards?.map { it.name }.orEmpty())
+        val recent = if (visible == null) GuideGuess.match(words, seenNames) else null
+        val shop = inShop
+        val guess = when {
+            visible != null && (cartish || shop) -> "${t.guessAdd(visible.first)} ${t.ifSoSay(t.sayAdd(visible.first))}"
+            recent != null && (cartish || shop) -> "${t.guessSearchAdd(recent.first)} ${t.ifSoSay(t.sayAdd(recent.first))}"
+            visible != null -> t.guessMean(visible.first)
+            cartish && shop -> t.guessCart
+            else -> listOfNotNull(t.notSureMeant, t.couldSay(summary().suggestions)).joinToString(" ")
+        }
+        val said = if (PrivateText.looksPrivate(heard)) t.notSureMeant else "${t.heard(heard.trim())} $guess"
+        say(said.replace("${t.notSureMeant} ${t.notSureMeant}", t.notSureMeant), GuideTurn.Kind.REFUSED)
+    }
+
+    private fun cartLines(v: ScreenView): String {
+        val cart = v.inCart
+        val lines = cart.take(GuideView.CART_LINES).map(GuideView::cartLine)
+        return t.inYourCart(lines, cart.size - lines.size)
+    }
+
     private fun cartText(): String {
         val v = view ?: return t.noCart
-        val inCart = v.cards.filter { it.qty > 0 }
-        val onCheckout = v.title.equals("Checkout", true)
         return when {
-            onCheckout && inCart.isNotEmpty() -> t.cartIs(inCart.joinToString("; ") { c -> listOf(c.label, c.qtyText, c.price).filter { it.isNotEmpty() }.joinToString(", ") }) +
-                (v.outOfStock?.let { " " + v.highlights.first { h -> it in h } } ?: "")
-            v.cartBadge != null -> t.cartBadge(v.cartBadge)
-            else -> t.noCart
+            v.kind == ScreenKind.CHECKOUT -> listOfNotNull(
+                if (v.inCart.isEmpty()) t.cartEmpty else cartLines(v),
+                v.outOfStockItems.takeIf { it.isNotEmpty() }?.let { o -> if (o.size == 1) t.oosOne(o[0].replace(" • ", ", ")) else t.oosMany(o.size, t.joinAnd(o)) },
+                v.total?.let { t.totalIs(it) },
+                t.checkoutAsk,
+            ).joinToString(" ")
+            v.cartCount != null -> "${t.cartHas(v.cartCount)} ${t.wantOpenCart}"
+            else -> "${t.noCart} ${t.whatNext}"
         }
+    }
+
+    private fun totalText(): String {
+        val v = view ?: return t.noTotal
+        return when {
+            v.total != null -> "${t.totalIs(v.total)} ${t.whatNext}"
+            v.kind == ScreenKind.CHECKOUT -> "${t.noTotal} ${t.whatNext}"
+            v.cartBar != null -> listOfNotNull(t.totalAtCheckout, t.couldSay(listOf(t.sayOpenCart))).joinToString(" ")
+            else -> "${t.noCart} ${t.whatNext}"
+        }
+    }
+
+    private fun cardTargets(cards: List<GuideCard>) =
+        cards.map { GuideTarget(listOf(it.label, it.price).filter { s -> s.isNotEmpty() }.joinToString(", "), it.name, it.size, it.container, it) }
+
+    /** The cards the user named, strongly (no sound-alike guessing): for questions, not actions. */
+    private fun named(item: String, v: ScreenView): List<GuideCard> {
+        val q = if (item.lowercase() in GuideGrammar.PRONOUNS) lastCard?.name ?: item else item
+        return when (val r = GuideTargets.resolve(q, cardTargets(v.cards))) {
+            is Resolved.One -> listOfNotNull(r.target.card)
+            is Resolved.Many -> r.targets.mapNotNull { it.card }.distinct()
+            Resolved.None -> emptyList()
+        }
+    }
+
+    private fun notHere(item: String, v: ScreenView): String =
+        listOfNotNull(t.cantSee(item, v.cards.take(3).map { it.name }), if (inShop) t.couldSay(listOf(t.saySearch(item))) else t.whatNext).joinToString(" ")
+
+    private fun priceText(item: String): String {
+        val v = view ?: return t.noPrices
+        if (v.cards.isEmpty()) return "${t.noPrices} ${t.whatNext}"
+        val cards = named(item, v)
+        if (cards.isEmpty()) return notHere(item, v)
+        cards.singleOrNull()?.let { lastCard = it }
+        val lines = cards.take(4).map { c -> t.priceIs(listOf(c.name, c.size).filter { it.isNotEmpty() }.joinToString(", "), c.price) }
+        return "${lines.joinToString(" ")} ${t.whatNext}"
+    }
+
+    private fun availableText(item: String): String {
+        val v = view ?: return t.nothingVisible
+        v.outOfStockItems.firstOrNull { GuideTargets.score(item, it.substringBefore(", ")) >= GuideTargets.MIN_SCORE }?.let {
+            return "${t.outOfStockNow(it.substringBefore(", "))} ${t.whatNext}"
+        }
+        val cards = named(item, v)
+        if (cards.isEmpty()) return notHere(item, v)
+        cards.singleOrNull()?.let { lastCard = it }
+        val lines = cards.take(3).map { c ->
+            if (GuideView.outOfStockCard(c) || (c.add == null && c.qty == 0)) t.outOfStockNow(c.name)
+            else t.available(listOf(c.name, c.size).filter { it.isNotEmpty() }.joinToString(", "), c.price)
+        }
+        return "${lines.joinToString(" ")} ${t.whatNext}"
+    }
+
+    private fun cheaperText(): String {
+        val v = view ?: return t.noPrices
+        val priced = v.cards.mapNotNull { c -> PRICE_NUM.find(c.price)?.value?.replace(",", "")?.toDoubleOrNull()?.let { c to it } }
+        if (priced.isEmpty()) return "${t.noPrices} ${t.whatNext}"
+        val cheap = priced.sortedBy { it.second }.take(GuideView.CARDS).map { it.first }
+        return "${t.cheapest(t.joinCards(cheap.map { GuideView.cardLine(it, t) }))} ${t.wantAdd}"
+    }
+
+    private fun newestText(): String {
+        val v = view ?: return t.noMessages
+        val m = v.messages.lastOrNull() ?: return "${t.noMessages} ${t.whatNext}"
+        val text = GuideView.label(m)
+        val said = if (m.sender == "me") t.newestMine(text) else t.newestFrom(v.title ?: "them", text)
+        return "$said ${t.whatNext}"
     }
 
     /** "tap <label>" / a bare label: resolve on the screen as last described, then act on a fresh look. */
@@ -390,17 +574,27 @@ class GuideSession(
             is Resolved.One -> tapTarget(r.target, utterance)
             is Resolved.Many -> choose(r.targets)?.let { tapTarget(it, utterance) }
             Resolved.None -> {
-                if (explicit) say("${t.cantSee(query, seenNames(v))} ${t.whatNext}", GuideTurn.Kind.REFUSED)
-                else say(t.didntUnderstand, GuideTurn.Kind.REFUSED)
+                if (explicit) {
+                    val tail = if (inShop) t.couldSay(listOf(t.saySearch(query))) ?: t.whatNext else t.whatNext
+                    say("${t.cantSee(query, seenNames(v))} $tail", GuideTurn.Kind.REFUSED)
+                } else {
+                    reflect(utterance)
+                }
                 null
             }
         }
     }
 
-    private fun seenNames(v: ScreenView): List<String> = v.items.filter { it.element != null && it.name.isNotEmpty() }.map { it.card?.label ?: it.name }.distinct().take(4)
+    /** What a friend would name on this screen (no controls). */
+    private fun seenNames(v: ScreenView): List<String> =
+        v.items.filter { it.element != null && it.name.isNotEmpty() && !it.chrome && it.element !== v.cartBar }.map { it.card?.name ?: it.name }.distinct().take(4)
 
     /** Several things match: the "which one?" sheet (cancel is the default). Null = nothing chosen (said). */
-    private suspend fun choose(options: List<GuideTarget>): GuideTarget? {
+    private suspend fun choose(
+        options: List<GuideTarget>,
+        question: String? = null,
+        cancelled: String = t.pickCancelled,
+    ): GuideTarget? {
         val shown = options.take(4)
         val texts = shown.map { it.option }
         if (texts.distinct().size != texts.size) {
@@ -408,10 +602,10 @@ class GuideSession(
             return null
         }
         io.showSaathi()
-        val i = withTimeoutOrNull(CONFIRM_TIMEOUT_MS) { io.pick(PickRequest(t.whichOne(texts), texts, t.pickHint)) }
+        val i = withTimeoutOrNull(CONFIRM_TIMEOUT_MS) { io.pick(PickRequest(question ?: t.whichOne(texts), texts, t.pickHint)) }
         coroutineContext.ensureActive()
         if (i == null || i !in shown.indices) {
-            say("${t.pickCancelled} ${t.whatNext}")
+            say("$cancelled ${t.whatNext}")
             return null
         }
         return shown[i]
@@ -422,21 +616,75 @@ class GuideSession(
         return tap(target.element, target.card, target.label, utterance)
     }
 
-    private suspend fun tap(element: Element, card: GuideCard?, label: String, utterance: String, ctx: CommandContext = CommandContext(utterance)): Outcome? =
-        act(Tap(element.index), t.tapped(label), ctx) { fresh -> GuideTargets.refind(element, card, fresh) }
+    private suspend fun tap(element: Element, card: GuideCard?, label: String, utterance: String, ctx: CommandContext = CommandContext(utterance), doneText: String = t.tapped(label)): Outcome? =
+        act(Tap(element.index), doneText, ctx) { fresh -> GuideTargets.refind(element, card, fresh) }
 
+    /**
+     * "add X" (also "order X in my cart", "X daal do", "I want X"): a card on screen that the user
+     * named clearly is added (asking which one when several match). A sound-alike of a card on
+     * screen ("diet google") is only ever offered on the "which one?" sheet. In a shopping app, a
+     * product not on screen is searched for, the matches described, and the user picks one before
+     * anything is added.
+     */
     private suspend fun add(item: String, count: Int, utterance: String): Outcome? {
         if (count > MAX_COUNT) { say("${t.tooMany} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
         val v = view ?: return null
-        if (v.cards.isEmpty()) return tapNamed(listOf("add", item).filter { it.isNotEmpty() }.joinToString(" "), utterance, true)
-        val card = pickCard(item, v.cards) ?: return null
+        val shop = inShop
+        if (v.cards.isEmpty() && !shop) return tapNamed(listOf("add", item).filter { it.isNotEmpty() }.joinToString(" "), utterance, true)
+        if (item.isBlank() || item.lowercase() in GuideGrammar.PRONOUNS) {
+            if (v.cards.isEmpty()) { say("${t.whichItem} ${t.whatNext}"); return null }
+            val card = pickCard(item, v.cards) ?: return null
+            return addCard(card, count, utterance)
+        }
+        when (val r = GuideTargets.resolve(item, cardTargets(v.cards))) {
+            is Resolved.One -> return addCard(r.target.card!!, count, utterance)
+            is Resolved.Many -> return choose(r.targets)?.card?.let { addCard(it, count, utterance) }
+            Resolved.None -> Unit
+        }
+        // A slip of the recogniser? Ask; never add a guess.
+        GuideGuess.match(GuideGuess.productWords(item), v.cards.map { it.name })?.let { (_, name) ->
+            val picked = choose(cardTargets(v.cards.filter { it.name == name }), t.didYouMeanPick(item), t.pickNothingAdded) ?: return null
+            return addCard(picked.card!!, count, utterance)
+        }
+        if (!shop) { say("${t.cantSee(item, v.cards.take(3).map { it.name })} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
+        return searchThenAdd(item, count, utterance)
+    }
+
+    /** Search for [item] (what was heard, or a name seen earlier that it sounds like), then the user picks. */
+    private suspend fun searchThenAdd(item: String, count: Int, utterance: String): Outcome? {
+        if (PrivateText.looksPrivate(item)) { say("${t.noSecrets} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
+        val q = GuideGuess.match(GuideGuess.productWords(item), seenNames)?.first ?: item
+        lastActRan = false
+        act(Search(q.take(80)), "", CommandContext(utterance), quiet = true)?.let { return it }
+        if (!lastActRan) return null // refused / failed: already said
+        val v = view ?: return null
+        if (v.cards.isEmpty()) { say("${t.noResults(q)} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
+        val matches = cardTargets(v.cards)
+            .map { it to maxOf(GuideTargets.score(q, it.label), GuideTargets.score(q, "${it.label} ${it.context}")) }
+            .filter { it.second >= GuideTargets.MIN_SCORE }
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .take(4)
+        if (matches.isEmpty()) {
+            say(t.searchedNoMatch(q, v.cards.take(3).map { it.name }), GuideTurn.Kind.INFO)
+            return null
+        }
+        val picked = choose(matches, t.foundAsk(q, matches.size), t.pickNothingAdded) ?: return null
+        return addCard(picked.card!!, count, utterance)
+    }
+
+    private suspend fun addCard(card: GuideCard, count: Int, utterance: String): Outcome? {
         lastCard = card
         if (card.qty > 0) {
             // Already in the cart: never add on top without being told exactly that ("plus …").
             say("${t.alreadyInCartHow(card.label, card.qtyText)} ${t.whatNext}")
             return null
         }
-        if (card.add == null) { say("${t.noAddButton(card.label)} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
+        if (card.add == null) {
+            val why = if (GuideView.outOfStockCard(card)) t.outOfStockNow(card.name) else t.noAddButton(card.label)
+            say("$why ${t.whatNext}", GuideTurn.Kind.REFUSED)
+            return null
+        }
         val ctx = CommandContext(command = utterance, quantity = count)
         var r = act(Tap(card.add.index), t.added, ctx, quiet = count > 1) { fresh -> GuideTargets.refind(card.add, card, fresh) }
         if (r != null) return r
@@ -466,7 +714,7 @@ class GuideSession(
                 say("${t.notInCart(card.label)} ${wish?.let { "${t.iSee} ${GuideView.label(it)}." } ?: ""} ${t.whatNext}".replace("  ", " "))
                 return null
             }
-            return add(card.name, 1, utterance)
+            return addCard(card, 1, utterance)
         }
         val btn = (if (plus) card.plus else card.minus) ?: run { say("${t.couldNotPress} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
         val ctx = CommandContext(command = utterance, quantity = 1)
@@ -477,21 +725,19 @@ class GuideSession(
         if (item.isBlank() || item.lowercase() in GuideGrammar.PRONOUNS) {
             lastCard?.let { c -> cards.firstOrNull { it.name == c.name && it.size == c.size }?.let { return it } }
             cards.singleOrNull()?.let { return it }
-            val targets = cards.map { GuideTarget(listOf(it.label, it.price).joinToString(", "), it.name, it.size, it.container, it) }
-            return choose(targets)?.card
+            return choose(cardTargets(cards))?.card
         }
-        val targets = cards.map { GuideTarget(listOf(it.label, it.price).filter { s -> s.isNotEmpty() }.joinToString(", "), it.name, it.size, it.container, it) }
-        return when (val r = GuideTargets.resolve(item, targets)) {
+        return when (val r = GuideTargets.resolve(item, cardTargets(cards))) {
             is Resolved.One -> r.target.card
             is Resolved.Many -> choose(r.targets)?.card
-            Resolved.None -> { say("${t.cantSee(item, cards.map { it.label }.distinct().take(4))} ${t.whatNext}", GuideTurn.Kind.REFUSED); null }
+            Resolved.None -> { say("${t.cantSee(item, cards.map { it.name }.distinct().take(4))} ${t.whatNext}", GuideTurn.Kind.REFUSED); null }
         }
     }
 
     private suspend fun search(query: String, utterance: String): Outcome? {
         if (PrivateText.looksPrivate(query)) { say("${t.noSecrets} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
         val pkg = target ?: return null
-        if (pkg in Apps.ORDER_APPS) return act(Search(query.take(80)), t.searched(query), CommandContext(utterance))
+        if (pkg in Apps.ORDER_APPS) return act(Search(query.take(80)), "", CommandContext(utterance))
         val s = look(settle = true) ?: return sayCantReturn()
         handover(s)?.let { return it }
         setScreen(s)
@@ -501,7 +747,7 @@ class GuideSession(
                 ?: run { say("${t.noSearch} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
             act(Tap(bar.index), t.tapped(GuideView.label(bar).ifEmpty { "Search" }), CommandContext(utterance), quiet = true) { fresh -> GuideTargets.refind(bar, null, fresh) }?.let { return it }
         }
-        return act(TypeText(query.take(500), 0), t.searched(query), CommandContext(utterance)) { fresh -> searchField(fresh) }
+        return act(TypeText(query.take(500), 0), "", CommandContext(utterance)) { fresh -> searchField(fresh) }
     }
 
     private fun searchField(s: Screen): Element? {
@@ -556,12 +802,12 @@ class GuideSession(
         val before = GuideView.of(s, label(s.packageName), t)
         val a: Action = when (action) {
             is Tap -> {
-                val e = find?.invoke(s) ?: run { setScreen(s); say("${t.screenMoved} ${describe(0)}", GuideTurn.Kind.DESCRIBE); return null }
+                val e = find?.invoke(s) ?: run { setScreen(s); val sum = summary(); say(Spoken("${t.screenMoved} ${sum.text}", sum.hint, sum.suggestions), GuideTurn.Kind.DESCRIBE); return null }
                 if (e.index in before.hidden) { say("${t.noSecrets} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
                 Tap(e.index)
             }
             is TypeText -> {
-                val e = find?.invoke(s) ?: run { setScreen(s); say("${t.screenMoved} ${describe(0)}", GuideTurn.Kind.DESCRIBE); return null }
+                val e = find?.invoke(s) ?: run { setScreen(s); val sum = summary(); say(Spoken("${t.screenMoved} ${sum.text}", sum.hint, sum.suggestions), GuideTurn.Kind.DESCRIBE); return null }
                 TypeText(action.text, e.index)
             }
             else -> action
@@ -574,6 +820,7 @@ class GuideSession(
         when (val r = device.execute(a, s, ctx)) {
             is Exec.Ran -> {
                 if (!r.ok) { say("${t.couldNotPress} ${t.whatNext}", GuideTurn.Kind.REFUSED); return null }
+                lastActRan = true
                 if (a is Tap && device.gate.isAddButton(s.elements[a.index], s.packageName)) ctx.itemsAdded++
                 if (a is Tap && WhatsApp.isWhatsApp(s) && s.elements[a.index].rid in setOf("send", "send_btn")) sent++
                 return after(s, before, doneText, quiet)
@@ -588,7 +835,10 @@ class GuideSession(
         return null
     }
 
-    /** Settle after an action, look (whatever is in front now), say what changed. */
+    /**
+     * Settle after an action, look (whatever is in front now), and say what changed FIRST ("Done —
+     * Amul Buffalo A2 Milk is gone. Your cart now has 1 item: …"); a new place is summarised.
+     */
     private suspend fun after(s: Screen, before: ScreenView, doneText: String, quiet: Boolean): Outcome? {
         device.waitForChange(s.hash, TAP_WAIT_MS)
         var now = device.snapshot() ?: return sayCantReturn()
@@ -606,9 +856,20 @@ class GuideSession(
         setScreen(now)
         if (quiet) return null
         val v = view!!
-        val changes = GuideView.changes(before, v, ::label, t)
-        val tail = if (GuideView.isNewPlace(before, v)) describe(0) else t.whatNext
-        say(listOf(doneText, changes.joinToString(" "), tail).filter { it.isNotEmpty() }.joinToString(" "), GuideTurn.Kind.RESULT)
+        if (GuideView.isNewPlace(before, v)) {
+            val sum = summary()
+            say(Spoken(listOf(doneText, sum.text).filter { it.isNotEmpty() }.joinToString(" "), sum.hint, sum.suggestions), GuideTurn.Kind.RESULT)
+            return null
+        }
+        val changes = GuideView.changes(before, v, t)
+        val cart = GuideView.cartAfter(before, v, t)
+        val parts = when {
+            changes.isNotEmpty() -> listOfNotNull(t.donePrefix + changes.joinToString(" "), cart, t.whatNext)
+            cart != null -> listOf(doneText, cart, t.whatNext)
+            before.hash == v.hash -> listOf(t.nothingChanged, t.whatNext)
+            else -> listOf(doneText.ifEmpty { t.screenChanged }, t.whatNext)
+        }
+        say(parts.filter { it.isNotEmpty() }.joinToString(" "), GuideTurn.Kind.RESULT)
         return null
     }
 
