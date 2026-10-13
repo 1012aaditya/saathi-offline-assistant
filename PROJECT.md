@@ -114,6 +114,7 @@ Next: **Expo phone app** — owner will design it first (not started). Still ope
 | 13 Oct | **Android app step 1 built** on branch `feature/android-app` (`android/`): Kotlin + Compose, all 12 Clarity screens, built-in Android speech (no keys), safety gate ported 1:1 to Kotlin with all 88 tests (+ config lock: protected app lists can't be overridden). Operating apps and walk camera are labelled "Practice" until steps 2/4 | Owner asked to build the app from the Clarity design now, on a separate branch so the hackathon laptop demo stays untouched |
 | 13 Oct | Onboarding privacy copy says screen text goes to AI while working (not "data stays on your phone") | ANDROID_APP.md §3: screen text → OpenAI, voice → Sarvam via the proxy; only history/settings are local. The proxy must not store screen text |
 | 12 Oct | Rename `.env` `LANG` → `SAATHI_LANG` (when voice.py lands) | macOS shell already sets `LANG` (e.g. `en_US.UTF-8`), which overrides `.env` in pydantic-settings |
+| 13 Oct | Braille reader on the Android app (OTPs, typed passwords, short text); rule 2 gets one narrow exception | Owner decision. Feeling a code in silence is more private than TTS. OTP only via SMS User Consent (per message, no SMS permission); display only (vibration, dots hidden, `FLAG_SECURE`, 3-min wipe); agent still never reads/types OTPs; UPI PINs never shown |
 
 ---
 

@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "Saathi"
-include(":app", ":safety")
+include(":app", ":safety", ":agent", ":braille")

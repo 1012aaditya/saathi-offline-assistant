@@ -26,7 +26,9 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,8 +48,14 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.saathi.data.Outcome
+import app.saathi.agent.ConfirmDialog
+import app.saathi.agent.Lang
+import app.saathi.agent.Requests
+import app.saathi.agent.TaskRunner
+import app.saathi.agent.Texts
 import app.saathi.feedback.Cue
+import app.saathi.safety.Answer
+import app.saathi.ui.components.readableWidth
 import app.saathi.ui.AppNav
 import app.saathi.ui.LocalDeps
 import app.saathi.ui.Route
@@ -59,35 +67,17 @@ import app.saathi.ui.components.SecondaryButton
 import app.saathi.ui.components.StatusLine
 import app.saathi.ui.components.YouCanSay
 import app.saathi.ui.theme.Clarity
+import androidx.compose.ui.platform.LocalContext
+import app.saathi.agent.Outcome
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// Practice sample. Read-backs in the real agent may only use text that is on screen (hard rule 4).
-private const val ConfirmTo = "Mom"
-private const val ConfirmText = "I'll be home by 7"
-private const val ConfirmQuestion = "Send to $ConfirmTo: $ConfirmText? Say yes or no."
-private const val ConfirmTitle = "Practice: reply to Mom"
-
-private enum class Answer { Yes, No, Unclear }
-
-/** Yes only when it's clearly yes. Anything mixed or unknown is unclear (→ ask once more → cancel). */
-private fun classifyAnswer(text: String): Answer {
-    val t = text.lowercase()
-    val w = ScreenParts.words(text)
-    val yes = w.any { it in setOf("yes", "yeah", "yep", "haan", "han", "ha", "haa", "send", "bhejo", "हाँ", "हां", "भेजो") }
-    val no = w.any { it in setOf("no", "nope", "nahi", "nahin", "na", "cancel", "stop", "mat", "नहीं", "ना", "मत") } ||
-        "don't" in t || "dont" in w || "do not" in t
-    return when {
-        yes && !no -> Answer.Yes
-        no && !yes -> Answer.No
-        else -> Answer.Unclear
-    }
-}
-
 /**
  * Screen 6 — Confirm sheet over the dimmed working screen. Cancel is first, focused and the default.
- * Nothing confirms on its own; an unclear voice answer is asked once more, then cancels.
- * Practice: pressing Send sends nothing.
+ * Shows the safety gate's read-back: recipient and message exactly as they are on screen
+ * (hard rule 4). Nothing confirms on its own; an unclear voice answer is asked once more, then
+ * cancels (hard rule 5). Cancel also removes the message Saathi typed; what is said and shown
+ * afterwards is the runner's real outcome (removed, or NOT removed and remembered), never assumed.
  */
 @Composable
 fun ConfirmScreen(nav: AppNav) {
@@ -95,12 +85,26 @@ fun ConfirmScreen(nav: AppNav) {
     val c = Clarity.colors
     val still = ScreenParts.rememberStill()
     val scope = rememberCoroutineScope()
+    val t = remember { Texts(Requests.lang(deps)) }
+    val confirming = remember { TaskRunner.state.value as? TaskRunner.State.Confirming }
+    val asked = confirming?.request
+    val context = LocalContext.current
+    val confirmTo = asked?.recipient.orEmpty()
+    val confirmText = asked?.message.orEmpty()
+    // Hindi: the gate's own read-back. English: the same on-screen strings in an English question.
+    val confirmQuestion = when {
+        asked == null -> ""
+        t.lang == Lang.HI -> asked.readback
+        else -> t.confirmQuestion(confirmTo, confirmText)
+    }
+    val dialog = remember { ConfirmDialog() }
 
-    var cancelled by rememberSaveable { mutableStateOf(false) }
+    var cancelled by rememberSaveable { mutableStateOf(asked == null) }
     var sheetGone by rememberSaveable { mutableStateOf(false) }
     var unclear by rememberSaveable { mutableIntStateOf(0) }
     var finished by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) } // the runner's final words for this run
     val sheet = remember { Animatable(if (still || cancelled) 0f else 1f) } // 1 = below the screen, 0 = up
     val cancelFocus = remember { FocusRequester() }
     val homeFocus = remember { FocusRequester() }
@@ -108,13 +112,14 @@ fun ConfirmScreen(nav: AppNav) {
 
     lateinit var listener: ScreenParts.ScreenListener
 
-    fun cancel(spoken: String = "Cancelled. Nothing was sent.") {
+    fun cancel(spoken: String = "Cancelling. Not sending.") {
         if (finished) return
         finished = true
         listener.cancel()
         deps.feedback.cue(Cue.Cancelled)
         deps.voice.speak(spoken)
-        deps.state.record(ConfirmTitle, Outcome.Cancelled)
+        // The runner removes the typed draft, records the outcome, and its result is said below.
+        TaskRunner.answer(Answer.NO)
         cancelled = true
         scope.launch {
             if (!still) sheet.animateTo(1f, tween(300, easing = ease))
@@ -127,20 +132,21 @@ fun ConfirmScreen(nav: AppNav) {
         finished = true
         listener.cancel()
         deps.voice.stopSpeaking()
-        // Practice: nothing is sent anywhere. Result says so out loud.
-        deps.state.record(ConfirmTitle, Outcome.Done)
-        nav.replace(Route.Result)
+        // A clear yes (tap or voice): the runner re-checks the screen and the gate, then sends.
+        TaskRunner.answer(Answer.YES)
+        nav.replace(Route.Working)
     }
 
-    fun askAgainOrCancel() {
-        unclear += 1
-        if (unclear >= 2) {
-            cancel("I wasn't sure, so I cancelled. Nothing was sent.")
+    fun askAgainOrCancel(next: ConfirmDialog.Next) {
+        unclear = dialog.unclear
+        if (next == ConfirmDialog.Next.CANCEL) {
+            cancel("I wasn't sure, so I'm cancelling. Not sending.")
             return
         }
         asking = true
         scope.launch {
-            deps.voice.speak("Sorry, I'm not sure. $ConfirmQuestion")
+            deps.feedback.cue(Cue.NeedsAnswer)
+            deps.voice.speak("Sorry, I'm not sure. $confirmQuestion")
             ScreenParts.awaitSpeechEnd(deps.voice)
             asking = false
             if (!finished) listener.start()
@@ -148,18 +154,48 @@ fun ConfirmScreen(nav: AppNav) {
     }
 
     listener = ScreenParts.rememberScreenListener(
-        onFailed = { reason -> if (reason == "I didn't catch that.") askAgainOrCancel() },
+        onFailed = { reason -> if (reason == "I didn't catch that.") askAgainOrCancel(dialog.silence()) },
     ) { text ->
-        when (classifyAnswer(text)) {
-            Answer.Yes -> send()
-            Answer.No -> cancel()
-            Answer.Unclear -> askAgainOrCancel()
+        when (val next = dialog.hear(text)) {
+            ConfirmDialog.Next.SEND -> send()
+            ConfirmDialog.Next.CANCEL -> cancel()
+            ConfirmDialog.Next.ASK_AGAIN -> askAgainOrCancel(next)
         }
     }
 
     ScreenParts.OnFirstShow {
+        if (asked == null) return@OnFirstShow
         deps.feedback.cue(Cue.NeedsAnswer)
-        deps.voice.speak(ConfirmQuestion)
+        deps.voice.speak(confirmQuestion)
+    }
+    // The run ended: after our Cancel, or elsewhere (Volume-down, service restart, no answer in
+    // time). Show and say what really happened to the typed text.
+    val st by TaskRunner.state.collectAsState()
+    LaunchedEffect(st) {
+        val f = st as? TaskRunner.State.Finished ?: return@LaunchedEffect
+        if (asked == null || f.runId != confirming.runId) return@LaunchedEffect
+        val first = result == null
+        result = f.outcome.message
+        if (!first) return@LaunchedEffect // a later update (draft removed after reconnect) is spoken by the runner
+        if (!finished) {
+            finished = true
+            listener.cancel()
+            cancelled = true
+            sheetGone = true
+            // Volume-down: the user is about to talk, stay quiet. Service gone / no answer in
+            // time: nobody else says it.
+            if (f.outcome !is Outcome.Stopped || TaskRunner.stoppedByServiceLoss) deps.voice.speak(f.outcome.message)
+        } else if (f.outcome is Outcome.Cancelled) {
+            ScreenParts.awaitSpeechEnd(deps.voice) // let "Cancelling" finish
+            deps.voice.speak(f.outcome.message)
+        }
+    }
+    // Leaving the screen without an answer (not a rotation) = cancel; never left waiting.
+    DisposableEffect(Unit) {
+        onDispose {
+            val rotating = (context as? android.app.Activity)?.isChangingConfigurations == true
+            if (!finished && asked != null && !rotating) TaskRunner.answer(Answer.NO)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -174,8 +210,8 @@ fun ConfirmScreen(nav: AppNav) {
 
     val status = when {
         listener.active -> "Listening"
-        cancelled -> "Cancelled — nothing was sent"
-        else -> "Needs your answer. Send to $ConfirmTo: $ConfirmText? Cancel is selected."
+        cancelled -> result ?: "Cancelling — nothing was sent. Removing the message I typed."
+        else -> "Needs your answer. Send to $confirmTo: $confirmText? Cancel is selected."
     }
 
     Box(Modifier.fillMaxSize().background(c.screen)) {
@@ -194,7 +230,7 @@ fun ConfirmScreen(nav: AppNav) {
             Text("Working", style = Clarity.type.headline, color = c.secondary)
             Text("WhatsApp", style = Clarity.type.title, color = c.label, modifier = Modifier.align(Alignment.CenterHorizontally))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.group).padding(horizontal = 16.dp)) {
-                listOf("Opening WhatsApp", "Finding Mom's chat", "Typing your reply…").forEach {
+                listOf(t.opening("WhatsApp"), t.openingChat(confirmTo), t.typing).forEach {
                     Box(Modifier.heightIn(min = 64.dp), contentAlignment = Alignment.CenterStart) {
                         Text(it, style = Clarity.type.body, color = c.label)
                     }
@@ -226,7 +262,8 @@ fun ConfirmScreen(nav: AppNav) {
                     )
                     .semantics { paneTitle = "Needs your answer" }
                     .navigationBarsPadding()
-                    .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 20.dp),
+                    .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 20.dp)
+                    .readableWidth(),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 Box(
@@ -241,16 +278,19 @@ fun ConfirmScreen(nav: AppNav) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     AskCapsule()
                     Text(
-                        "Send to $ConfirmTo?",
+                        "Send to $confirmTo?",
                         style = Clarity.type.title,
                         color = c.label,
                         modifier = Modifier.semantics { heading() },
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("“$ConfirmText”", style = Clarity.type.title.copy(fontWeight = FontWeight.Medium), color = c.label)
+                        Text("“$confirmText”", style = Clarity.type.title.copy(fontWeight = FontWeight.Medium), color = c.label)
                         Footnote("Exactly as typed on screen")
                     }
-                    ScreenParts.PracticeLabel(text = "Practice run — sample data. Nothing will really be sent. Saathi can't use your apps yet in this version.")
+                    if (asked != null) {
+                        // The safety gate's read-back, verbatim (it is the source of the words above).
+                        Footnote("Safety check: ${asked.readback}")
+                    }
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -264,7 +304,7 @@ fun ConfirmScreen(nav: AppNav) {
                     PrimaryButton(
                         "Send",
                         { send() },
-                        description = "Send “$ConfirmText” to $ConfirmTo. Practice run — nothing is really sent.",
+                        description = "Send “$confirmText” to $confirmTo. It will really be sent.",
                     )
                 }
 
@@ -299,9 +339,16 @@ fun ConfirmScreen(nav: AppNav) {
                         Modifier.size(48.dp).clip(CircleShape).background(c.group).clearAndSetSemantics {},
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Outlined.Close, contentDescription = null, tint = c.label) }
-                    Text("Cancelled", style = Clarity.type.title, color = c.label, modifier = Modifier.semantics { heading() })
+                    Text(if (result == null && asked != null) "Cancelling…" else "Cancelled", style = Clarity.type.title, color = c.label, modifier = Modifier.semantics { heading() })
                 }
-                Body("Nothing was sent.", secondary = true)
+                Body(
+                    when {
+                        asked == null -> "Nothing to confirm. Nothing was sent."
+                        result != null -> result!!
+                        else -> "Nothing was sent. I'm removing the message I typed."
+                    },
+                    secondary = true,
+                )
                 PrimaryButton("Home", { nav.home() }, modifier = Modifier.focusRequester(homeFocus))
                 YouCanSay(listOf("Go home", "Help")) { nav.replace(Route.Listening) }
             }

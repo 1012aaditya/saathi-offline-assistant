@@ -40,17 +40,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import app.saathi.agent.Requests
+import app.saathi.agent.TaskRunner
 import app.saathi.feedback.Cue
 import app.saathi.ui.AppNav
 import app.saathi.ui.LocalDeps
-import app.saathi.ui.Route
 import app.saathi.ui.components.Body
 import app.saathi.ui.components.LargeTitle
 import app.saathi.ui.components.NavRow
 import app.saathi.ui.components.PrimaryButton
 import app.saathi.ui.components.SaathiScreen
 import app.saathi.ui.components.SecondaryButton
-import app.saathi.ui.routeForPhrase
 import app.saathi.ui.theme.Clarity
 import app.saathi.voice.Voice
 
@@ -71,6 +71,7 @@ fun ListeningScreen(nav: AppNav) {
     var failReason by remember { mutableStateOf("") }
     var transcript by remember { mutableStateOf("") }
     var finished by remember { mutableStateOf(false) }
+    val replyTo = remember { TaskRunner.session.pendingReplyTo }
 
     fun begin() {
         if (finished) return
@@ -86,6 +87,7 @@ fun ListeningScreen(nav: AppNav) {
     fun cancel() {
         if (finished) return
         finished = true
+        TaskRunner.session.pendingReplyTo = null
         if (active) {
             active = false
             voice.cancelListening()
@@ -101,18 +103,17 @@ fun ListeningScreen(nav: AppNav) {
             "start again" in t -> begin()
             else -> {
                 finished = true
-                deps.state.lastRequest = text
-                when (val r = routeForPhrase(text)) {
-                    Route.Home -> nav.home()
-                    null -> nav.replace(Route.Working)
-                    else -> nav.replace(r)
-                }
+                // Parsed offline by keywords; tasks go to Working, everything else is answered honestly.
+                Requests.handle(text, deps, nav)
             }
         }
     }
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) begin() else phase = ListenPhase.NoMic
+        if (ok) begin() else {
+            feedback.cue(Cue.Cancelled)
+            phase = ListenPhase.NoMic
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -200,7 +201,11 @@ fun ListeningScreen(nav: AppNav) {
             Box(ScreenParts.rise(3, still).fillMaxWidth().heightIn(min = 104.dp)) {
                 if (transcript.isBlank()) {
                     Text(
-                        if (phase == ListenPhase.Failed) "Tap Try again, or Home." else "Say what you need — for example, “Read my messages”.",
+                        when {
+                            phase == ListenPhase.Failed -> "Tap Try again, or Home."
+                            replyTo != null -> "What should I say to $replyTo? I'll read it back before sending."
+                            else -> "Say what you need — for example, “Read Mom's last message”."
+                        },
                         style = Clarity.type.body,
                         color = c.secondary,
                         modifier = Modifier.semantics { contentDescription = "Nothing heard yet" },

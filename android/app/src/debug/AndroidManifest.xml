@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: on-device walk-mode detector benchmark (no camera, no UI).
+     Protected by DUMP so only `adb shell` can trigger it. See WalkBenchReceiver.kt. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".walk.WalkBenchReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+        <!-- Typed test commands from `adb shell` (see DebugCommandReceiver.kt). -->
+        <receiver
+            android:name=".DebugCommandReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

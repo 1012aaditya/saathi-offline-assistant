@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.core.content.ContextCompat
+import app.saathi.agent.Requests
 import app.saathi.feedback.Cue
 import app.saathi.feedback.Feedback
 import app.saathi.feedback.reducedMotion
@@ -93,7 +94,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 object ScreenParts {
 
-    /** Shown on every practice screen. Step 1 can't operate other apps — say so plainly. */
+    /** Honest label for anything that is still a practice (sample data), e.g. Walk mode demos. */
     const val PRACTICE_NOTE = "Practice run — sample data. Saathi can't use your apps yet in this version."
 
     const val MIC_NEEDED = "Saathi needs the microphone to hear you. You can allow it in app settings."
@@ -332,6 +333,7 @@ object ScreenParts {
             if (active) {
                 active = false
                 voice.cancelListening()
+                feedback.cue(Cue.StopListening)
             }
         }
     }
@@ -363,6 +365,7 @@ object ScreenParts {
                     listener.active = false
                     deps.voice.reset()
                     listener.problem = l.reason
+                    deps.feedback.cue(Cue.StopListening)
                     failed(l.reason)
                 }
                 else -> Unit
@@ -412,49 +415,9 @@ object ScreenParts {
     }
 
     /** Anything said on a screen that isn't one of its own phrases is treated as a new request. */
-    fun handleAsRequest(text: String, deps: Deps, nav: AppNav) {
-        deps.voice.stopSpeaking()
-        when (val r = routeForPhrase(text)) {
-            Route.Home -> nav.home()
-            null -> {
-                deps.state.lastRequest = text
-                nav.replace(Route.Working)
-            }
-            else -> nav.replace(r)
-        }
-    }
-
-    // ---------------------------------------------------------------- practice runs
-
-    /** Step 1 practice paths. Sample data only; nothing touches other apps. */
-    enum class Practice(val app: String, val steps: List<String>) {
-        Read("WhatsApp", listOf("Opening WhatsApp", "Finding Mom's chat", "Reading the last message")),
-        Send("WhatsApp", listOf("Opening WhatsApp", "Finding Mom's chat", "Typing your reply")),
-        Pay("Payments", listOf("Opening your payments app", "Filling in the details", "Reaching the PIN screen")),
-        Help("Saathi", listOf("Understanding what you asked")),
-        Other("Saathi", listOf("Understanding what you asked", "Checking what I can do")),
-    }
+    fun handleAsRequest(text: String, deps: Deps, nav: AppNav) = Requests.handle(text, deps, nav)
 
     private val wordSplit = Regex("[^\\p{L}\\p{M}\\p{N}']+")
 
     fun words(text: String): Set<String> = text.lowercase().split(wordSplit).filter { it.isNotBlank() }.toSet()
-
-    /**
-     * Picks the practice path from the request words. Payment wins over send, and send over read,
-     * so "send a message" confirms and "pay" always hands over.
-     */
-    fun practiceFor(request: String): Practice {
-        val t = request.lowercase()
-        val w = words(request)
-        fun any(vararg options: String) = options.any { it in w }
-        fun prefix(vararg options: String) = w.any { word -> options.any { word.startsWith(it) } }
-        return when {
-            any("pay", "paying", "paid", "upi", "paise", "paisa", "bhugtan", "पैसे", "भुगतान") || prefix("payment") -> Practice.Pay
-            any("send", "sending", "tell", "bhejo", "bhej", "jawab", "भेजो", "भेज", "जवाब") || prefix("repl") -> Practice.Send
-            any("read", "padho", "padh", "पढ़ो", "पढ़") || prefix("messag", "whatsapp", "msg") ||
-                "व्हाट्सएप" in t || "मैसेज" in t || "संदेश" in t -> Practice.Read
-            any("help", "madad", "मदद") || "what can you do" in t -> Practice.Help
-            else -> Practice.Other
-        }
-    }
 }

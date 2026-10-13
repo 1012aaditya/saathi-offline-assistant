@@ -1,16 +1,22 @@
 package app.saathi.ui.screens
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import androidx.compose.animation.core.LinearEasing
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.SystemClock
+import android.provider.Settings
+import android.view.View
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -21,26 +27,31 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.East
+import androidx.compose.material.icons.filled.West
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,7 +61,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -68,12 +78,14 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.saathi.data.WalkSensitivity
 import app.saathi.feedback.Cue
 import app.saathi.feedback.WalkLevel
@@ -85,49 +97,42 @@ import app.saathi.ui.components.DangerButton
 import app.saathi.ui.components.NavRow
 import app.saathi.ui.components.PrimaryButton
 import app.saathi.ui.components.SaathiScreen
+import app.saathi.ui.components.SecondaryButton
 import app.saathi.ui.theme.Clarity
 import app.saathi.ui.theme.DarkClarity
 import app.saathi.ui.theme.LocalClarity
+import app.saathi.walk.OverlayBox
+import app.saathi.walk.Phrasebook
+import app.saathi.walk.SteerHint
+import app.saathi.walk.WalkEngine
+import app.saathi.walk.WalkOutput
+import app.saathi.walk.WalkSnapshot
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
 
 /*
- * Screen 9 — Walk mode, PRACTICE version.
+ * Screen 9 — Walk mode, live.
  *
- * Step 1 has no camera detection: this screen runs a clearly-labelled simulation of the three
- * warning levels so people can feel the sounds, haptics and visuals. It starts paused (nothing
- * plays until Start) and stops vibrating when the screen is left.
+ * Back camera → the same two YOLOv8n models as the web walk mode, on the phone (no internet) →
+ * spoken warnings + vibration (WalkEngine). Starts PAUSED: no camera, sound or vibration until
+ * Start. Everything stops when the screen is left or the app goes to the background.
+ * It only ever warns — it never says the way is clear.
  */
 
 // Warning colours (DESIGN.md walk row). Always paired with an icon + word, never colour alone.
 private val NoticeColor = Color(0xFFFFD60A)
 private val CarefulColor = Color(0xFFFF9F0A)
 private val StopColor = Color(0xFFFF453A)
+private val QuietColor = Color(0xFF8E8E93)
 
-private const val LOOP_MS = 6000
-private const val START_M = 4.5f // simulated chair starts this far away…
-private const val END_M = 0.5f // …and ends this close, each loop.
+/** A warning line stays on screen this long; the direction hint too. */
+private const val LINE_MS = 6000L
 
-/** Distances (metres) at which each level starts. Low warns later, High earlier. */
-private data class Thresholds(val notice: Float, val careful: Float, val stop: Float)
-
-private fun thresholdsFor(s: WalkSensitivity) = when (s) {
-    WalkSensitivity.Low -> Thresholds(notice = 2f, careful = 1.5f, stop = 1f)
-    WalkSensitivity.Medium -> Thresholds(notice = 3f, careful = 2f, stop = 1f)
-    WalkSensitivity.High -> Thresholds(notice = 4f, careful = 3f, stop = 1.5f)
-}
-
-private fun levelAt(distance: Float, t: Thresholds): WalkLevel? = when {
-    distance <= t.stop -> WalkLevel.Stop
-    distance <= t.careful -> WalkLevel.Careful
-    distance <= t.notice -> WalkLevel.Notice
+private fun levelOf(level: Int): WalkLevel? = when (level) {
+    1 -> WalkLevel.Notice
+    2 -> WalkLevel.Careful
+    3 -> WalkLevel.Stop
     else -> null
-}
-
-private fun Thresholds.metresFor(level: WalkLevel) = when (level) {
-    WalkLevel.Notice -> notice
-    WalkLevel.Careful -> careful
-    WalkLevel.Stop -> stop
 }
 
 private fun levelColor(level: WalkLevel) = when (level) {
@@ -142,10 +147,24 @@ private fun levelWord(level: WalkLevel) = when (level) {
     WalkLevel.Stop -> "Stop"
 }
 
-private fun fmtMetres(m: Float): String =
-    NumberFormat.getNumberInstance().apply { maximumFractionDigits = 1 }.format(m.toDouble())
+/** Low warns later, High earlier: multiplies every distance threshold. */
+private fun scaleFor(s: WalkSensitivity) = when (s) {
+    WalkSensitivity.Low -> 0.75
+    WalkSensitivity.Medium -> 1.0
+    WalkSensitivity.High -> 1.3
+}
 
-private fun metresWord(m: Float) = if (m == 1f) "metre" else "metres"
+private fun fmtMetres(m: Double): String =
+    NumberFormat.getNumberInstance().apply { maximumFractionDigits = 1 }.format(m)
+
+/** Heat map colour by estimated distance: warm = near, cool = far. */
+private fun heatColor(d: Double): Color = when {
+    d < 1.0 -> StopColor
+    d < 2.0 -> CarefulColor
+    d < 3.5 -> NoticeColor
+    d < 6.0 -> Color(0xFF64D2FF)
+    else -> Color(0xFF5E5CE6)
+}
 
 @Composable
 fun WalkScreen(nav: AppNav) {
@@ -159,14 +178,77 @@ private fun WalkContent(nav: AppNav) {
     val state = deps.state
     val c = Clarity.colors
     val context = LocalContext.current
+    val view = LocalView.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val still = remember { reducedMotion(context) }
 
-    var running by remember { mutableStateOf(false) } // starts PAUSED
-    var elapsed by remember { mutableIntStateOf(0) }
+    val engine = remember { WalkEngine(context) }
+    val snap by engine.state.collectAsState()
     var heatOn by remember { mutableStateOf(false) }
+    val previewView = remember {
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FIT_CENTER // whole frame visible, so the boxes line up
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
+    }
 
-    // Light status/nav bar icons on the black background; restore on leave. Stop vibrating on leave.
-    val view = LocalView.current
+    // Settings apply live: language of the spoken lines, sensitivity.
+    val words = Phrasebook.forLanguage(state.languageTag?.substringBefore('-') ?: deps.voice.locale.language)
+    SideEffect {
+        engine.words = words
+        engine.distScale = scaleFor(state.walkSensitivity)
+    }
+
+    val output = remember {
+        object : WalkOutput {
+            // Obstacle warnings are safety output: always spoken while walk mode runs. The Sounds
+            // setting only mutes earcons (a device without a vibration motor has nothing else).
+            override fun speak(text: String) = deps.voice.speak(text)
+
+            override fun vibrate(level: Int) {
+                levelOf(level)?.let(deps.feedback::walk)
+            }
+
+            override fun isSpeaking() = deps.voice.speaking.value
+        }
+    }
+
+    // Camera permission: asked only when the user presses Start; never granted by the app itself.
+    fun hasCamera() = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    var cameraOk by remember { mutableStateOf(hasCamera()) }
+    var cameraRefused by remember { mutableStateOf(false) }
+    val startEngine = {
+        deps.feedback.cue(Cue.StartListening)
+        engine.start(lifecycleOwner, previewView, output)
+    }
+    val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        cameraOk = ok
+        cameraRefused = !ok
+        if (ok) {
+            startEngine()
+        } else {
+            deps.voice.speak("Walk mode needs the camera. You can allow it in the phone's settings.")
+        }
+    }
+    val start: () -> Unit = {
+        if (engine.state.value.phase == WalkSnapshot.Phase.Failed) {
+            deps.feedback.cue(Cue.Cancelled)
+            deps.voice.speak("Walk mode couldn't start on this phone.")
+        } else if (hasCamera()) {
+            cameraOk = true
+            startEngine()
+        } else {
+            askCamera.launch(Manifest.permission.CAMERA)
+        }
+    }
+    val stop: () -> Unit = {
+        engine.stop()
+        deps.feedback.stopVibration()
+        deps.feedback.cue(Cue.StopListening)
+    }
+
+    // Light status/nav bar icons on black; restore on leave. Leaving stops the camera, sound and vibration.
     DisposableEffect(Unit) {
         val window = context.findActivity()?.window
         val ctrl = window?.let { WindowCompat.getInsetsController(it, view) }
@@ -175,7 +257,10 @@ private fun WalkContent(nav: AppNav) {
         ctrl?.isAppearanceLightStatusBars = false
         ctrl?.isAppearanceLightNavigationBars = false
         onDispose {
+            engine.release()
             deps.feedback.stopVibration()
+            deps.voice.stopSpeaking()
+            view.keepScreenOn = false
             if (ctrl != null) {
                 prevStatus?.let { ctrl.isAppearanceLightStatusBars = it }
                 prevNav?.let { ctrl.isAppearanceLightNavigationBars = it }
@@ -183,60 +268,49 @@ private fun WalkContent(nav: AppNav) {
         }
     }
 
-    // 6 s practice loop, only while running.
-    LaunchedEffect(running) {
-        while (running) {
-            delay(100)
-            elapsed = (elapsed + 100) % LOOP_MS
+    // App to the background (screen off, another app): stop and say so — never warn silently from a dead camera.
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_STOP && engine.state.value.running) {
+                engine.stop()
+                deps.feedback.stopVibration()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    // Keep the screen awake while walking (like the web version's wake lock).
+    SideEffect { view.keepScreenOn = snap.running }
+
+    // Clock for fading out old lines/hints.
+    var nowMs by remember { mutableLongStateOf(SystemClock.uptimeMillis()) }
+    LaunchedEffect(snap.running) {
+        while (snap.running) {
+            nowMs = SystemClock.uptimeMillis()
+            delay(500)
         }
     }
 
-    val t = thresholdsFor(state.walkSensitivity)
-    val p = elapsed / LOOP_MS.toFloat()
-    val distance = START_M - (START_M - END_M) * p
-    val level = if (running) levelAt(distance, t) else null
-
-    // On each level change: haptic pattern always; short spoken warning only if sounds are on.
-    LaunchedEffect(running, level) {
-        val lv = level ?: return@LaunchedEffect
-        if (!running) return@LaunchedEffect
-        deps.feedback.walk(lv)
-        if (state.soundOn) {
-            val m = t.metresFor(lv)
-            deps.voice.speak("${levelWord(lv)}, chair, ${fmtMetres(m)} ${metresWord(m)}")
-        }
-    }
-
+    val running = snap.running
+    val lineFresh = running && snap.line.isNotEmpty() && nowMs - snap.lineAt < LINE_MS
+    val lineLevel = if (lineFresh) levelOf(snap.lineLevel) else null
+    val hint = if (running && nowMs - snap.hintAt < LINE_MS) snap.hint else null
     val visibleStatus = when {
+        snap.phase == WalkSnapshot.Phase.Failed -> "Walk mode couldn't start on this phone"
         !running -> "Walk mode is paused"
-        level == null -> "Path ahead is clear"
-        level == WalkLevel.Stop -> "Stop. Chair about ${fmtMetres(t.stop)} ${metresWord(t.stop)} ahead"
-        else -> {
-            val m = t.metresFor(level)
-            "Chair ahead, about ${fmtMetres(m)} ${metresWord(m)}"
-        }
+        snap.phase == WalkSnapshot.Phase.Loading -> "Getting ready…"
+        lineFresh -> snap.line
+        else -> "Watching ahead"
     }
-    // The live region says "Practice" so a TalkBack user is never misled into trusting it.
-    val liveStatus = if (running) "Practice: $visibleStatus" else "Walk mode practice is paused"
-
-    val start: () -> Unit = {
-        elapsed = 0
-        running = true
-        deps.feedback.cue(Cue.StartListening)
-        if (state.soundOn) deps.voice.speak("Practice walk. No camera yet.")
-    }
-    val stop: () -> Unit = {
-        running = false
-        elapsed = 0
-        deps.feedback.stopVibration()
-        deps.voice.stopSpeaking()
-        deps.feedback.cue(Cue.StopListening)
-    }
+    // Polite live region. Warnings are always spoken aloud, so TalkBack only hears on/off changes
+    // (no double speech).
+    val liveStatus = if (running) "Walk mode on" else visibleStatus
 
     Box(Modifier.fillMaxSize().background(c.screen)) {
         SaathiScreen(
             status = liveStatus,
-            youCanSay = listOf("Stop", "What's ahead?"),
+            youCanSay = listOf("Stop", "Go home"),
             onTalk = { nav.go(Route.Listening) },
             navRow = {
                 NavRow("Home", { nav.home() }, trailing = {
@@ -248,38 +322,38 @@ private fun WalkContent(nav: AppNav) {
             },
             bottom = {
                 if (running) {
-                    DangerButton("Stop", stop, description = "Stop walk mode practice")
+                    DangerButton("Stop", stop, modifier = Modifier.heightIn(min = 72.dp), description = "Stop walk mode")
                 } else {
-                    PrimaryButton("Start", start, modifier = Modifier.heightIn(min = 72.dp), description = "Start walk mode practice")
+                    PrimaryButton(
+                        "Start",
+                        start,
+                        modifier = Modifier.heightIn(min = 72.dp),
+                        description = "Start walk mode. Uses the back camera.",
+                    )
                 }
             },
         ) {
-            PracticeBanner()
-            StatusCard(running, level, visibleStatus)
-            Scene(running = running, level = level, progress = p, heatOn = heatOn, still = still, t = t)
-            if (running) SpaceCard(still) else PausedCard()
-            Row(
-                Modifier.padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(Icons.Outlined.Info, contentDescription = null, tint = c.label, modifier = Modifier.size(22.dp))
-                Text("Warnings only — not for crossing roads", style = Clarity.type.footnote, color = c.label)
+            StatusCard(running, snap.phase, lineLevel, visibleStatus)
+            CameraStage(previewView, snap, running, heatOn)
+            if (hint != null) HintCard(hint, words.steer(hint).trimEnd('.', '।'))
+            if (!cameraOk && !running) CameraCard(refused = cameraRefused) { openAppSettings(context) }
+            Notes(canVibrate = deps.feedback.canVibrate, extraOn = snap.extraOn, error = snap.error)
+            if (running && snap.fps > 0) {
+                Text(
+                    "${fmtMetres(snap.fps)} checks a second · ${snap.msPerFrame.toInt()} ms each · ${snap.backend}",
+                    style = Clarity.type.footnote,
+                    color = c.secondary,
+                )
             }
         }
 
-        // Red edge flash at Stop. Reduced motion: steady red edge instead of flashing.
-        if (level == WalkLevel.Stop) {
+        // Red edge flash on a fresh "stop". Reduced motion: steady red edge instead of flashing.
+        if (lineLevel == WalkLevel.Stop && nowMs - snap.lineAt < 1500) {
             val alpha = if (still) {
                 1f
             } else {
                 val flash = rememberInfiniteTransition(label = "flash")
-                val a by flash.animateFloat(
-                    initialValue = 0.15f,
-                    targetValue = 1f,
-                    animationSpec = infiniteRepeatable(tween(300), RepeatMode.Reverse),
-                    label = "flashAlpha",
-                )
+                val a by flash.animateFloat(0.15f, 1f, infiniteRepeatable(tween(300), RepeatMode.Reverse), label = "flashAlpha")
                 a
             }
             Box(
@@ -318,32 +392,7 @@ private fun HeatToggle(on: Boolean, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun PracticeBanner() {
-    val c = Clarity.colors
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(c.group)
-            .border(1.dp, c.secondary, RoundedCornerShape(16.dp))
-            .semantics(mergeDescendants = true) {}
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(Icons.Outlined.Info, contentDescription = null, tint = c.label, modifier = Modifier.size(24.dp))
-        Text(
-            buildAnnotatedString {
-                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("Practice — no camera yet.") }
-                append(" Real obstacle detection arrives in a later update.")
-            },
-            style = Clarity.type.callout,
-            color = c.label,
-        )
-    }
-}
-
-@Composable
-private fun StatusCard(running: Boolean, level: WalkLevel?, text: String) {
+private fun StatusCard(running: Boolean, phase: WalkSnapshot.Phase, level: WalkLevel?, text: String) {
     val c = Clarity.colors
     Row(
         Modifier
@@ -351,41 +400,133 @@ private fun StatusCard(running: Boolean, level: WalkLevel?, text: String) {
             .heightIn(min = 60.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(c.group)
+            .semantics(mergeDescendants = true) {}
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         when {
-            !running -> PauseGlyph(c.label, Modifier.size(26.dp))
+            !running || phase == WalkSnapshot.Phase.Failed -> PauseGlyph(c.label, Modifier.size(26.dp))
             level != null -> LevelGlyph(level, levelColor(level), Modifier.size(26.dp))
         }
         Text(text, style = Clarity.type.body.copy(fontWeight = FontWeight.SemiBold), color = c.label)
     }
 }
 
+/**
+ * Live camera picture (whole frame, letterboxed) with the tracked objects drawn on top.
+ * Decorative for TalkBack: the status line and speech carry the meaning.
+ */
 @Composable
-private fun SpaceCard(still: Boolean) {
-    val c = Clarity.colors
-    val nudge = if (still) {
-        0f
-    } else {
-        val tr = rememberInfiniteTransition(label = "nudge")
-        val x by tr.animateFloat(
-            initialValue = 0f,
-            targetValue = 0f,
-            animationSpec = infiniteRepeatable(
-                keyframes {
-                    durationMillis = 1200
-                    0f at 0
-                    -8f at 540
-                    0f at 1200
-                },
-            ),
-            label = "nudgeX",
-        )
-        x
+private fun CameraStage(previewView: PreviewView, snap: WalkSnapshot, running: Boolean, heatOn: Boolean) {
+    val aspect = snap.frameAspect.toFloat().coerceIn(0.4f, 2.5f)
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        BoxWithConstraints(
+            Modifier
+                .heightIn(max = 560.dp)
+                .aspectRatio(aspect)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF0B0B0D))
+                .clearAndSetSemantics {},
+        ) {
+            // Always composed (the same PreviewView is reused across Start/Stop); covered while paused.
+            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            if (running) {
+                val boxes = snap.boxes
+                Canvas(Modifier.fillMaxSize()) {
+                    if (heatOn) drawHeat(boxes)
+                    for (b in boxes) {
+                        val lv = levelOf(b.level)
+                        drawRoundRect(
+                            color = lv?.let(::levelColor) ?: QuietColor,
+                            topLeft = Offset((b.box.x * size.width).toFloat(), (b.box.y * size.height).toFloat()),
+                            size = Size((b.box.w * size.width).toFloat(), (b.box.h * size.height).toFloat()),
+                            cornerRadius = CornerRadius(12f),
+                            style = Stroke(width = if (lv == null) 2.dp.toPx() else if (lv == WalkLevel.Stop) 5.dp.toPx() else 3.dp.toPx()),
+                        )
+                    }
+                }
+                val density = LocalDensity.current
+                val wPx = with(density) { maxWidth.toPx() }
+                val hPx = with(density) { maxHeight.toPx() }
+                for (b in boxes) {
+                    val lv = levelOf(b.level) ?: continue
+                    Chip(lv, b, (b.box.x * wPx).toInt(), (b.box.y * hPx).toInt())
+                }
+                if (heatOn) {
+                    Text(
+                        "Warm = near · Cool = far",
+                        style = Clarity.type.footnote,
+                        color = Color.White,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(12.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.72f))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+            } else {
+                Column(
+                    Modifier.fillMaxSize().background(Color(0xFF0B0B0D)),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(Icons.Outlined.PhotoCamera, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+                    Text("Camera off", style = Clarity.type.headline, color = Color.White)
+                    Text("Press Start", style = Clarity.type.footnote, color = Color(0xFFD1D1D6))
+                }
+            }
+        }
     }
-    val density = LocalDensity.current
+}
+
+/** Icon + level word + object + distance above the box. */
+@Composable
+private fun Chip(level: WalkLevel, b: OverlayBox, xPx: Int, boxTopPx: Int) {
+    val closer = if (b.approaching) " · closer" else ""
+    Row(
+        Modifier
+            .layout { measurable, constraints ->
+                val p = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                layout(p.width, p.height) {
+                    val x = xPx.coerceIn(0, maxOf(0, constraints.maxWidth - p.width))
+                    val y = (boxTopPx - p.height - 4).coerceIn(0, maxOf(0, constraints.maxHeight - p.height))
+                    p.place(x, y)
+                }
+            }
+            .heightIn(min = 32.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(levelColor(level))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        LevelGlyph(level, Color.Black, Modifier.size(18.dp))
+        Text(
+            "${levelWord(level)} · ${b.word} · ${fmtMetres(b.dist)} m$closer",
+            style = Clarity.type.footnote.copy(fontWeight = FontWeight.Bold),
+            color = Color.Black,
+        )
+    }
+}
+
+/** Depth-ish heat map from the boxes' estimated distances (no depth sensor): warm near, cool far. */
+private fun DrawScope.drawHeat(boxes: List<OverlayBox>) {
+    drawRect(Color(0x335E5CE6), size = size) // everything else: unknown / far
+    for (b in boxes.sortedByDescending { it.dist }) { // nearest drawn last, on top
+        drawRoundRect(
+            color = heatColor(b.dist).copy(alpha = 0.42f),
+            topLeft = Offset((b.box.x * size.width).toFloat(), (b.box.y * size.height).toFloat()),
+            size = Size((b.box.w * size.width).toFloat(), (b.box.h * size.height).toFloat()),
+            cornerRadius = CornerRadius(12f),
+        )
+    }
+}
+
+@Composable
+private fun HintCard(hint: SteerHint, text: String) {
+    val c = Clarity.colors
     Row(
         Modifier
             .fillMaxWidth()
@@ -398,169 +539,76 @@ private fun SpaceCard(still: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Box(
-            Modifier
-                .graphicsLayer { translationX = with(density) { nudge.dp.toPx() } }
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(c.accent),
+            Modifier.size(56.dp).clip(CircleShape).background(c.accent),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = c.onAccent, modifier = Modifier.size(32.dp))
+            // Physical left/right: never mirrored for right-to-left languages.
+            val icon = when (hint) {
+                SteerHint.Left -> Icons.Filled.West
+                SteerHint.Right -> Icons.Filled.East
+                SteerHint.Both -> Icons.Outlined.WarningAmber
+            }
+            Icon(icon, contentDescription = null, tint = c.onAccent, modifier = Modifier.size(32.dp))
         }
-        Column {
-            Text("More space on the left", style = Clarity.type.headline, color = c.label)
-            Text("Step a little to your left", style = Clarity.type.footnote, color = c.secondary)
-        }
+        Text(text, style = Clarity.type.headline, color = c.label)
     }
 }
 
 @Composable
-private fun PausedCard() {
+private fun CameraCard(refused: Boolean, openSettings: () -> Unit) {
     val c = Clarity.colors
-    Text(
-        "Paused. Press Start to feel the practice warnings.",
-        style = Clarity.type.body,
-        color = c.label,
-        modifier = Modifier
+    Column(
+        Modifier
             .fillMaxWidth()
-            .heightIn(min = 80.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(c.group)
             .padding(16.dp),
-    )
-}
-
-/**
- * Corridor + obstacle, drawn in a 350 x 300 "scene" space (same as the design) and scaled.
- * Decorative for TalkBack: the status line carries the meaning.
- */
-@Composable
-private fun Scene(running: Boolean, level: WalkLevel?, progress: Float, heatOn: Boolean, still: Boolean, t: Thresholds) {
-    // Box growth: smooth with motion; discrete sizes per level with reduced motion.
-    val q = if (still) {
-        when (level) {
-            null -> 0f
-            WalkLevel.Notice -> 0.15f
-            WalkLevel.Careful -> 0.55f
-            WalkLevel.Stop -> 0.95f
-        }
-    } else {
-        progress
-    }
-    val qAnim by animateFloatAsState(
-        targetValue = q,
-        animationSpec = if (still) snap() else tween(100, easing = LinearEasing),
-        label = "boxGrow",
-    )
-    val bob = if (running && !still) {
-        val tr = rememberInfiniteTransition(label = "bob")
-        val y by tr.animateFloat(0f, 3f, infiniteRepeatable(tween(550), RepeatMode.Reverse), label = "bobY")
-        y
-    } else {
-        0f
-    }
-
-    val w = 100f + 100f * qAnim
-    val h = w * 1.1f
-    val bottomY = 180f + 90f * qAnim
-    val top = bottomY - h
-    val cx = 205f
-    val boxColor = level?.let(::levelColor) ?: Color(0xFF8E8E93)
-    val density = LocalDensity.current
-
-    BoxWithConstraints(
-        Modifier
-            .fillMaxWidth()
-            .height(300.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color(0xFF0B0B0D))
-            .clearAndSetSemantics {},
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        val sxDp = maxWidth.value / 350f
-        Canvas(Modifier.fillMaxSize().graphicsLayer { translationY = with(density) { bob.dp.toPx() } }) {
-            sceneSpace { drawCorridor() }
-        }
-        Canvas(Modifier.fillMaxSize()) {
-            sceneSpace {
-                if (heatOn) drawHeat(cx, top + h / 2)
-                // Vignette.
-                drawRect(
-                    Brush.radialGradient(
-                        0f to Color.Transparent,
-                        0.5f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.72f),
-                        center = Offset(175f, 165f),
-                        radius = 230f,
-                    ),
-                    size = Size(350f, 300f),
-                )
-                if (running) {
-                    drawChair(cx - w / 2, top, w)
-                    drawRoundRect(
-                        color = boxColor,
-                        topLeft = Offset(cx - w / 2, top),
-                        size = Size(w, h),
-                        cornerRadius = CornerRadius(16f),
-                        style = Stroke(width = if (level == WalkLevel.Stop) 4f else 3f),
-                    )
-                }
-            }
-        }
-
-        if (running && level != null) {
-            val chipTop = maxOf(6f, top - 44f)
-            val xPx = with(density) { (cx * sxDp).dp.roundToPx() }
-            val yPx = with(density) { chipTop.dp.roundToPx() }
-            Row(
-                Modifier
-                    .layout { measurable, constraints ->
-                        val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
-                        layout(placeable.width, placeable.height) {
-                            val x = (xPx - placeable.width / 2).coerceIn(0, maxOf(0, constraints.maxWidth - placeable.width))
-                            placeable.place(x, yPx)
-                        }
-                    }
-                    .heightIn(min = 36.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(levelColor(level))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                LevelGlyph(level, Color.Black, Modifier.size(20.dp))
-                Text(
-                    "${levelWord(level)} · Chair · ${fmtMetres(t.metresFor(level))} m",
-                    style = Clarity.type.footnote.copy(fontWeight = FontWeight.Bold),
-                    color = Color.Black,
-                )
-            }
-        }
-
-        if (heatOn) {
-            Text(
-                "Warm = near · Cool = far",
-                style = Clarity.type.footnote,
-                color = Color.White,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(12.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.Black.copy(alpha = 0.72f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-        }
-
-        if (!running) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
-                Text("Paused", style = Clarity.type.headline, color = Color.White)
-            }
-        }
+        Text(
+            if (refused) "Camera is off for Saathi" else "Walk mode uses the back camera",
+            style = Clarity.type.headline,
+            color = c.label,
+        )
+        Text(
+            if (refused) {
+                "Walk mode can't warn you without it. You can allow the camera in the phone's Settings › Apps › Saathi › Permissions."
+            } else {
+                "When you press Start, the phone will ask to allow the camera. Pictures are checked on this phone and never saved or sent."
+            },
+            style = Clarity.type.callout,
+            color = c.label,
+        )
+        if (refused) SecondaryButton("Open phone settings", openSettings, description = "Open Saathi's settings to allow the camera")
     }
 }
 
-/** Run [block] with the canvas scaled so (0,0)-(350,300) fills it. */
-private inline fun DrawScope.sceneSpace(crossinline block: DrawScope.() -> Unit) {
-    withTransform({ scale(size.width / 350f, size.height / 300f, pivot = Offset.Zero) }) { block() }
+@Composable
+private fun Notes(canVibrate: Boolean, extraOn: Boolean, error: String?) {
+    val c = Clarity.colors
+    val lines = buildList {
+        add("Warnings only — not for crossing roads.")
+        add("No depth sensor: distances are rough estimates from the picture. It can't see kerbs, potholes, wires or wet floors. Keep using your cane.")
+        add("Works offline. Pictures stay on this phone.")
+        if (!canVibrate) add("This device can't vibrate, so warnings are spoken only.")
+        if (!extraOn) add("Door and stairs detection is off on this phone.")
+        if (error != null) add(error)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        lines.forEachIndexed { i, line ->
+            Row(
+                Modifier.padding(horizontal = 4.dp).semantics(mergeDescendants = true) {},
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Outlined.Info, contentDescription = null, tint = c.label, modifier = Modifier.size(22.dp))
+                Text(
+                    line,
+                    style = if (i == 0) Clarity.type.footnote.copy(fontWeight = FontWeight.SemiBold) else Clarity.type.footnote,
+                    color = c.label,
+                )
+            }
+        }
+    }
 }
 
 private fun path(vararg pts: Pair<Float, Float>, close: Boolean = true) = Path().apply {
@@ -570,76 +618,6 @@ private fun path(vararg pts: Pair<Float, Float>, close: Boolean = true) = Path()
 
 private fun DrawScope.line(x1: Float, y1: Float, x2: Float, y2: Float, color: Color, width: Float) =
     drawLine(color, Offset(x1, y1), Offset(x2, y2), strokeWidth = width, cap = StrokeCap.Round)
-
-private fun DrawScope.drawCorridor() {
-    val faint = Color.White
-    drawRect(Brush.verticalGradient(listOf(Color(0xFF2A2A2E), Color(0xFF151518)), startY = 0f, endY = 300f), size = Size(350f, 300f))
-    drawPath(path(0f to 0f, 130f to 108f, 130f to 172f, 0f to 300f), Color(0xFF17171A))
-    drawPath(path(350f to 0f, 220f to 108f, 220f to 172f, 350f to 300f), Color(0xFF121215))
-    drawRect(Color(0xFF26262B), topLeft = Offset(130f, 108f), size = Size(90f, 64f))
-    drawPath(
-        path(0f to 300f, 130f to 172f, 220f to 172f, 350f to 300f),
-        Brush.verticalGradient(listOf(Color(0xFF1D1D21), Color(0xFF34343A)), startY = 172f, endY = 300f),
-    )
-    // Door on the back wall.
-    drawPath(path(150f to 172f, 150f to 128f, 178f to 128f, 178f to 172f, close = false), faint.copy(alpha = 0.14f), style = Stroke(2f))
-    // Wall edges.
-    line(30f, 60f, 30f, 250f, faint.copy(alpha = 0.08f), 2f)
-    line(70f, 92f, 70f, 214f, faint.copy(alpha = 0.08f), 2f)
-    // Floor perspective lines.
-    val floor = faint.copy(alpha = 0.08f)
-    line(175f, 172f, 175f, 300f, floor, 1.5f)
-    line(152f, 172f, 80f, 300f, floor, 1.5f)
-    line(198f, 172f, 270f, 300f, floor, 1.5f)
-    line(140f, 172f, 10f, 300f, floor, 1.5f)
-    line(210f, 172f, 340f, 300f, floor, 1.5f)
-    val cross = faint.copy(alpha = 0.09f)
-    line(113f, 190f, 237f, 190f, cross, 1.5f)
-    line(88f, 215f, 262f, 215f, cross, 1.5f)
-    line(52f, 250f, 298f, 250f, cross, 1.5f)
-    // Ceiling edges + light.
-    drawPath(path(0f to 0f, 130f to 108f, 220f to 108f, 350f to 0f, close = false), faint.copy(alpha = 0.06f), style = Stroke(1.5f))
-    drawRoundRect(faint.copy(alpha = 0.18f), topLeft = Offset(150f, 24f), size = Size(50f, 8f), cornerRadius = CornerRadius(4f))
-}
-
-/** Depth heat map stand-in: warm near the floor and the obstacle, cool far away. */
-private fun DrawScope.drawHeat(cx: Float, cy: Float) {
-    drawRect(
-        Brush.verticalGradient(
-            0f to Color(0x615E5CE6), // indigo, far
-            0.38f to Color(0x38409CFF), // blue
-            0.52f to Color(0x29FFD60A), // yellow
-            0.70f to Color(0x52FF9F0A), // orange
-            1f to Color(0x6BFF453A), // red, near
-            startY = 0f,
-            endY = 300f,
-        ),
-        size = Size(350f, 300f),
-    )
-    drawRect(
-        Brush.radialGradient(listOf(StopColor.copy(alpha = 0.55f), StopColor.copy(alpha = 0f)), center = Offset(cx, cy), radius = 115f),
-        size = Size(350f, 300f),
-    )
-}
-
-/** Chair from the design (viewBox 100 x 110), drawn inside the obstacle box. */
-private fun DrawScope.drawChair(left: Float, top: Float, width: Float) {
-    val s = width / 100f
-    withTransform({
-        translate(left, top)
-        scale(s, s, pivot = Offset.Zero)
-    }) {
-        drawRoundRect(Color(0xFF4A4A50), topLeft = Offset(30f, 10f), size = Size(40f, 42f), cornerRadius = CornerRadius(5f))
-        drawRoundRect(Color(0xFF6C6C72), topLeft = Offset(30f, 10f), size = Size(40f, 42f), cornerRadius = CornerRadius(5f), style = Stroke(2f))
-        drawRoundRect(Color(0xFF56565C), topLeft = Offset(24f, 52f), size = Size(52f, 12f), cornerRadius = CornerRadius(4f))
-        drawRoundRect(Color(0xFF7A7A80), topLeft = Offset(24f, 52f), size = Size(52f, 12f), cornerRadius = CornerRadius(4f), style = Stroke(2f))
-        val leg = Color(0xFF7A7A80)
-        line(30f, 64f, 30f, 98f, leg, 4f)
-        line(70f, 64f, 70f, 98f, leg, 4f)
-        line(38f, 64f, 38f, 90f, leg, 4f)
-        line(62f, 64f, 62f, 90f, leg, 4f)
-    }
-}
 
 /** Level icons (24-unit space): Notice = circle-i, Careful = triangle-!, Stop = octagon-bar. */
 @Composable
@@ -681,6 +659,12 @@ private fun PauseGlyph(color: Color, modifier: Modifier) {
             line(15f, 6f, 15f, 18f, color, 2.4f)
         }
     }
+}
+
+private fun openAppSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {

@@ -26,7 +26,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.saathi.data.Outcome
+import app.saathi.agent.Command
+import app.saathi.agent.Outcome
+import app.saathi.agent.TaskRunner
 import app.saathi.feedback.Cue
 import app.saathi.ui.AppNav
 import app.saathi.ui.LocalDeps
@@ -39,7 +41,7 @@ import app.saathi.ui.components.SectionHeader
 import app.saathi.ui.components.TextLink
 import app.saathi.ui.theme.Clarity
 
-/** What the Result screen shows for each practice path. */
+/** What the Result screen shows, built from the real task outcome. */
 private class ResultAnswer(
     val eyebrow: String,
     val section: String,
@@ -47,81 +49,59 @@ private class ResultAnswer(
     val detail: String?,
     val body: String?,
     val spoken: String,
-    val practice: Boolean,
     val success: Boolean,
-    val record: Pair<String, Outcome>?,
 )
 
-private fun answerFor(kind: ScreenParts.Practice, request: String): ResultAnswer = when (kind) {
-    ScreenParts.Practice.Read -> ResultAnswer(
-        eyebrow = "Done",
-        section = "Mom's last message",
-        quote = "Did you eat? Come home early.",
-        detail = "Today, 6:42 PM",
-        body = null,
-        spoken = "Practice run with sample data. Mom's last message: Did you eat? Come home early. Today, 6:42 PM.",
-        practice = true,
-        success = true,
-        record = "Practice: read Mom's last message" to Outcome.Done,
-    )
-    // Reached only from Confirm → Send. Confirm already recorded it.
-    ScreenParts.Practice.Send -> ResultAnswer(
-        eyebrow = "Done",
-        section = "Practice reply to Mom",
-        quote = "I'll be home by 7",
-        detail = null,
-        body = "Practice: the message was not really sent.",
-        spoken = "Practice: the message was not really sent.",
-        practice = true,
-        success = true,
-        record = null,
-    )
-    ScreenParts.Practice.Help -> ResultAnswer(
-        eyebrow = "Help",
-        section = "What I can do now",
-        quote = null,
-        detail = null,
-        body = "In this version I can listen to you, open Walk mode, Activity and Settings, and run practice tasks with sample data. " +
-            "Using your apps arrives in the next update. Try saying “Read my messages”.",
-        spoken = "In this version I can listen to you, open Walk mode, Activity and Settings, and run practice tasks with sample data. " +
-            "Using your apps arrives in the next update. Try saying: Read my messages.",
-        practice = false,
-        success = true,
-        record = null,
-    )
-    // Pay goes to Handover, never here; anything unknown is answered honestly.
-    ScreenParts.Practice.Pay, ScreenParts.Practice.Other -> ResultAnswer(
-        eyebrow = "Not yet",
-        section = "I can't do that yet",
-        quote = request.ifBlank { null },
-        detail = if (request.isBlank()) null else "What you asked",
-        body = "Saathi can't use your apps in this version, so I didn't try. Say “Read my messages” to hear a practice run.",
-        spoken = "I can't do that yet. Saathi can't use your apps in this version, so I didn't try.",
-        practice = false,
-        success = false,
-        record = if (request.isBlank()) null else "Couldn't do yet: ${request.trim().take(60)}" to Outcome.Failed,
-    )
+private fun answerFor(state: TaskRunner.State): ResultAnswer {
+    val f = state as? TaskRunner.State.Finished
+        ?: return ResultAnswer("Nothing yet", "No result", null, null, "There's nothing to show yet. Say what you need.", "There's nothing to show yet.", false)
+    val o = f.outcome
+    return when (o) {
+        is Outcome.Answered -> ResultAnswer(
+            eyebrow = if (f.command is Command.Help) "Help" else "Done",
+            section = o.title.ifBlank { f.title },
+            quote = o.quote,
+            detail = if (o.quote != null && f.command is Command.ReadLast) "Exactly as it appears on screen" else null,
+            body = if (o.quote != null && f.command is Command.ReadLast) null else o.message,
+            spoken = o.message,
+            success = true,
+        )
+        is Outcome.Asked -> ResultAnswer("Needs more", "I need one more thing", null, null, o.message, o.message, false)
+        is Outcome.Cancelled -> ResultAnswer("Cancelled", f.title, null, null, o.message, o.message, false)
+        is Outcome.Stopped -> ResultAnswer("Stopped", f.title, null, null, o.message, o.message, false)
+        is Outcome.Failed -> ResultAnswer(
+            eyebrow = "Didn't work",
+            section = if (f.command is Command.Unsupported) "I can't do that offline yet" else f.title,
+            quote = if (f.command is Command.Unsupported) f.command.utterance.ifBlank { null } else null,
+            detail = if (f.command is Command.Unsupported && f.command.utterance.isNotBlank()) "What you asked" else null,
+            body = o.message,
+            spoken = o.message,
+            success = false,
+        )
+        is Outcome.HandedOver -> ResultAnswer("Your turn", f.title, null, null, o.message, o.message, false)
+    }
 }
 
-/** Screen 7 — Result: checkmark draws in, the answer card is read aloud. Practice data is labelled. */
+/** Screen 7 — Result: checkmark draws in, the real answer card is read aloud (quotes verbatim). */
 @Composable
 fun ResultScreen(nav: AppNav) {
     val deps = LocalDeps.current
     val c = Clarity.colors
     val still = ScreenParts.rememberStill()
-    val request = deps.state.lastRequest
-    val kind = remember(request) { ScreenParts.practiceFor(request) }
-    val answer = remember(kind, request) { answerFor(kind, request) }
+    val state = remember { TaskRunner.state.value }
+    val answer = remember(state) { answerFor(state) }
+    val command = (state as? TaskRunner.State.Finished)?.command
+    val readContact = (command as? Command.ReadLast)?.contact?.takeIf { (state as TaskRunner.State.Finished).outcome is Outcome.Answered }
+    val needsAnswer = (state as? TaskRunner.State.Finished)?.outcome is Outcome.Asked
     val speaking by deps.voice.speaking.collectAsState()
 
     ScreenParts.OnFirstShow {
         deps.feedback.cue(if (answer.success) Cue.Done else Cue.Cancelled)
-        deps.voice.speak(answer.spoken)
-        answer.record?.let { (title, outcome) -> deps.state.record(title, outcome) }
+        deps.voice.speak(answer.spoken) // history was recorded by the task runner
     }
 
     fun repeatAnswer() {
-        deps.feedback.cue(Cue.StartListening)
+        deps.feedback.tick()
         deps.voice.speak(answer.spoken)
     }
 
@@ -141,17 +121,18 @@ fun ResultScreen(nav: AppNav) {
         when {
             w.any { it in setOf("repeat", "again", "dobara", "phir") } -> repeatAnswer()
             "something else" in t || "another" in w || "new" in w -> somethingElse()
-            kind == ScreenParts.Practice.Read && w.any { it.startsWith("repl") } -> {
+            readContact != null && (w.any { it.startsWith("repl") } || w.any { it in setOf("jawab", "जवाब") }) && w.size <= 2 -> {
+                // "Reply": the next thing said becomes the message to this contact (confirmed before sending).
                 deps.voice.stopSpeaking()
-                deps.state.lastRequest = "Reply to Mom"
-                nav.replace(Route.Working)
+                TaskRunner.session.pendingReplyTo = readContact
+                nav.replace(Route.Listening)
             }
             "home" in w -> home()
             else -> ScreenParts.handleAsRequest(text, deps, nav)
         }
     }
 
-    val say = if (kind == ScreenParts.Practice.Read) listOf("Repeat", "Reply", "Go home") else listOf("Repeat", "Something else", "Go home")
+    val say = if (readContact != null) listOf("Repeat", "Reply", "Go home") else listOf("Repeat", "Something else", "Go home")
     val status = when {
         listener.active -> "Listening"
         else -> "${answer.eyebrow}. ${answer.spoken}"
@@ -163,8 +144,36 @@ fun ResultScreen(nav: AppNav) {
         onTalk = { listener.toggle() },
         bottom = {
             ScreenParts.ListenHint(listener)
-            PrimaryButton("Something else", { somethingElse() }, description = "Something else. Start a new request.")
+            if (needsAnswer) {
+                PrimaryButton("Answer", { somethingElse() }, description = "Answer. Saathi listens for your reply.")
+            } else {
+                PrimaryButton("Something else", { somethingElse() }, description = "Something else. Start a new request.")
+            }
+            if (readContact != null) {
+                SecondaryButton(
+                    "Reply to $readContact",
+                    {
+                        deps.voice.stopSpeaking()
+                        TaskRunner.session.pendingReplyTo = readContact
+                        nav.replace(Route.Listening)
+                    },
+                    description = "Reply to $readContact. Say your message next; I'll read it back before sending.",
+                )
+            }
             SecondaryButton("Repeat", { repeatAnswer() }, description = "Repeat. Read it again.")
+            // Only real answers (e.g. a message read verbatim). Never hand-overs: no OTP/PIN path from here.
+            val feelText = if (answer.success) answer.quote ?: answer.body else null
+            if (feelText != null) {
+                SecondaryButton(
+                    "Feel it in braille",
+                    {
+                        deps.voice.stopSpeaking()
+                        deps.state.brailleText = feelText
+                        nav.go(Route.Braille)
+                    },
+                    description = "Feel it in braille. Opens the braille reader with this text.",
+                )
+            }
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TextLink("Home", { home() }) }
         },
     ) {
@@ -211,6 +220,5 @@ fun ResultScreen(nav: AppNav) {
             }
         }
 
-        if (answer.practice) ScreenParts.PracticeLabel(ScreenParts.rise(4, still))
     }
 }

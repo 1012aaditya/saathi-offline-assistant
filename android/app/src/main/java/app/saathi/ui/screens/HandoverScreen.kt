@@ -30,7 +30,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.saathi.data.Outcome
+import app.saathi.agent.Outcome
+import app.saathi.agent.TaskRunner
 import app.saathi.feedback.Cue
 import app.saathi.ui.AppNav
 import app.saathi.ui.LocalDeps
@@ -60,8 +61,8 @@ private fun bellAngle(t: Float): Float {
 }
 
 /**
- * Screen 8 — Your turn. Saathi stops before any PIN and hands over. In step 1 this follows a
- * practice payment: no payment app was opened and no money moved.
+ * Screen 8 — Your turn. Saathi stopped (PIN, password, CAPTCHA) and hands control back. The reason
+ * is the real one from the safety gate. Saathi never reads or types PINs and never touches TalkBack.
  */
 @Composable
 fun HandoverScreen(nav: AppNav) {
@@ -69,13 +70,14 @@ fun HandoverScreen(nav: AppNav) {
     val c = Clarity.colors
     val still = ScreenParts.rememberStill()
 
+    val reason = remember {
+        ((TaskRunner.state.value as? TaskRunner.State.Finished)?.outcome as? Outcome.HandedOver)?.message
+            ?: "I've stopped. Please finish this step yourself."
+    }
+
     ScreenParts.OnFirstShow {
         deps.feedback.cue(Cue.HandOver)
-        deps.voice.speak(
-            "Your turn. I've stopped before the PIN. I never read or type PINs. " +
-                "This was a practice run, so no payment app was opened.",
-        )
-        deps.state.record("Practice: payment — handed to you", Outcome.HandedOver)
+        deps.voice.speak("Your turn. $reason") // history was recorded by the task runner
     }
 
     val ring = remember { Animatable(0f) }
@@ -109,8 +111,7 @@ fun HandoverScreen(nav: AppNav) {
     }
 
     val status = if (listener.active) "Listening"
-    else "Your turn. I've stopped. I never read or type PINs. Practice run — no payment app was opened. " +
-        "TalkBack is unchanged — Saathi never turns it off in this version."
+    else "Your turn. $reason TalkBack is unchanged — Saathi never turns it off."
 
     SaathiScreen(
         status = status,
@@ -139,16 +140,11 @@ fun HandoverScreen(nav: AppNav) {
         Column(ScreenParts.rise(1, still), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             LargeTitle("Your turn")
             Text(
-                "I've stopped. A PIN screen would come next — I never read or type PINs.",
+                reason,
                 style = Clarity.type.headline.copy(fontWeight = FontWeight.Normal),
                 color = c.secondary,
             )
         }
-
-        ScreenParts.PracticeLabel(
-            ScreenParts.rise(2, still),
-            text = "Practice run — sample data. No payment app was opened and no money moved. Saathi can't use your apps yet in this version.",
-        )
 
         Group(ScreenParts.rise(3, still)) {
             Row(
@@ -161,7 +157,7 @@ fun HandoverScreen(nav: AppNav) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    "TalkBack is unchanged — Saathi never turns it off in this version",
+                    "TalkBack is unchanged — Saathi never turns it off",
                     style = Clarity.type.body,
                     color = c.label,
                     modifier = Modifier.weight(1f),
@@ -171,10 +167,10 @@ fun HandoverScreen(nav: AppNav) {
         }
 
         Column(ScreenParts.rise(4, still), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionHeader("In a real payment")
+            SectionHeader("What to do now")
             Group {
                 listOf(
-                    "Enter your PIN yourself",
+                    "Finish this step yourself (PIN, password or CAPTCHA)",
                     "When you're done, say “Saathi” or hold Volume-down",
                 ).forEachIndexed { i, text ->
                     if (i > 0) GroupDivider()

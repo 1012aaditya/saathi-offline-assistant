@@ -1,5 +1,6 @@
 package app.saathi
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -14,6 +15,11 @@ import app.saathi.voice.Voice
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** Set by the accessibility service: Volume-down was held in another app -> listen. */
+        const val EXTRA_TALK = "app.saathi.TALK"
+    }
+
     private lateinit var deps: Deps
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,6 +33,7 @@ class MainActivity : ComponentActivity() {
             it.init()
         }
         deps = Deps(state, feedback, voice)
+        if (intent?.getBooleanExtra(EXTRA_TALK, false) == true) state.pendingTalk = true
         setContent {
             // Keep services in sync with Settings.
             feedback.soundOn = state.soundOn
@@ -36,7 +43,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Volume-down: a short press still changes the volume; a long press is push-to-talk.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_TALK, false)) deps.state.requestTalk()
+    }
+
+    // Volume-down (when Saathi's accessibility service is off; when on, the service handles it everywhere): a short press still changes the volume; a long press is push-to-talk.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
             event.startTracking()

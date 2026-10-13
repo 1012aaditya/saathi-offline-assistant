@@ -423,7 +423,7 @@ fun SettingsScreen(nav: AppNav) {
                 )
             }
             Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Footnote("History and settings stay on your phone. While I'm working, screen text is sent to an AI service to decide the next step — it isn't stored.")
+                Footnote("History and settings stay on your phone. Saathi's app tasks work offline: screen text stays on your phone and isn't stored.")
                 Footnote("Your voice is sent to a speech service to turn it into text.")
                 Footnote("Walk mode warnings are made on your phone.")
             }

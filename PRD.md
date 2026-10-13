@@ -49,7 +49,7 @@ User speaks: *"Rahul ko 1 rupaya bhejo."* Saathi opens GPay, finds Rahul, enters
 - Supporting every app — 3 flows done well beat 10 done badly
 - Replacing TalkBack — Saathi works alongside it
 - Full physical-world navigation (Seeing AI, Be My Eyes already do this). *Update 13 Oct: a small on-device "walk mode" (beta) was added as an extra — obstacle warnings only, never route guidance or "safe to cross".*
-- Solving CAPTCHAs, reading OTPs, or entering PINs/passwords — always handed to the user
+- Solving CAPTCHAs, reading OTPs, or entering PINs/passwords — always handed to the user (*13 Oct: the user can choose to feel an OTP in braille on the Android app; the agent still never reads or types it*)
 
 ---
 
@@ -107,7 +107,7 @@ User speaks: *"Rahul ko 1 rupaya bhejo."* Saathi opens GPay, finds Rahul, enters
 | S2 | The read-back may only contain text that literally appears on the current screen (no model hallucination of payee or amount). |
 | S3 | On-screen payee/recipient must match the name the user said; otherwise ask. |
 | S4 | Amount cap per command (config `MAX_AMOUNT_INR`; ₹2,000 default, ₹10 during testing). |
-| S5 | Never read, type or store UPI PINs, passwords or OTPs. At PIN screens: stop and hand off. |
+| S5 | Never read, type or store UPI PINs, passwords or OTPs. At PIN screens: stop and hand off. *Exception (13 Oct): the Android braille reader can show an OTP the user allowed (Android's per-message consent) or text the user typed, as vibration only — never spoken, stored, logged or sent to a model.* |
 | S6 | Never solve or bypass CAPTCHAs — hand off to the user. |
 | S7 | The gate is deterministic code with unit tests — never an LLM decision. |
 | S8 | Traces contain screenshots of personal apps: stored locally only, gitignored, deletable. |

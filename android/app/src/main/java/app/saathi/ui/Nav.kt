@@ -21,6 +21,7 @@ import app.saathi.data.AppState
 import app.saathi.feedback.Feedback
 import app.saathi.feedback.reducedMotion
 import app.saathi.ui.screens.ActivityScreen
+import app.saathi.ui.screens.BrailleScreen
 import app.saathi.ui.screens.ConfirmScreen
 import app.saathi.ui.screens.HandoverScreen
 import app.saathi.ui.screens.HomeScreen
@@ -34,8 +35,8 @@ import app.saathi.ui.screens.WelcomeScreen
 import app.saathi.ui.screens.WorkingScreen
 import app.saathi.voice.Voice
 
-/** The 12 Clarity screens (DESIGN.md). */
-enum class Route { Welcome, Setup, Home, Listening, Working, Confirm, Result, Handover, Walk, Activity, Settings, Safety }
+/** The 12 Clarity screens (DESIGN.md) + Braille. */
+enum class Route { Welcome, Setup, Home, Listening, Working, Confirm, Result, Handover, Walk, Activity, Settings, Safety, Braille }
 
 /** Shared services, available to every screen via [LocalDeps]. */
 class Deps(val state: AppState, val feedback: Feedback, val voice: Voice)
@@ -71,6 +72,7 @@ fun routeForPhrase(text: String): Route? {
     return when {
         "go home" in t || t.trim() == "home" -> Route.Home
         "walk" in t -> Route.Walk
+        "braille" in t || "ब्रेल" in t -> Route.Braille
         "activity" in t || "history" in t -> Route.Activity
         "safety" in t -> Route.Safety
         "setting" in t -> Route.Settings
@@ -87,7 +89,20 @@ fun SaathiNavHost(deps: Deps) {
     val ease = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
 
     // Volume-down long-press anywhere opens Listening.
-    LaunchedEffect(Unit) { deps.state.talk.collect { nav.go(Route.Listening) } }
+    LaunchedEffect(Unit) {
+        if (deps.state.pendingTalk) {
+            deps.state.pendingTalk = false
+            nav.go(Route.Listening)
+        }
+        deps.state.talk.collect { nav.go(Route.Listening) }
+    }
+
+    // Debug builds only: a typed command from `adb shell` (DebugCommandReceiver), handled exactly
+    // like a spoken one. Release builds have no sender, so this never fires there.
+    LaunchedEffect(Unit) {
+        DebugCommands.take()?.let { app.saathi.agent.Requests.handle(it, deps, nav) }
+        DebugCommands.flow.collect { DebugCommands.take(); app.saathi.agent.Requests.handle(it, deps, nav) }
+    }
 
     CompositionLocalProvider(LocalDeps provides deps) {
         NavHost(
@@ -113,6 +128,7 @@ fun SaathiNavHost(deps: Deps) {
             composable(Route.Activity.name) { ActivityScreen(nav) }
             composable(Route.Settings.name) { SettingsScreen(nav) }
             composable(Route.Safety.name) { SafetyScreen(nav) }
+            composable(Route.Braille.name) { BrailleScreen(nav) }
         }
     }
 }

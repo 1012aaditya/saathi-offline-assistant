@@ -12,6 +12,7 @@ Read before non-trivial work: `PROJECT.md` (status, decisions, open questions) �
 
 1. **Never weaken, bypass or skip `saathi/safety.py`.** Every device action goes through `safety.check()` before execution. Any change to safety rules needs a matching unit test in `tests/test_safety.py`.
 2. **Never write code that reads, types, stores or logs UPI PINs, passwords or OTPs.** PIN screens → stop and hand off to the user.
+   *One exception (owner decision, 13 Oct): the Android **braille reader** (`android/braille/`, `app/.../braille/`, `BrailleScreen.kt`) may show an OTP or user-typed text as braille vibration. Only via Android's SMS User Consent (per message, user taps Allow; no SMS permission). Display only: never spoken, logged, stored, sent to a model or typed anywhere; dots hidden on screen; `FLAG_SECURE`; wiped after 3 min or when the app leaves the screen. The agent itself still never reads, types or stores OTPs/passwords, and UPI PINs are never shown anywhere.*
 3. **Never solve or bypass CAPTCHAs.** Hand off to the user.
 4. **Read-backs may only contain strings that exist verbatim in the current screen's element list.**
 5. **Confirmation defaults to cancel.** Unclear answer → ask once more → cancel.

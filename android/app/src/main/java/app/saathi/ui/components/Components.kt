@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,8 +52,21 @@ import androidx.compose.ui.unit.dp
 import app.saathi.ui.theme.Clarity
 
 /**
+ * Apple-style readable width. On tablets and landscape, content is capped at this width and
+ * centred; on phones (narrower than this) nothing changes.
+ */
+val ReadableWidth: Dp = 720.dp
+
+/** Full width up to [ReadableWidth], centred. Use on anything that would stretch edge to edge on a tablet. */
+fun Modifier.readableWidth(max: Dp = ReadableWidth): Modifier =
+    this.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = max).fillMaxWidth()
+
+/**
  * Standard Clarity screen: optional nav row, scrolling content, pinned bottom area with the
  * actions and the "You can say …" line + talk button. Every screen uses this so voice is everywhere.
+ * Content is capped at [ReadableWidth] and centred on wide screens; the background still fills.
+ *
+ * [talkLabel] / [listening] are passed to the talk button ([YouCanSay]); defaults keep the old behaviour.
  */
 @Composable
 fun SaathiScreen(
@@ -60,6 +75,8 @@ fun SaathiScreen(
     onTalk: () -> Unit,
     navRow: (@Composable () -> Unit)? = null,
     bottom: @Composable ColumnScope.() -> Unit = {},
+    talkLabel: String = TalkLabel,
+    listening: Boolean? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = Clarity.colors
@@ -67,18 +84,26 @@ fun SaathiScreen(
         Modifier.fillMaxSize().background(c.screen).statusBarsPadding().navigationBarsPadding(),
     ) {
         StatusLine(status)
-        navRow?.invoke()
-        Column(
-            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
-            content = content,
-        )
-        Column(
-            Modifier.fillMaxWidth().background(c.screen).padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+        navRow?.let { Box(Modifier.readableWidth()) { it() } }
+        // The scroll container spans the full width (so swipes at the sides still scroll); the content inside is capped.
+        Box(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+            contentAlignment = Alignment.TopCenter,
         ) {
-            bottom()
-            YouCanSay(youCanSay, onTalk)
+            Column(
+                Modifier.readableWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp),
+                content = content,
+            )
+        }
+        Box(Modifier.fillMaxWidth().background(c.screen), contentAlignment = Alignment.TopCenter) {
+            Column(
+                Modifier.readableWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                bottom()
+                YouCanSay(youCanSay, talkLabel = talkLabel, listening = listening, onTalk = onTalk)
+            }
         }
     }
 }
@@ -97,7 +122,7 @@ fun StatusLine(text: String) {
 @Composable
 fun NavRow(backLabel: String? = null, onBack: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 8.dp),
+        Modifier.readableWidth().heightIn(min = 52.dp).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -174,17 +199,23 @@ private fun BaseButton(
 }
 
 @Composable
-fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, description: String? = null) =
-    BaseButton(text, onClick, Clarity.colors.accent, Clarity.colors.onAccent, modifier, 64.dp, description)
+fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, description: String? = null, height: Dp = 64.dp) =
+    BaseButton(text, onClick, Clarity.colors.accent, Clarity.colors.onAccent, modifier, height, description)
 
 @Composable
-fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, description: String? = null, tag: String? = null) =
-    BaseButton(text, onClick, Clarity.colors.group, Clarity.colors.label, modifier, 64.dp, description, tag)
+fun SecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    description: String? = null,
+    tag: String? = null,
+    height: Dp = 64.dp,
+) = BaseButton(text, onClick, Clarity.colors.group, Clarity.colors.label, modifier, height, description, tag)
 
 /** Stop / destructive: 72dp, dark red with white text (9.3:1). */
 @Composable
-fun DangerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, description: String? = null) =
-    BaseButton(text, onClick, Clarity.colors.danger, Clarity.colors.onDanger, modifier, 72.dp, description)
+fun DangerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, description: String? = null, height: Dp = 72.dp) =
+    BaseButton(text, onClick, Clarity.colors.danger, Clarity.colors.onDanger, modifier, height, description)
 
 @Composable
 fun TextLink(text: String, onClick: () -> Unit, contentDescription: String? = null, danger: Boolean = false) {
@@ -242,10 +273,22 @@ fun GroupRow(
     }
 }
 
-/** "You can say …" footer + the 56dp talk button. On every screen. */
+/** Default spoken label of the talk button. */
+const val TalkLabel = "Talk to Saathi"
+
+/**
+ * "You can say …" footer + the 56dp talk button. On every screen.
+ * [talkLabel] is the button's TalkBack label. [listening]: null (default) = plain button as before;
+ * true/false = the button shows and announces the listening state (filled accent while listening).
+ */
 @Composable
-fun YouCanSay(phrases: List<String>, onTalk: () -> Unit) {
+fun YouCanSay(phrases: List<String>, onTalk: () -> Unit) = YouCanSay(phrases, talkLabel = TalkLabel, listening = null, onTalk = onTalk)
+
+/** [YouCanSay] with a custom talk-button label and/or listening state; `onTalk` stays last so a trailing lambda works. */
+@Composable
+fun YouCanSay(phrases: List<String>, talkLabel: String = TalkLabel, listening: Boolean? = null, onTalk: () -> Unit) {
     val c = Clarity.colors
+    val on = listening == true
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             "You can say " + phrases.joinToString(" · ") { "“$it”" },
@@ -257,11 +300,14 @@ fun YouCanSay(phrases: List<String>, onTalk: () -> Unit) {
             Modifier
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(c.group)
+                .background(if (on) c.accent else c.group)
                 .clickable(role = Role.Button, onClick = onTalk)
-                .semantics { contentDescription = "Talk to Saathi" },
+                .semantics {
+                    contentDescription = talkLabel
+                    if (listening != null) stateDescription = if (on) "Listening" else "Not listening"
+                },
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.Mic, contentDescription = null, tint = c.label) }
+        ) { Icon(Icons.Filled.Mic, contentDescription = null, tint = if (on) c.onAccent else c.label) }
     }
 }
 

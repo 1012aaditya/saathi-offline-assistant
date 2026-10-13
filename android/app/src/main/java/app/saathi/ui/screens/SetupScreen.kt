@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import app.saathi.agent.SaathiAccessibilityService
 import app.saathi.feedback.Cue
 import app.saathi.ui.AppNav
 import app.saathi.ui.LocalDeps
@@ -72,7 +73,9 @@ import app.saathi.ui.theme.Clarity
 
 /** Privacy copy — exactly as in DESIGN.md "Privacy copy". */
 private const val PrivacyBase =
-    "History and settings stay on your phone. While I'm working, screen text is sent to an AI service to decide the next step — it isn't stored."
+    "History and settings stay on your phone. Saathi's app tasks work offline: screen text stays on your phone and isn't stored."
+private const val PrivacyA11y =
+    "Saathi always asks before sending, never reads or types PINs or passwords, never grants permissions, and never turns TalkBack off."
 private const val PrivacyVoice = "Your voice is sent to a speech service to turn it into text."
 private const val PrivacyWalk = "Walk mode warnings are made on your phone."
 private const val PrivacyLocal = "History and settings stay on your phone."
@@ -97,7 +100,7 @@ private fun setupSteps(): List<SetupStep> = listOf(
             Icons.Outlined.TouchApp to "Tap and type in apps when you ask",
             Icons.Outlined.VerifiedUser to "Always ask you before sending, paying or ordering",
         ),
-        listOf(PrivacyBase), "Saathi can't use your apps for you", null,
+        listOf(PrivacyBase, PrivacyA11y), "Saathi can't use your apps for you", null,
     ),
     SetupStep(
         "Microphone", "Let Saathi hear you",
@@ -151,7 +154,9 @@ fun SetupScreen(nav: AppNav) {
 
     val cur = steps[step]
     val isAccessibility = step == 0
-    fun granted(i: Int): Boolean = i != 0 && (steps[i].permission?.let { ScreenParts.hasPermission(context, it) } ?: true)
+    fun granted(i: Int): Boolean =
+        if (i == 0) SaathiAccessibilityService.isEnabled(context)
+        else steps[i].permission?.let { ScreenParts.hasPermission(context, it) } ?: true
     val grantedNow = remember(step, refresh) { granted(step) }
 
     fun go(n: Int) {
@@ -195,7 +200,15 @@ fun SetupScreen(nav: AppNav) {
 
     fun allow() {
         val p = steps[step].permission
-        if (step == 0 || p == null || ScreenParts.hasPermission(context, p)) {
+        if (step == 0) {
+            // Only the owner can switch the service on: open Android's settings (never done for them).
+            if (SaathiAccessibilityService.isEnabled(context)) {
+                feedback.cue(Cue.Done)
+                go(step + 1)
+            } else {
+                SaathiAccessibilityService.openSettings(context)
+            }
+        } else if (p == null || ScreenParts.hasPermission(context, p)) {
             feedback.cue(Cue.Done)
             go(step + 1)
         } else {
@@ -210,7 +223,7 @@ fun SetupScreen(nav: AppNav) {
 
     BackHandler { back() }
 
-    val showAsk = !done && !isAccessibility && !grantedNow && !declined
+    val showAsk = !done && !grantedNow && !declined
     val say = when {
         done -> listOf("Start", "Go back")
         showAsk -> listOf("Allow", "Not now")
@@ -236,7 +249,7 @@ fun SetupScreen(nav: AppNav) {
         listener.active -> "Listening"
         done -> "You're all set. Start when you're ready."
         declined -> "Not now. $declineText"
-        isAccessibility -> "Step 1 of 4. ${cur.title}. Arrives in the next update — nothing to switch on yet."
+        isAccessibility && !grantedNow -> "Step 1 of 4. ${cur.title}. Off. Allow opens Accessibility settings: choose Saathi and switch it on."
         grantedNow -> "Step ${step + 1} of 4. ${cur.title}. Already allowed."
         else -> "Step ${step + 1} of 4. ${cur.title}."
     }
@@ -257,7 +270,11 @@ fun SetupScreen(nav: AppNav) {
             when {
                 done -> PrimaryButton("Start", { finish() }, description = "Start using Saathi")
                 showAsk -> {
-                    PrimaryButton("Allow", { allow() }, description = "Allow ${cur.name}")
+                    PrimaryButton(
+                        if (isAccessibility) "Open settings" else "Allow",
+                        { allow() },
+                        description = if (isAccessibility) "Open Accessibility settings. Choose Saathi and switch it on." else "Allow ${cur.name}",
+                    )
                     SecondaryButton("Not now", { notNow() }, description = "Not now, skip ${cur.name}")
                 }
                 declined -> {
@@ -313,7 +330,10 @@ fun SetupScreen(nav: AppNav) {
 
                 Box(ScreenParts.rise(2, still)) {
                     when {
-                        isAccessibility -> ScreenParts.NoteBox("Arrives in the next update — nothing to switch on yet.")
+                        isAccessibility && !grantedNow && !declined -> ScreenParts.NoteBox(
+                            "In Accessibility settings, choose Installed apps (or Downloaded apps), then Saathi, and switch it on. " +
+                                "Android shows a warning — that's normal. Then come back here.",
+                        )
                         declined -> ScreenParts.NoteBox(
                             declineText,
                             extra = if (askedAndDenied) {
@@ -338,11 +358,11 @@ fun SetupScreen(nav: AppNav) {
                     val summary = remember(refresh) {
                         steps.mapIndexed { i, s ->
                             val value = when {
-                                i == 0 -> "Next update"
+                                i == 0 -> if (granted(0)) "On" else "Off"
                                 granted(i) -> "Allowed"
                                 else -> "Not now"
                             }
-                            Triple(s.name, value, i != 0 && granted(i))
+                            Triple(s.name, value, granted(i))
                         }
                     }
                     Group {

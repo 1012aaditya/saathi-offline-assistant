@@ -38,6 +38,8 @@ class AppState(context: Context) {
     var speechRate by mutableStateOf(prefs.getFloat("speechRate", 1.0f)); private set
     var spendingLimit by mutableStateOf(prefs.getInt("spendingLimit", 500)); private set
     var walkSensitivity by mutableStateOf(WalkSensitivity.valueOf(prefs.getString("walk", WalkSensitivity.Medium.name)!!)); private set
+    /** Braille: play a tone on raised dots. null = automatic (sound only when the phone can't vibrate). */
+    var brailleSound by mutableStateOf(if (prefs.contains("brailleSound")) prefs.getBoolean("brailleSound", false) else null); private set
     val appLevels = mutableStateListOf<Pair<String, AppLevel>>().apply {
         addAll(
             listOf("WhatsApp" to AppLevel.AskFirst, "Grocery app" to AppLevel.AskFirst, "Payments" to AppLevel.Off).map { (app, def) ->
@@ -53,9 +55,19 @@ class AppState(context: Context) {
     /** The last thing the user said (Listening -> Working). */
     var lastRequest by mutableStateOf(""); internal set
 
+    /** Result -> Braille: public text to feel (already read aloud). Memory only; never an OTP or PIN. */
+    var brailleText by mutableStateOf<String?>(null); internal set
+
     /** Volume-down long-press anywhere -> open Listening. Collected by the nav host. */
     val talkRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val talk: SharedFlow<Unit> get() = talkRequests
+
+    /** Volume-down held before the nav host was listening (cold start): open Listening once ready. */
+    @Volatile var pendingTalk = false
+
+    fun requestTalk() {
+        if (talkRequests.subscriptionCount.value == 0 || !talkRequests.tryEmit(Unit)) pendingTalk = true
+    }
 
     fun finishSetup() { setupDone = true; prefs.edit().putBoolean("setupDone", true).apply() }
     fun updateTheme(t: ThemeChoice) { theme = t; prefs.edit().putString("theme", t.name).apply() }
@@ -63,6 +75,7 @@ class AppState(context: Context) {
     fun updateLanguage(tag: String?) { languageTag = tag; prefs.edit().putString("languageTag", tag).apply() }
     fun updateSpeechRate(r: Float) { speechRate = r.coerceIn(0.7f, 1.5f); prefs.edit().putFloat("speechRate", speechRate).apply() }
     fun updateWalkSensitivity(s: WalkSensitivity) { walkSensitivity = s; prefs.edit().putString("walk", s.name).apply() }
+    fun updateBrailleSound(on: Boolean) { brailleSound = on; prefs.edit().putBoolean("brailleSound", on).apply() }
 
     /** Only ever called after the user confirmed on a sheet whose default is Cancel. */
     fun updateSpendingLimit(v: Int) { spendingLimit = v; prefs.edit().putInt("spendingLimit", v).apply() }

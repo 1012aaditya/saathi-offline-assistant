@@ -43,7 +43,7 @@
 
 ### Won't (this hackathon)
 
-- iOS · on-device Android app · solving CAPTCHAs · reading OTPs · entering PINs/passwords
+- iOS · on-device Android app · solving CAPTCHAs · entering PINs/passwords · the agent reading OTPs (*13 Oct: the Android braille reader may show an OTP the user allowed, as vibration only — see CLAUDE.md rule 2*)
 - Account creation, investments, loans, any action beyond the 4 flows
 - Real-money transactions above ₹10 during development
 

@@ -1,0 +1,178 @@
+package app.saathi.agent
+
+import app.saathi.safety.Verdict
+
+/**
+ * Saathi's own words, one language at a time (the app follows the phone's language). Hindi is in
+ * Devanagari (TTS reads it best), short. Anything quoted from the screen is passed in verbatim and
+ * never translated or paraphrased (hard rule 4).
+ */
+class Texts(val lang: Lang) {
+    private fun s(en: String, hi: String): String = if (lang == Lang.HI) hi else en
+
+    // -- narration -----------------------------------------------------------------------------
+    fun opening(app: String) = s("Opening $app", "$app खोल रहा हूँ")
+    val backToChats get() = s("Going back to the chat list", "चैट सूची पर वापस जा रहा हूँ")
+    val leavingOtherChat get() = s("This is a different chat. Going back", "यह दूसरी चैट है, वापस जा रहा हूँ")
+    fun openingChat(name: String) = s("Opening $name's chat", "$name की चैट खोल रहा हूँ")
+    fun searching(name: String) = s("Searching for $name", "$name को खोज रहा हूँ")
+    val jumpingToLatest get() = s("Going to the newest messages", "नए संदेशों पर जा रहा हूँ")
+    val lookingFurther get() = s("Looking a little further up", "थोड़ा ऊपर देख रहा हूँ")
+    val typing get() = s("Typing your message", "आपका संदेश लिख रहा हूँ")
+    val readyToSend get() = s("Message typed. I'll check with you before sending", "संदेश लिख दिया, भेजने से पहले पूछूँगा")
+    val turningOnUnread get() = s("Showing only unread chats", "सिर्फ़ नए संदेश वाली चैट दिखा रहा हूँ")
+    val turningOffUnread get() = s("Putting the chat list back as it was", "चैट सूची पहले जैसी कर रहा हूँ")
+    val sending get() = s("Sending", "भेज रहा हूँ")
+    val clearingDraft get() = s("Removing the typed message", "लिखा हुआ संदेश हटा रहा हूँ")
+
+    // -- answers -------------------------------------------------------------------------------
+    fun lastMessage(name: String, msg: String) =
+        s("$name's last text message: \"$msg\"", "$name का आखिरी संदेश: \"$msg\"")
+    fun lastMessageTitle(name: String) = s("$name's last message", "$name का आखिरी संदेश")
+    fun noMessageFromThem(name: String) = s(
+        "I opened \"$name\" but couldn't find a text message from them near the end of the chat.",
+        "\"$name\" की चैट खोली, पर उनका कोई हाल का लिखा संदेश नहीं मिला।",
+    )
+    fun sent(name: String) = s("Sent to \"$name\".", "\"$name\" को भेज दिया।")
+    fun sentTitle(name: String) = s("Message to $name", "$name को संदेश")
+    fun opened(app: String) = s("$app is open.", "$app खुल गया।")
+
+    fun unreadSummary(rows: List<Pair<String, Int>>, max: Int = 6): String {
+        if (rows.isEmpty()) return s("No new messages right now.", "अभी कोई नया संदेश नहीं है।")
+        val more = rows.size - max
+        return if (lang == Lang.HI) {
+            val spoken = rows.take(max).joinToString(", ") { (n, c) -> "$n के $c" }
+            "${rows.size} चैट में नए संदेश हैं: $spoken${if (more > 0) ", और $more चैट" else ""}।"
+        } else {
+            val spoken = rows.take(max).joinToString(", ") { (n, c) -> "$n, $c" }
+            "${rows.size} ${if (rows.size == 1) "chat has" else "chats have"} new messages: $spoken${if (more > 0) ", and $more more" else ""}."
+        }
+    }
+    val unreadTitle get() = s("New messages", "नए संदेश")
+
+    fun screenSummary(app: String, texts: List<String>, more: Int): String {
+        if (texts.isEmpty()) return s("$app is open, but I can't find any text on this screen.", "$app खुला है, पर स्क्रीन पर कोई लिखावट नहीं मिली।")
+        val list = texts.joinToString("; ")
+        return s(
+            "This is $app. On screen: $list${if (more > 0) ", and $more more" else ""}.",
+            "यह $app है। स्क्रीन पर: $list${if (more > 0) ", और $more चीज़ें" else ""}।",
+        )
+    }
+    fun screenTitle(app: String) = s("On screen in $app", "$app की स्क्रीन पर")
+    val noCapturedScreen get() = s(
+        "I can only describe another app's screen. Open that app, then hold Volume-down and ask again.",
+        "मैं दूसरे ऐप की स्क्रीन बता सकता हूँ। वह ऐप खोलिए, फिर Volume-down दबाकर पूछिए।",
+    )
+    val pinScreenSummary get() = s(
+        "This is a PIN or password screen. I won't read it. Please enter it yourself.",
+        "यह पिन या पासवर्ड की स्क्रीन है। मैं इसे नहीं पढ़ूँगा, आप खुद डालिए।",
+    )
+
+    // -- asks ----------------------------------------------------------------------------------
+    val whoseMessage get() = s("Whose message should I read? For example, say “Read Mom's last message”.", "किसका संदेश पढ़ूँ? जैसे, “मम्मी का आखिरी संदेश पढ़ो”।")
+    val replyToWhom get() = s("Who should I reply to? For example, say “Reply to Mom, I'll be home by 7”.", "किसे जवाब भेजूँ? जैसे, “मम्मी को बोलो मैं सात बजे आऊँगा”।")
+    fun whatToSay(name: String) = s("What should I say to $name?", "$name को क्या लिखूँ?")
+    fun whichOne(names: List<String>) = s(
+        "I found more than one: ${names.joinToString(", ") { "\"$it\"" }}. Please say the full name.",
+        "एक से ज़्यादा मिले: ${names.joinToString(", ") { "\"$it\"" }}। पूरा नाम बताइए।",
+    )
+
+    // -- failures --------------------------------------------------------------------------------
+    fun notFound(name: String) = s("I couldn't find a chat called $name in WhatsApp.", "WhatsApp में $name नाम की चैट नहीं मिली।")
+    val cantTypeHere get() = s("I can't find the message box in this chat, so I didn't type anything.", "इस चैट में संदेश लिखने की जगह नहीं मिली, मैंने कुछ नहीं लिखा।")
+    val draftExists get() = s("This chat already has an unsent draft. I won't overwrite it.", "इस चैट में पहले से कुछ लिखा है, मैं उसे नहीं मिटाऊँगा।")
+    val typedMismatch get() = s("The typed text doesn't match what you said, so I won't send it.", "लिखा हुआ संदेश आपकी बात से अलग है, मैं नहीं भेजूँगा।")
+    val noSendButton get() = s("I can't find WhatsApp's send button, so nothing was sent.", "भेजने का बटन नहीं मिला, कुछ नहीं भेजा।")
+    val notSureSent get() = s("I pressed send but I'm not sure it went. Please check the chat.", "भेजें दबाया, पर पक्का नहीं कि गया। चैट देख लीजिए।")
+    val stuck get() = s("This step isn't working. I've stopped.", "यह स्टेप नहीं हो पा रहा। मैं रुक रहा हूँ।")
+    val tooManySteps get() = s("That took too many steps. I've stopped.", "बहुत स्टेप हो गए, मैं रुक रहा हूँ।")
+    val unsafe get() = s("I can't do this safely, so I've stopped.", "यह काम सुरक्षित तरीके से नहीं हो पा रहा, मैं रुक रहा हूँ।")
+    val cantRead get() = s("I can't read the screen right now.", "अभी स्क्रीन पढ़ नहीं पा रहा।")
+    val notExact get() = s("I couldn't read it exactly, so I won't guess.", "ठीक से पढ़ नहीं पाया, अंदाज़ा नहीं लगाऊँगा।")
+    val readOnly get() = s("I only read this screen; I won't change anything.", "मैं सिर्फ़ पढ़ता हूँ, कुछ नहीं बदलूँगा।")
+    val ownScreen get() = s("I won't tap on Saathi's own screen.", "मैं साथी की अपनी स्क्रीन पर नहीं दबाऊँगा।")
+    val couldNotOpen get() = s("I couldn't open that app.", "वह ऐप नहीं खुल पाया।")
+    val notSentChanged get() = s("The screen changed after I read it to you, so I didn't send.", "पढ़कर सुनाने के बाद स्क्रीन बदल गई, इसलिए नहीं भेजा।")
+    val draftRemoved get() = s("I removed the message I had typed.", "मैंने लिखा हुआ संदेश हटा दिया।")
+    val stopped get() = s("Stopped. You can carry on yourself.", "रुक गया। आप आगे खुद कर सकते हैं।")
+    val stoppedServiceLost get() = s(
+        "Stopped: Saathi's Accessibility service was switched off or restarted.",
+        "रुक गया: साथी की Accessibility सेवा बंद हुई या फिर से शुरू हुई।",
+    )
+    fun draftLeft(chat: String) = s(
+        "I couldn't remove the text I typed for $chat; it was NOT sent. I'll try again when I can.",
+        "$chat के लिए लिखा संदेश हटा नहीं पाया; वह भेजा नहीं गया। मैं फिर कोशिश करूँगा।",
+    )
+    fun draftLeftGiveUp(chat: String) = s(
+        "I still couldn't remove the text I typed for $chat. It was NOT sent. Please check that chat's message box.",
+        "$chat के लिए लिखा संदेश अब भी नहीं हटा। वह भेजा नहीं गया। उस चैट का संदेश बॉक्स देख लीजिए।",
+    )
+    fun draftChanged(chat: String) = s(
+        "The message box for $chat has other text now, so I left it. Nothing was sent.",
+        "$chat के संदेश बॉक्स में अब कुछ और लिखा है, मैंने नहीं छुआ। कुछ नहीं भेजा।",
+    )
+    fun clearingEarlierDraft(chat: String) = s(
+        "First, removing the text I typed earlier for $chat",
+        "पहले $chat के लिए पहले लिखा संदेश हटा रहा हूँ",
+    )
+    fun earlierDraftRemoved(chat: String) = s(
+        "I removed the text I had typed earlier for $chat. It was not sent.",
+        "$chat के लिए पहले लिखा संदेश हटा दिया। वह भेजा नहीं गया था।",
+    )
+    fun cancelled(cleared: Boolean) = s(
+        if (cleared) "Cancelled. Nothing was sent, and I removed the typed message." else "Cancelled. Nothing was sent.",
+        if (cleared) "कैंसल कर दिया। कुछ नहीं भेजा, लिखा हुआ संदेश हटा दिया।" else "कैंसल कर दिया। कुछ नहीं भेजा।",
+    )
+
+    // -- help / honest limits -----------------------------------------------------------------
+    val helpTitle get() = s("What I can do", "मैं क्या कर सकता हूँ")
+    val help get() = s(
+        "Offline, I can read a contact's last WhatsApp message, tell you who has new messages, reply to a contact " +
+            "after you say yes, open WhatsApp, Google Pay or Blinkit, and describe the screen of the app you were in. " +
+            "Hold Volume-down in any app to talk to me.",
+        "बिना इंटरनेट मैं WhatsApp पर किसी का आखिरी संदेश पढ़ सकता हूँ, बता सकता हूँ किसके नए संदेश हैं, आपकी हाँ के बाद जवाब भेज सकता हूँ, " +
+            "ऐप खोल सकता हूँ, और जिस ऐप में आप थे उसकी स्क्रीन बता सकता हूँ। किसी भी ऐप में Volume-down दबाकर बोलिए।",
+    )
+    val unsupportedTitle get() = s("I can't do that offline yet", "यह अभी बिना इंटरनेट नहीं कर सकता")
+    val unsupported get() = s(
+        "I can't do that offline yet, so I didn't try. Say “Help” to hear what I can do.",
+        "यह मैं अभी बिना इंटरनेट नहीं कर सकता, इसलिए कोशिश नहीं की। “मदद” बोलिए।",
+    )
+    fun appOff(app: String) = s(
+        "$app is turned off for Saathi in Settings, so I didn't open it.",
+        "Settings में $app साथी के लिए बंद है, इसलिए नहीं खोला।",
+    )
+    fun readOnlyApp(app: String) = s(
+        "$app is set to Read only in Settings, so I won't send messages there.",
+        "Settings में $app सिर्फ़ पढ़ने के लिए है, मैं संदेश नहीं भेजूँगा।",
+    )
+    val serviceOff get() = s(
+        "Saathi's Accessibility service is off, so I can't use your apps yet.",
+        "साथी की Accessibility सेवा बंद है, इसलिए अभी ऐप नहीं चला सकता।",
+    )
+
+    // -- confirmation --------------------------------------------------------------------------
+    fun confirmQuestion(recipient: String, message: String) = s(
+        "Send to $recipient: \"$message\"? Say yes or no.",
+        "$recipient को भेजूँ: \"$message\"? हाँ या नहीं बोलिए।",
+    )
+
+    /** Spoken text for a gate verdict. The gate's own words are Hindi; English maps by rule. */
+    fun verdict(v: Verdict): String {
+        if (lang == Lang.HI && v.message.isNotEmpty()) return v.message
+        return when (v.rule) {
+            "R8" -> "Please enter your PIN yourself. I've stopped."
+            "R9" -> "You'll need to fill in this CAPTCHA yourself."
+            "R7" -> "I won't type PINs, OTPs or passwords."
+            "R2" -> "The message or name isn't clear on screen, so I've stopped."
+            "R5" -> "This chat belongs to someone else, not the person you named."
+            "R4" -> "What I'd read back isn't on the screen, so I've stopped."
+            "R10" -> "That's not part of what you asked, so I won't do it."
+            "R11" -> "That button is covered by another button, so I won't press it."
+            "app" -> "That app isn't on my list."
+            "index" -> "I couldn't find that button on screen."
+            "confirm" -> "I didn't get a yes, so I won't send it."
+            else -> if (v.rule.startsWith("changed")) notSentChanged else "I've stopped to be safe."
+        }
+    }
+}

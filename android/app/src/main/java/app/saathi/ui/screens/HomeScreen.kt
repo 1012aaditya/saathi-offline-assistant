@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -125,6 +126,14 @@ fun HomeScreen(nav: AppNav) {
                 icon = Icons.Outlined.Schedule,
                 chevron = true,
                 onClick = { nav.go(Route.Activity) },
+            )
+            GroupDivider()
+            GroupRow(
+                "Braille",
+                modifier = Modifier.semantics { contentDescription = "Braille. Feel codes and short text with your finger" },
+                icon = Icons.Outlined.TouchApp,
+                chevron = true,
+                onClick = { nav.go(Route.Braille) },
             )
         }
     }
