@@ -27,3 +27,11 @@ cache/
 
 # depth-model benchmark downloads (not shipped)
 walk/models/bench/
+
+# android build output and local SDK path
+android/.gradle/
+android/**/build/
+android/local.properties
+android/.kotlin/
+*.apk
+*.aab

@@ -41,6 +41,8 @@ node --test 'walk/tests/*.test.mjs'                 # walk mode tests
 uv run pytest -q                                    # unit tests (safety tests must pass before any commit)
 uv run python eval/run_flows.py --flow all --n 10   # success-rate table → eval/results.md
 uv run ruff check . && uv run ruff format .
+# Android app (branch feature/android-app; see android/README.md)
+cd android && ./gradlew :safety:test :app:assembleDebug   # needs JAVA_HOME=/opt/homebrew/opt/openjdk@17
 ```
 
 ## Code layout
@@ -63,6 +65,7 @@ tests/                test_safety.py, test_actions.py, test_blinkit.py, …, fix
 scripts/              dump_screen, talkback_test, sarvam_test, llm_probe, blinkit_empty_cart
 walk/                 walk mode (beta): on-device obstacle warnings, phone browser, no agent
 site/                 website + app-screen prototypes (not connected to the agent)
+android/              native app (Kotlin/Compose): Clarity screens + safety gate port (android/safety)
 ```
 
 ## Conventions

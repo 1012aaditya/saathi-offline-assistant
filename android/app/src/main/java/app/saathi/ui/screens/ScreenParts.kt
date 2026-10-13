@@ -1,0 +1,460 @@
+package app.saathi.ui.screens
+
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
+import androidx.core.content.ContextCompat
+import app.saathi.feedback.Cue
+import app.saathi.feedback.Feedback
+import app.saathi.feedback.reducedMotion
+import app.saathi.ui.AppNav
+import app.saathi.ui.Deps
+import app.saathi.ui.LocalDeps
+import app.saathi.ui.Route
+import app.saathi.ui.routeForPhrase
+import app.saathi.ui.theme.Clarity
+import app.saathi.voice.Voice
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+
+/**
+ * Helpers shared by the step-1 screens (Welcome … Handover). Everything lives in one object so
+ * names can't clash with other files in this package.
+ */
+object ScreenParts {
+
+    /** Shown on every practice screen. Step 1 can't operate other apps — say so plainly. */
+    const val PRACTICE_NOTE = "Practice run — sample data. Saathi can't use your apps yet in this version."
+
+    const val MIC_NEEDED = "Saathi needs the microphone to hear you. You can allow it in app settings."
+
+    private val Ease = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
+
+    // ---------------------------------------------------------------- motion
+
+    /** Android "Remove animations". Read once per screen; motion off, final states shown. */
+    @Composable
+    fun rememberStill(): Boolean {
+        val context = LocalContext.current
+        return remember { reducedMotion(context) }
+    }
+
+    /** Content fades and rises 12dp over 350ms, staggered 40ms per [index] (DESIGN.md). */
+    fun rise(index: Int, still: Boolean): Modifier = Modifier.composed {
+        val p = remember { Animatable(if (still) 1f else 0f) }
+        LaunchedEffect(Unit) {
+            if (!still) {
+                delay(40L * index)
+                p.animateTo(1f, tween(350, easing = Ease))
+            }
+        }
+        Modifier.graphicsLayer {
+            alpha = p.value
+            translationY = (1f - p.value) * 12.dp.toPx()
+        }
+    }
+
+    /** A checkmark that draws itself in. Decorative: the row around it carries the words. */
+    @Composable
+    fun DrawnCheck(
+        color: Color,
+        size: Dp,
+        stroke: Dp,
+        still: Boolean,
+        modifier: Modifier = Modifier,
+        delayMs: Int = 100,
+        durationMs: Int = 400,
+    ) {
+        val p = remember { Animatable(if (still) 1f else 0f) }
+        LaunchedEffect(Unit) {
+            if (!still) {
+                delay(delayMs.toLong())
+                p.animateTo(1f, tween(durationMs, easing = LinearOutSlowInEasing))
+            }
+        }
+        Canvas(modifier.size(size)) {
+            val s = this.size.width / 22f
+            val path = Path().apply {
+                moveTo(4f * s, 11.5f * s)
+                lineTo(8.5f * s, 16f * s)
+                lineTo(18f * s, 6.5f * s)
+            }
+            val measure = PathMeasure()
+            measure.setPath(path, false)
+            val part = Path()
+            measure.getSegment(0f, measure.length * p.value, part, true)
+            drawPath(part, color, style = Stroke(width = stroke.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+    }
+
+    /** Accent circle that pops in, then its checkmark draws (Setup done, Result). */
+    @Composable
+    fun CheckBadge(size: Dp, still: Boolean, modifier: Modifier = Modifier) {
+        val c = Clarity.colors
+        val pop = remember { Animatable(if (still) 1f else 0f) }
+        LaunchedEffect(Unit) { if (!still) pop.animateTo(1f, tween(400, easing = Ease)) }
+        Box(
+            modifier
+                .size(size)
+                .graphicsLayer {
+                    val s = 0.6f + 0.4f * pop.value
+                    scaleX = s
+                    scaleY = s
+                    alpha = pop.value
+                }
+                .clip(CircleShape)
+                .background(c.accent)
+                .clearAndSetSemantics {},
+            contentAlignment = Alignment.Center,
+        ) {
+            DrawnCheck(c.onAccent, size * 0.55f, size / 18, still, delayMs = 250, durationMs = 500)
+        }
+    }
+
+    /** Small bar meter. Animates only while [active] and motion is allowed. Decorative. */
+    @Composable
+    fun LevelBars(
+        active: Boolean,
+        still: Boolean,
+        color: Color,
+        modifier: Modifier = Modifier,
+        count: Int = 5,
+        barWidth: Dp = 4.dp,
+        minHeight: Dp = 6.dp,
+        maxHeight: Dp = 20.dp,
+    ) {
+        Row(
+            modifier.height(maxHeight).clearAndSetSemantics {},
+            horizontalArrangement = Arrangement.spacedBy(barWidth),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (active && !still) {
+                val t = rememberInfiniteTransition(label = "bars")
+                repeat(count) { i ->
+                    val f = t.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse,
+                            initialStartOffset = StartOffset(i * 120),
+                        ),
+                        label = "bar$i",
+                    ).value
+                    Box(Modifier.width(barWidth).height(lerp(minHeight, maxHeight, f)).clip(RoundedCornerShape(barWidth / 2)).background(color))
+                }
+            } else {
+                repeat(count) {
+                    Box(Modifier.width(barWidth).height((minHeight + maxHeight) / 2).clip(RoundedCornerShape(barWidth / 2)).background(color))
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- honest labels
+
+    /** "Practice run — sample data …" — on every practice screen. */
+    @Composable
+    fun PracticeLabel(modifier: Modifier = Modifier, text: String = PRACTICE_NOTE) {
+        val c = Clarity.colors
+        val shape = RoundedCornerShape(12.dp)
+        Row(
+            modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .border(1.dp, c.separator, shape)
+                .semantics(mergeDescendants = true) {}
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(Icons.Outlined.Info, contentDescription = null, tint = c.secondary, modifier = Modifier.padding(top = 1.dp).size(22.dp))
+            Text(text, style = Clarity.type.footnote, color = c.label)
+        }
+    }
+
+    /** Grey rounded note (e.g. "Arrives in the next update", "Without this, …"). */
+    @Composable
+    fun NoteBox(
+        text: String,
+        modifier: Modifier = Modifier,
+        icon: ImageVector = Icons.Outlined.Info,
+        iconTint: Color? = null,
+        extra: (@Composable () -> Unit)? = null,
+    ) {
+        val c = Clarity.colors
+        Row(
+            modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.group).padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint ?: c.secondary, modifier = Modifier.padding(top = 2.dp).size(24.dp))
+            Column(Modifier.weight(1f)) {
+                Text(text, style = Clarity.type.callout, color = c.label, modifier = Modifier.semantics(mergeDescendants = true) {})
+                extra?.invoke()
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- once-per-screen
+
+    /** Runs [block] the first time a screen shows (not again on rotation). */
+    @Composable
+    fun OnFirstShow(block: () -> Unit) {
+        var shown by rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            if (!shown) {
+                shown = true
+                block()
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- permissions
+
+    fun hasPermission(context: Context, permission: String): Boolean =
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+
+    fun openAppSettings(context: Context) {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+    }
+
+    // ---------------------------------------------------------------- on-screen listening
+
+    /**
+     * Listening without leaving the screen (Confirm's yes/no, "Repeat" on Result, "Continue" on
+     * Welcome …). Asks for the microphone itself if needed. Only reacts to sessions it started.
+     */
+    @Stable
+    class ScreenListener internal constructor(private val voice: Voice, private val feedback: Feedback) {
+        var active by mutableStateOf(false)
+            internal set
+        var problem by mutableStateOf<String?>(null)
+            internal set
+        internal var hasMic: () -> Boolean = { false }
+        internal var askMic: () -> Unit = {}
+
+        fun start() {
+            problem = null
+            if (!hasMic()) {
+                askMic()
+                return
+            }
+            begin()
+        }
+
+        internal fun begin() {
+            problem = null
+            voice.reset()
+            voice.startListening()
+            feedback.cue(Cue.StartListening)
+            active = true
+        }
+
+        /** Talk button: start, or finish the current utterance. */
+        fun toggle() {
+            if (active) voice.stopListening() else start()
+        }
+
+        fun cancel() {
+            if (active) {
+                active = false
+                voice.cancelListening()
+            }
+        }
+    }
+
+    @Composable
+    fun rememberScreenListener(onFailed: (String) -> Unit = {}, onHeard: (String) -> Unit): ScreenListener {
+        val deps = LocalDeps.current
+        val context = LocalContext.current
+        val heard by rememberUpdatedState(onHeard)
+        val failed by rememberUpdatedState(onFailed)
+        val listener = remember { ScreenListener(deps.voice, deps.feedback) }
+        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            if (ok) listener.begin() else listener.problem = MIC_NEEDED
+        }
+        listener.hasMic = { hasPermission(context, Manifest.permission.RECORD_AUDIO) }
+        listener.askMic = { launcher.launch(Manifest.permission.RECORD_AUDIO) }
+
+        val listen by deps.voice.listen.collectAsState()
+        LaunchedEffect(listen) {
+            if (!listener.active) return@LaunchedEffect
+            when (val l = listen) {
+                is Voice.Listen.Heard -> {
+                    listener.active = false
+                    deps.voice.reset()
+                    deps.feedback.cue(Cue.StopListening)
+                    heard(l.text)
+                }
+                is Voice.Listen.Failed -> {
+                    listener.active = false
+                    deps.voice.reset()
+                    listener.problem = l.reason
+                    failed(l.reason)
+                }
+                else -> Unit
+            }
+        }
+        DisposableEffect(Unit) { onDispose { listener.cancel() } }
+        return listener
+    }
+
+    /** One line under the actions: "Listening…" or why listening stopped. Polite live region. */
+    @Composable
+    fun ListenHint(listener: ScreenListener) {
+        val text = when {
+            listener.active -> "Listening…"
+            else -> listener.problem
+        } ?: return
+        Text(
+            text,
+            style = Clarity.type.callout,
+            color = Clarity.colors.label,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+
+    /** 56dp talk button with a listening state (used where the screen has its own voice answer). */
+    @Composable
+    fun TalkButton(description: String, active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+        val c = Clarity.colors
+        Box(
+            modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(if (active) c.accent else c.group)
+                .clickable(role = Role.Button, onClick = onClick)
+                .semantics {
+                    contentDescription = description
+                    stateDescription = if (active) "Listening" else "Not listening"
+                },
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Filled.Mic, contentDescription = null, tint = if (active) c.onAccent else c.label) }
+    }
+
+    /** Wait until the current TTS line has been spoken (so the mic doesn't cut it off). */
+    suspend fun awaitSpeechEnd(voice: Voice) {
+        withTimeoutOrNull(2_000) { voice.speaking.first { it } } ?: return
+        withTimeoutOrNull(15_000) { voice.speaking.first { !it } }
+    }
+
+    /** Anything said on a screen that isn't one of its own phrases is treated as a new request. */
+    fun handleAsRequest(text: String, deps: Deps, nav: AppNav) {
+        deps.voice.stopSpeaking()
+        when (val r = routeForPhrase(text)) {
+            Route.Home -> nav.home()
+            null -> {
+                deps.state.lastRequest = text
+                nav.replace(Route.Working)
+            }
+            else -> nav.replace(r)
+        }
+    }
+
+    // ---------------------------------------------------------------- practice runs
+
+    /** Step 1 practice paths. Sample data only; nothing touches other apps. */
+    enum class Practice(val app: String, val steps: List<String>) {
+        Read("WhatsApp", listOf("Opening WhatsApp", "Finding Mom's chat", "Reading the last message")),
+        Send("WhatsApp", listOf("Opening WhatsApp", "Finding Mom's chat", "Typing your reply")),
+        Pay("Payments", listOf("Opening your payments app", "Filling in the details", "Reaching the PIN screen")),
+        Help("Saathi", listOf("Understanding what you asked")),
+        Other("Saathi", listOf("Understanding what you asked", "Checking what I can do")),
+    }
+
+    private val wordSplit = Regex("[^\\p{L}\\p{M}\\p{N}']+")
+
+    fun words(text: String): Set<String> = text.lowercase().split(wordSplit).filter { it.isNotBlank() }.toSet()
+
+    /**
+     * Picks the practice path from the request words. Payment wins over send, and send over read,
+     * so "send a message" confirms and "pay" always hands over.
+     */
+    fun practiceFor(request: String): Practice {
+        val t = request.lowercase()
+        val w = words(request)
+        fun any(vararg options: String) = options.any { it in w }
+        fun prefix(vararg options: String) = w.any { word -> options.any { word.startsWith(it) } }
+        return when {
+            any("pay", "paying", "paid", "upi", "paise", "paisa", "bhugtan", "पैसे", "भुगतान") || prefix("payment") -> Practice.Pay
+            any("send", "sending", "tell", "bhejo", "bhej", "jawab", "भेजो", "भेज", "जवाब") || prefix("repl") -> Practice.Send
+            any("read", "padho", "padh", "पढ़ो", "पढ़") || prefix("messag", "whatsapp", "msg") ||
+                "व्हाट्सएप" in t || "मैसेज" in t || "संदेश" in t -> Practice.Read
+            any("help", "madad", "मदद") || "what can you do" in t -> Practice.Help
+            else -> Practice.Other
+        }
+    }
+}
