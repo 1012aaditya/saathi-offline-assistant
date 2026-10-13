@@ -34,6 +34,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -94,9 +97,16 @@ fun OrderPickScreen(nav: AppNav) {
     val ease = remember { CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f) }
 
     lateinit var listener: ScreenParts.ScreenListener
+    // Diagnostics (13 Oct: picks registered "from tap" with no human touch): when did a finger last
+    // touch this sheet? A TalkBack double-tap is a click without a touch, so this only logs.
+    val lastTouch = remember { longArrayOf(0L) }
 
     fun answer(index: Int?, source: String) {
         if (finished) return
+        if (source == "tap") {
+            val sinceTouch = SystemClock.uptimeMillis() - lastTouch[0]
+            Log.i("SaathiConfirm", "item pick click: index=${index ?: "cancel"} fingerTouchedSheet=${lastTouch[0] > 0 && sinceTouch < 1500} sinceTouchMs=${if (lastTouch[0] > 0) sinceTouch else -1}")
+        }
         if (source == "tap" && index != null && SystemClock.uptimeMillis() - shownAt < PICK_ARM_MS) {
             Log.i("SaathiConfirm", "item pick tap ignored: sheet appeared ${SystemClock.uptimeMillis() - shownAt} ms ago")
             return
@@ -251,7 +261,17 @@ fun OrderPickScreen(nav: AppNav) {
                     Footnote(footnote)
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val e = awaitPointerEvent(PointerEventPass.Initial)
+                                if (e.type == PointerEventType.Press) lastTouch[0] = SystemClock.uptimeMillis()
+                            }
+                        }
+                    },
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     SecondaryButton(
                         "Cancel",
                         { answer(null, "tap") },

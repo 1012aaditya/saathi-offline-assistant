@@ -321,7 +321,29 @@ class SaathiAccessibilityService : AccessibilityService() {
         return snap.handles.getOrNull(index) as? AccessibilityNodeInfo
     }
 
-    private suspend fun performRaw(action: Action, screen: Screen): Boolean = when (action) {
+    /**
+     * The app actually in front right now. Saathi's own sheets come forward while a task waits for
+     * the user, so an action planned on another app's screen must never land on Saathi's UI: only the
+     * user answers Saathi's questions (13 Oct: a Blinkit item pick was registered with no human tap).
+     */
+    private fun frontPackage(): String? = runCatching { currentRoot()?.packageName?.toString() }.getOrNull()
+
+    private suspend fun performRaw(action: Action, screen: Screen): Boolean {
+        if (action !is OpenApp && action !is Search && action !is Back && action !is Home) {
+            val front = frontPackage()
+            if (front == packageName || front != screen.packageName) {
+                Log.w(TAG, "refused ${action.type}: front app changed since the screen was read (own=${front == packageName})")
+                return false
+            }
+        }
+        if ((action is Back || action is Home) && frontPackage() == packageName) {
+            Log.w(TAG, "refused ${action.type}: Saathi itself is in front")
+            return false
+        }
+        return performRawChecked(action, screen)
+    }
+
+    private suspend fun performRawChecked(action: Action, screen: Screen): Boolean = when (action) {
         is Tap -> tap(screen, action.index)
         is TypeText -> type(screen, action)
         is Scroll -> scroll(action.direction)
@@ -342,6 +364,10 @@ class SaathiAccessibilityService : AccessibilityService() {
             depth++
         }
         if (target != null && target.isClickable) {
+            if (target.packageName?.toString() == packageName) {
+                Log.w(TAG, "refused click on Saathi's own UI")
+                return false
+            }
             if (target != node && !DeviceBridge.allowsParentTap(asElement(target), screen.packageName)) return false
             if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
         }
@@ -423,8 +449,13 @@ class SaathiAccessibilityService : AccessibilityService() {
         return runCatching { startActivity(intent) }.isSuccess
     }
 
-    private suspend fun tapAt(p: Point): Boolean =
-        gesture(Path().apply { moveTo(p.x.toFloat(), p.y.toFloat()) }, 60)
+    private suspend fun tapAt(p: Point): Boolean {
+        if (frontPackage() == packageName) {
+            Log.w(TAG, "refused coordinate tap: Saathi itself is in front")
+            return false
+        }
+        return gesture(Path().apply { moveTo(p.x.toFloat(), p.y.toFloat()) }, 60)
+    }
 
     private suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float): Boolean =
         gesture(Path().apply { moveTo(x1, y1); lineTo(x2, y2) }, 400)
