@@ -8,6 +8,24 @@ import app.saathi.safety.CommandContext
  * Matching itself is the safety port's matcher (payeeMatches, token_set_ratio >= 80).
  */
 object Names {
+    /**
+     * The user's own chat ("Message yourself"): "message myself …", "send it to me", "mujhe khud
+     * ko bolo …". WhatsApp shows that chat as "<your name> (You)" (or "You"); see [WhatsApp.isSelfChat].
+     */
+    const val SELF = "Myself"
+
+    private val SELF_PHRASES: Set<String> = setOf(
+        "myself", "me", "my self", "self", "my own chat", "my own number", "yourself",
+        "khud", "khud ko", "mujhe khud", "mujhe khud ko", "apne aap", "apne aap ko", "apne aapko", "apne ko", "khud ke liye",
+        "खुद", "ख़ुद", "खुद को", "मुझे खुद", "मुझे खुद को", "अपने आप", "अपने आप को", "अपने आपको",
+    )
+
+    /** True when [phrase] (a captured recipient) means the user themself. */
+    fun isSelf(phrase: String): Boolean {
+        val p = phrase.trim().lowercase().replace(Regex("\\s+"), " ").trim(',', '.', ':')
+        return p in SELF_PHRASES || p == SELF.lowercase()
+    }
+
     /** Relation words people save contacts under, in both scripts. One group = same person. */
     private val RELATIONS: List<Set<String>> = listOf(
         setOf("mom", "mommy", "mummy", "mumma", "mamma", "maa", "mother", "mum", "amma", "ammi", "मम्मी", "माँ", "मां", "मम्मा", "अम्मा", "अम्मी"),

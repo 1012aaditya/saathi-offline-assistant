@@ -65,7 +65,12 @@ class Voice(private val context: Context) {
     sealed interface Listen {
         data object Idle : Listen
         data class Hearing(val partial: String, val level: Float) : Listen
-        data class Heard(val text: String) : Listen
+        /**
+         * [msAfterSpeech]: how long after the end of Saathi's last speech the transcript arrived
+         * ([app.saathi.agent.Heard.LONG_AFTER] if Saathi hadn't spoken). Answer sheets need it
+         * ([app.saathi.agent.VoiceAnswer]).
+         */
+        data class Heard(val text: String, val msAfterSpeech: Long = app.saathi.agent.Heard.LONG_AFTER) : Listen
 
         /** [reason] is the spoken/shown sentence (unchanged strings); [code] says why, for logic. */
         data class Failed(val reason: String, val code: FailCode = FailCode.Other) : Listen
@@ -470,6 +475,7 @@ class Voice(private val context: Context) {
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                 // Saathi spoke during / just before this session, or it came too soon after: not the user.
                 val why = interlock.judge(id)
+                val after = interlock.msSinceSpeechEnded() ?: app.saathi.agent.Heard.LONG_AFTER
                 interlock.close(id)
                 if (why != EchoGuard.Reason.NONE) {
                     Log.i(TAG, "speech in: result discarded ($why), length ${text.length}")
@@ -480,7 +486,7 @@ class Voice(private val context: Context) {
                     _offlinePack.value = OfflinePack.Installed // it just worked on-device
                     publishMode()
                 }
-                _listen.value = if (text.isBlank()) Listen.Failed("I didn't catch that.", FailCode.NoMatch) else Listen.Heard(text)
+                _listen.value = if (text.isBlank()) Listen.Failed("I didn't catch that.", FailCode.NoMatch) else Listen.Heard(text, after)
             }
             override fun onPartialResults(partial: Bundle?) {
                 if (stale()) return

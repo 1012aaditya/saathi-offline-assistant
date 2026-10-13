@@ -99,6 +99,9 @@ class AgentLoop(
         const val LOOP_REPEATS = 3
         const val OPEN_WAIT_MS = 8_000L // cold-starting an app took ~3.5 s on the tablet
         const val TAP_WAIT_MS = 3_000L
+        const val APP_POLL_MS = 400L
+        const val SETTLE_MS = 600L
+        const val SETTLE_TRIES = 3
 
         /** No answer on the Confirm screen for this long (app left, recogniser stuck) = cancel. */
         const val CONFIRM_TIMEOUT_MS = 90_000L
@@ -250,6 +253,8 @@ class AgentLoop(
             }
 
             val plan = flow.next(screen)
+            // A shorter reading of the spoken name / the user's own chat: the gate's names (R5) follow the flow's.
+            flow.contextNames?.let { if (it != ctx.names) ctx.names = it }
             writeAhead(flow, screen)
             when (plan) {
                 is Plan.Done -> {
@@ -308,7 +313,7 @@ class AgentLoop(
                     }
                     when (val r = device.execute(action, screen, ctx) { say(plan.say) }) {
                         is Exec.Ran -> {
-                            val changed = device.waitForChange(screen.hash, if (action is OpenApp) OPEN_WAIT_MS else TAP_WAIT_MS)
+                            val changed = if (action is OpenApp) waitForApp(action.app, screen.hash) else device.waitForChange(screen.hash, TAP_WAIT_MS)
                             if (r.ok) flow.executed(action, changed)
                             val sig = action.toString()
                             recent.addLast(sig)
@@ -452,8 +457,39 @@ class AgentLoop(
         if (now?.packageName == packageName) return
         val alias = Apps.APP_ALIASES.entries.firstOrNull { it.value == packageName }?.key ?: return
         if (device.execute(OpenApp(alias), now ?: return, ctx) is Exec.Ran) {
-            device.waitForChange(now.hash, OPEN_WAIT_MS)
+            waitForApp(alias, now.hash)
         }
+    }
+
+    /**
+     * After an OpenApp: wait until that app is really in front, not just until the screen hash
+     * changes. Saathi's own screen changes too (the narration line it just showed), which used to
+     * end the wait at once; the next look then still saw Saathi and counted another failed open
+     * (13 Oct, 22:50: "I couldn't open that app."). Then give its first screen a moment to settle.
+     * True once the app is in front; false on timeout.
+     */
+    private suspend fun waitForApp(alias: String, oldHash: String): Boolean {
+        val pkg = Apps.APP_ALIASES[alias.lowercase().trim()] ?: return device.waitForChange(oldHash, OPEN_WAIT_MS)
+        var hash = oldHash
+        var polls = (OPEN_WAIT_MS / APP_POLL_MS).toInt()
+        while (polls-- > 0) {
+            val s = device.snapshot()
+            if (s?.packageName == pkg) {
+                // In front. Its first frame has nothing to tap yet (a splash): wait for real content.
+                if (s.elements.none { it.clickable || it.editable } && polls > 0) {
+                    device.waitForChange(s.hash, APP_POLL_MS)
+                    continue
+                }
+                // Then let it settle while it is still changing (the list drawing in).
+                var h = s.hash
+                repeat(SETTLE_TRIES) { if (!device.waitForChange(h, SETTLE_MS)) return true; h = device.snapshot()?.hash ?: return true }
+                return true
+            }
+            if (s != null) hash = s.hash
+            device.waitForChange(hash, APP_POLL_MS)
+        }
+        log("open: $alias not in front after ${OPEN_WAIT_MS / 1000} s")
+        return false
     }
 
     /** Save the record BEFORE the flow's draft is typed (the flow sets [Flow.draft] when it plans the typing). */
@@ -509,7 +545,12 @@ object Flows {
         }
         is Command.Reply -> if (command.contact != null && command.text != null) {
             val r = Recipients.of(command.contact, phoneBook)
-            ReplyFlow(command.contact, command.text, r.context(command.utterance), t, r)
+            // Shorter readings of an unsure name ("Aaditya Goel" -> "Aaditya"), each with its own text.
+            val fallbacks = command.alternatives.filter { it.text != null }.map { a ->
+                val ra = Recipients.of(a.contact, phoneBook)
+                ChatTarget(a.contact, ra.queries, ra.inPhone, ra.context(command.utterance).names, a.text)
+            }
+            ReplyFlow(command.contact, command.text, r.context(command.utterance), t, r, fallbacks)
         } else null
         is Command.UnreadSummary -> UnreadFlow(t)
         is Command.ScreenSummary -> ScreenSummaryFlow(captured, capturedLabel.ifEmpty { captured?.packageName.orEmpty() }, gate, t)

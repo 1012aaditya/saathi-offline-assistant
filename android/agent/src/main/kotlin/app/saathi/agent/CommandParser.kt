@@ -276,42 +276,127 @@ object CommandParser {
 
     // -- helpers --------------------------------------------------------------------------------
 
-    /** "reply to Rahul Sharma: on my way" -> ("Rahul Sharma", "on my way"). */
+    /** A name is at most this many words when Saathi has to guess where it ends. */
+    private const val MAX_GUESS_WORDS = 3
+
+    /** A spoken name (unless it is a saved one, matched whole) is at most this many words. */
+    private const val MAX_NAME_WORDS = 3
+
+    /**
+     * "<name> saying|that|ki|कि|bolo <message>" (also ":" "," " - "): everything before the joining
+     * word is the name ("send a message to Aaditya Goel saying saathi self test").
+     */
+    private val SEP = Regex(
+        "^(.{1,60}?)\\s*(?::|,|\\s-\\s|\\s+(?:that|saying|ki|कि|bolo|bol do|kaho|keh do|kah do|likho|बोलो|बोल दो|कहो|कह दो|लिखो)\\s+)(.*)$",
+        I,
+    )
+
+    /**
+     * Words that start or fill a message, never the 2nd / 3rd word of a name ("Mom I'm late",
+     * "Rahul kal milte hain"). A guessed name stops before them.
+     */
+    private val MESSAGE_WORDS = setOf(
+        "i", "i'm", "im", "i'll", "ill", "i've", "i'd", "we", "we're", "we'll", "you", "you're", "u", "your", "he", "she",
+        "they", "it", "it's", "its", "this", "that", "there", "here", "am", "is", "are", "was", "were", "be", "been", "will",
+        "can", "could", "would", "should", "shall", "do", "did", "does", "don't", "dont", "not", "no", "yes", "ok", "okay",
+        "hi", "hello", "hey", "call", "come", "coming", "came", "reached", "reach", "reaching", "going", "go", "gone",
+        "leaving", "left", "on", "at", "in", "of", "for", "with", "by", "about", "a", "an", "or", "but", "so", "thanks",
+        "thank", "sorry", "good", "morning", "night", "evening", "where", "when", "why", "how", "which", "see", "meet",
+        "lunch", "dinner", "home", "office", "late", "early", "now", "soon", "today", "tomorrow", "tonight", "yesterday",
+        "back", "wait", "done", "get", "got", "need", "want", "love", "miss", "test", "testing",
+        "main", "mai", "mein", "mujhe", "hum", "aap", "tum", "tu", "ghar", "aa", "aao", "aaja", "aaya", "aayi", "raha",
+        "rahi", "rahe", "hoon", "hu", "hun", "hai", "hain", "ho", "tha", "thi", "kal", "aaj", "jaldi", "der", "se", "ko",
+        "ka", "ki", "ke", "kya", "kab", "kahan", "kyun", "kaise", "theek", "thik", "accha", "acha", "achha", "haan",
+        "nahi", "nahin", "chalo", "chal", "khana", "khaana", "bata", "pahunch", "pahuch", "gaya", "gayi", "ja", "jaa",
+        "jao", "kar", "karo", "de", "le", "lo", "phone", "milte", "milo", "mil",
+        "मैं", "मुझे", "हम", "आप", "तुम", "घर", "आ", "रहा", "रही", "रहे", "हूँ", "हूं", "है", "हैं", "हो", "था", "थी", "कल",
+        "आज", "से", "को", "का", "की", "के", "क्या", "कब", "कहाँ", "ठीक", "अच्छा", "हाँ", "नहीं", "चलो", "खाना", "पहुँच",
+        "गया", "गई", "जा", "कर", "दो", "लो", "मिलते",
+    )
+
+    private fun lowerWord(w: String): String = w.lowercase().trim(',', '.', ':', '!', '?', '"', '“', '”')
+
+    /** A guessed name's 2nd / 3rd word can't be a message word, filler or non-name. */
+    private fun plausibleName(words: List<String>): Boolean =
+        words.drop(1).none { lowerWord(it) in MESSAGE_WORDS || lowerWord(it) in FILLER || lowerWord(it) in NOT_NAMES }
+
+    /**
+     * "reply to Rahul Sharma: on my way" -> ("Rahul Sharma", "on my way"). When the end of the name
+     * isn't marked ("message Aaditya Goel saathi self test"), the longest plausible name comes
+     * first and the shorter ones are [Command.Reply.alternatives]: a saved name (phone contacts,
+     * trusted contacts) is taken whole and needs none; a guess is checked against WhatsApp's
+     * search, longest first ([ChatOpener]).
+     */
     private fun splitNameText(rest0: String, known: List<String>): Command.Reply? {
         val rest = rest0.trim()
         if (rest.isEmpty()) return null
-        val lower = rest.lowercase()
-        for (k in known.sortedByDescending { it.length }) {
-            val kl = k.lowercase().trim()
-            if (kl.isEmpty() || !lower.startsWith(kl)) continue
-            val after = rest.substring(kl.length)
-            if (after.isEmpty() || !after[0].isLetterOrDigit()) {
-                return Command.Reply(k.trim(), cleanText(after), "")
+        // 1. A joining word: everything before it is the name.
+        SEP.matchEntire(rest)?.let { m ->
+            val before = m.groupValues[1].trim()
+            val bw = before.split(Regex("\\s+")).filter { it.isNotEmpty() }
+            if (bw.size <= MAX_NAME_WORDS && (Names.isSelf(before) || plausibleName(stripLeadingFillers(bw)))) {
+                // The joining word marks where the name ends: no other reading ("Mom we said that …"
+                // isn't a name: "we" is a message word, so it falls through to the guesses below).
+                val name = cleanName(before, known)
+                if (name != null) return Command.Reply(name, cleanText(m.groupValues[2]), "")
             }
         }
-        val sep = Regex("^(.{1,40}?)\\s*(?::|,|\\s-\\s|\\s+(?:that|saying|ki|कि)\\s+)(.*)$", RegexOption.IGNORE_CASE).matchEntire(rest)
-        if (sep != null && wordCount(sep.groupValues[1]) <= 3) {
-            val name = cleanName(sep.groupValues[1], known) ?: return null
-            return Command.Reply(name, cleanText(sep.groupValues[2]), "")
+        // 2. No joining word: every plausible split, longest name first.
+        val splits = guesses(rest, known)
+        val first = splits.firstOrNull() ?: return null
+        val alts = if (isKnown(first.contact, known)) emptyList() else splits.drop(1)
+        return Command.Reply(first.contact, first.text, "", alts)
+    }
+
+    private fun isKnown(name: String, known: List<String>): Boolean = known.any { it.trim().equals(name.trim(), ignoreCase = true) }
+
+    private fun stripLeadingFillers(words: List<String>): List<String> = words.dropWhile { lowerWord(it) in FILLER }
+
+    /** Saved names that [rest] starts with (whole words), longest first, each with the text after it. */
+    private fun knownPrefixes(rest: String, known: List<String>): List<NameSplit> {
+        val lower = rest.lowercase()
+        return known.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+            .sortedByDescending { it.length }
+            .filter { k ->
+                val kl = k.lowercase()
+                lower.startsWith(kl) && (lower.length == kl.length || !lower[kl.length].isLetterOrDigit())
+            }
+            .map { k -> NameSplit(k, cleanText(rest.substring(k.length))) }
+    }
+
+    /** Candidate (name, text) splits without a joining word, longest name first; saved names win ties. */
+    private fun guesses(rest: String, known: List<String>): List<NameSplit> {
+        val words = stripLeadingFillers(rest.split(Regex("\\s+")).filter { it.isNotEmpty() })
+        if (words.isEmpty()) return emptyList()
+        val out = mutableListOf<NameSplit>()
+        out += knownPrefixes(words.joinToString(" "), known)
+        for (n in minOf(MAX_GUESS_WORDS, words.size) downTo 1) {
+            val nameWords = words.take(n)
+            if (!plausibleName(nameWords)) continue
+            val name = cleanName(nameWords.joinToString(" "), emptyList()) ?: continue
+            if (name != Names.SELF && wordCount(name) != n) continue // a filler was trimmed: the shorter split covers it
+            out += NameSplit(name, cleanText(words.drop(n).joinToString(" ")))
         }
-        val words = rest.split(Regex("\\s+"))
-        val name = cleanName(words.first(), known) ?: return null
-        return Command.Reply(name, cleanText(words.drop(1).joinToString(" ")), "")
+        return out.distinctBy { it.contact.lowercase() }.sortedByDescending { wordCount(it.contact) }
     }
 
     /** Strip filler words; reject non-names. Prefers a saved contact name if it ends the capture. */
     internal fun cleanName(raw: String, known: List<String>): String? {
         var s = raw.trim().trim(',', ':', '.', '"', '“', '”').replace(Regex("'s$"), "")
         s = s.replace(Regex("\\s+(?:a\\s+)?(?:whatsapp\\s+)?(?:message|msg|text|reply)$", RegexOption.IGNORE_CASE), "")
+        // The user's own chat: "myself", "to me", "mujhe khud".
+        val bare = s.lowercase().replace(Regex("^(?:to|ko|को)\\s+"), "").replace(Regex("\\s+(?:ko|को)$"), "")
+        if (Names.isSelf(bare)) return Names.SELF
         val lower = s.lowercase()
         known.sortedByDescending { it.length }.firstOrNull { k ->
             val kl = k.lowercase().trim()
-            kl.isNotEmpty() && (lower == kl || lower.endsWith(" $kl"))
+            // Only filler before it ("WhatsApp par Mummy"): never cut a longer name ("Aaditya Goel" isn't "Goel").
+            kl.isNotEmpty() && (lower == kl || (lower.endsWith(" $kl") && lower.removeSuffix(kl).trim().split(Regex("\\s+")).all { it in FILLER }))
         }?.let { return it.trim() }
         val words = s.split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
         while (words.isNotEmpty() && words.first().lowercase() in FILLER) words.removeAt(0)
         while (words.isNotEmpty() && words.last().lowercase() in FILLER) words.removeAt(words.size - 1)
-        if (words.isEmpty() || words.size > 3) return null
+        if (words.isEmpty() || words.size > MAX_NAME_WORDS) return null
         if (words.any { it.lowercase() in NOT_NAMES }) return null
         // "group" alone isn't a name, but group chats are ("Family Group ko bolo …").
         if (words.size == 1 && words[0].lowercase() in setOf("group", "groups", "ग्रुप")) return null

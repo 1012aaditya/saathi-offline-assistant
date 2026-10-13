@@ -50,6 +50,9 @@ class Deps(val state: AppState, val feedback: Feedback, val voice: Voice)
 val LocalDeps = staticCompositionLocalOf<Deps> { error("Deps not provided") }
 
 class AppNav(private val controller: NavHostController) {
+    /** The screen showing now (null before the graph is ready). */
+    fun current(): Route? = controller.currentDestination?.route?.let { r -> Route.entries.firstOrNull { it.name == r } }
+
     fun go(route: Route) = controller.navigate(route.name) { launchSingleTop = true }
     fun back() { if (!controller.popBackStack()) go(Route.Home) }
     /** Clears the stack back to Home (every screen has a labelled way home). */

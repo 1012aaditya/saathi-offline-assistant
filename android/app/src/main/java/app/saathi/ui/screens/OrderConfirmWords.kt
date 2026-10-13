@@ -35,7 +35,10 @@ class OrderConfirmWords(order: OrderSummary, lang: Lang) {
     val nothingDone: String = if (empty) "Nothing was removed." else "Nothing was ordered."
 
     /** Everything the sheet shows or says (a reply repeating it is an echo, not an answer). */
-    val sheetWords: List<String> = listOf(question, title, note, confirmLabel, confirmDescription, cancelDescription, cancelSpoken, unsureSpoken, status, total) + lines
+    val sheetWords: List<String> = listOf(
+        question, title, note, confirmLabel, confirmDescription, cancelDescription, cancelSpoken, unsureSpoken, status, total,
+        undoing, cancellingStatus, nothingDone,
+    ) + lines
 
     companion object {
         fun of(req: ConfirmRequest?, lang: Lang): OrderConfirmWords? = req?.order?.let { OrderConfirmWords(it, lang) }

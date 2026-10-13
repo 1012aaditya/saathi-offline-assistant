@@ -63,10 +63,15 @@ import kotlinx.coroutines.launch
 /**
  * Grocery "which one?" sheet (a close call between products, or the size). Cancel is first,
  * focused and the default. Each option is the product's name, size and price exactly as Blinkit
- * shows them (hard rule 4). Voice: a name or "first / second" ([PickDialog]); unclear is asked once
- * more, then cancels; silence twice, Back, or leaving the screen = Cancel. Nothing is ordered from
- * here: ordering still needs the read-back and a clear yes. Option taps are ignored in the first
- * [PICK_ARM_MS] after the sheet appears (a touch meant for the app underneath).
+ * shows them (hard rule 4). Voice: through the shared answer pipeline ([PickDialog] ->
+ * VoiceAnswer): a position ("first", "doosra", "2") or a name said on its own; unclear is asked
+ * once more, then cancels; silence twice, Back, or leaving the screen = Cancel. Nothing is
+ * ordered from here: ordering still needs the read-back and a clear yes. Option taps are ignored
+ * in the first [PICK_ARM_MS] after the sheet appears (a touch meant for the app underneath).
+ *
+ * 13 Oct, 22:51: this sheet took a 54-character transcript naming one option (no human answer)
+ * as the pick. The status line no longer repeats the options (TalkBack reads it aloud while the
+ * mic may be open), no text here has a position word, and every text is an echo source.
  */
 @Composable
 fun OrderPickScreen(nav: AppNav) {
@@ -121,21 +126,32 @@ fun OrderPickScreen(nav: AppNav) {
     }
 
     val hint = req?.hint.orEmpty()
-    // What the sheet says besides the options (an echo of these is not an answer).
+    val status = "Needs your answer: which one? Cancel is selected."
+    val cancelDescription = "Cancel. This is the default. Nothing will be added."
+    // No position in these ("Option 1"): a "first" must never be in what the sheet says.
+    val optionDescriptions = options.map { "$it. Adds it to the cart; I'll still ask before ordering." }
+    val footnote = "Names, sizes and prices exactly as Blinkit shows them. Nothing is ordered without your yes."
+    // EVERYTHING the sheet says or shows, options included: an echo of any of it is not an answer.
     val sheetWords = listOf(
         question,
         "Sorry, I'm not sure. $question",
-        "Needs your answer. $question Cancel is selected.",
-        "Cancel. This is the default. Nothing will be added.",
+        status,
+        cancelDescription,
         hint,
-    )
+        footnote,
+        "Cancel", "Working", "Blinkit",
+    ) + options + optionDescriptions + choosing?.lines.orEmpty()
 
-    listener = ScreenParts.rememberScreenListener(
-        onFailed = { reason -> if (reason == ScreenParts.NOT_CAUGHT) askAgainOrCancel(dialog.silence()) },
-        genericEchoCheck = false, // the dialog's own check below
-    ) { text ->
-        val next = dialog.hear(text, echoSources = deps.voice.recentPrompts(30_000) + sheetWords)
-        Log.i("SaathiConfirm", "item pick voice answer: ${next::class.simpleName} (unclear so far ${dialog.unclear}), length ${text.length}")
+    listener = ScreenParts.rememberAnswerListener(
+        sheetTexts = sheetWords,
+        onUnclear = { askAgainOrCancel(dialog.silence()) },
+    ) { heard, sources ->
+        val next = dialog.hear(heard, sources)
+        Log.i(
+            "SaathiConfirm",
+            "item pick voice answer: ${next::class.simpleName} (${dialog.lastWhy}, unclear so far ${dialog.unclear}), " +
+                "length ${heard.text.length}, ${ScreenParts.afterSpeech(heard)}",
+        )
         when (next) {
             is PickDialog.Next.Picked -> answer(next.index, "voice")
             PickDialog.Next.Cancel -> answer(null, "voice")
@@ -177,10 +193,10 @@ fun OrderPickScreen(nav: AppNav) {
 
     BackHandler { if (req == null) nav.home() else answer(null, "back") }
 
-    val status = if (listener.active) "Listening" else "Needs your answer. $question Cancel is selected."
+    val statusNow = if (listener.active) "Listening" else status
 
     Box(Modifier.fillMaxSize().background(c.screen)) {
-        StatusLine(status)
+        StatusLine(statusNow)
 
         Column(
             Modifier
@@ -232,7 +248,7 @@ fun OrderPickScreen(nav: AppNav) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     AskCapsule()
                     Text(question, style = Clarity.type.title, color = c.label, modifier = Modifier.semantics { heading() })
-                    Footnote("Names, sizes and prices exactly as Blinkit shows them. Nothing is ordered without your yes.")
+                    Footnote(footnote)
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -240,14 +256,14 @@ fun OrderPickScreen(nav: AppNav) {
                         "Cancel",
                         { answer(null, "tap") },
                         modifier = Modifier.focusRequester(cancelFocus),
-                        description = "Cancel. This is the default. Nothing will be added.",
+                        description = cancelDescription,
                         tag = "Default",
                     )
                     options.forEachIndexed { i, label ->
                         SecondaryButton(
                             label,
                             { answer(i, "tap") },
-                            description = "Option ${i + 1}: $label. Adds it to the cart; I'll still ask before ordering.",
+                            description = optionDescriptions[i],
                         )
                     }
                 }

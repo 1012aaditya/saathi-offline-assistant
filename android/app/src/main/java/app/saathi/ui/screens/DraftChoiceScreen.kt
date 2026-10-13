@@ -137,6 +137,9 @@ fun DraftChoiceScreen(nav: AppNav) {
         canChange -> "Say “Keep”, “Replace”, “Add” or “Send it” (or rehne do, badal do, jod do, bhej do). If I'm not sure, I'll ask again, then keep it."
         else -> "Say “Keep” or “Send it” (or rehne do, bhej do). If I'm not sure, I'll ask again, then keep it."
     }
+    // TalkBack reads the status line aloud (maybe while the mic is open): it doesn't repeat the
+    // choices; Saathi's spoken question does.
+    val draftStatus = "Needs your answer: $chat's chat already has unsent text. Keep is selected."
     // Everything Saathi says or shows while waiting: a reply that repeats it is an echo, not a choice.
     val sheetWords = listOf(
         question,
@@ -147,6 +150,7 @@ fun DraftChoiceScreen(nav: AppNav) {
         "Your new message: “${req?.newMessage.orEmpty()}”",
         t.draftCantChange,
         "Needs your answer. $question Keep is selected.",
+        draftStatus,
         "Keep it. This is the default. I won't change or send anything.",
         "Replace with my message",
         "Replace it with your new message. I'll read it to you before sending. If you say no, I'll put your text back.",
@@ -155,14 +159,16 @@ fun DraftChoiceScreen(nav: AppNav) {
         "Send it as it is",
         "Send this text as it is. I'll read it to you and ask before sending.",
         sayHint,
+        "Keep it", "Working", "WhatsApp",
     )
 
-    listener = ScreenParts.rememberScreenListener(
-        onFailed = { reason -> if (reason == ScreenParts.NOT_CAUGHT) askAgainOrKeep(dialog.silence()) },
-        genericEchoCheck = false, // the dialog's own check below
-    ) { text ->
-        val next = dialog.hear(text, canChange, echoSources = deps.voice.recentPrompts(30_000) + sheetWords)
-        Log.i("SaathiConfirm", "draft voice answer: $next (unclear so far ${dialog.unclear}), length ${text.length}")
+    // The shared answer pipeline (VoiceAnswer): a change is named on this sheet, so it must be said on its own.
+    listener = ScreenParts.rememberAnswerListener(
+        sheetTexts = sheetWords,
+        onUnclear = { askAgainOrKeep(dialog.silence()) },
+    ) { heard, sources ->
+        val next = dialog.hear(heard, canChange, sources)
+        Log.i("SaathiConfirm", "draft voice answer: $next (${dialog.lastWhy}, unclear so far ${dialog.unclear}), length ${heard.text.length}, ${ScreenParts.afterSpeech(heard)}")
         when (next) {
             DraftChoiceDialog.Next.KEEP -> answer(DraftChoice.KEEP, "voice")
             DraftChoiceDialog.Next.REPLACE -> answer(DraftChoice.REPLACE, "voice")
@@ -211,7 +217,7 @@ fun DraftChoiceScreen(nav: AppNav) {
 
     val status = when {
         listener.active -> "Listening"
-        else -> "Needs your answer. $question Keep is selected."
+        else -> draftStatus
     }
 
     Box(Modifier.fillMaxSize().background(c.screen)) {

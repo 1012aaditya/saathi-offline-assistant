@@ -30,6 +30,21 @@ object WhatsApp {
 
     fun isWhatsApp(s: Screen): Boolean = s.packageName == PKG
 
+    // -- the user's own chat ("Message yourself") ------------------------------------------------
+
+    /** WhatsApp marks the user's own chat with a suffix: "Aaditya Goel (You)" (Hindi: "(आप)"). */
+    private val SELF_SUFFIX = Regex("\\s*[(（]\\s*(you|आप|मैं)\\s*[)）]\\s*$", RegexOption.IGNORE_CASE)
+    private val SELF_NAMES = setOf("you", "आप", "message yourself", "खुद को मैसेज करें", "ख़ुद को मैसेज करें")
+
+    /** The person's name without WhatsApp's own-chat suffix: "Aaditya Goel (You)" -> "Aaditya Goel". */
+    fun personName(text: String): String = text.replace(SELF_SUFFIX, "").trim().ifEmpty { text.trim() }
+
+    /** True for the user's own chat as WhatsApp shows it: "Aaditya Goel (You)", "You", "Message yourself". */
+    fun isSelfChat(text: String): Boolean {
+        val t = text.trim()
+        return SELF_SUFFIX.containsMatchIn(t) || t.lowercase() in SELF_NAMES
+    }
+
     fun byRid(s: Screen, rid: String): Element? = s.elements.firstOrNull { it.rid == rid }
 
     fun onChatList(s: Screen): Boolean =

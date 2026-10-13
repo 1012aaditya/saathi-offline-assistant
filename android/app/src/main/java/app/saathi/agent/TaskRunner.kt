@@ -107,7 +107,7 @@ object TaskRunner {
 
     fun title(command: Command): String = when (command) {
         is Command.ReadLast -> "Read ${command.contact ?: "a"}'s last message"
-        is Command.Reply -> "Reply to ${command.contact ?: "someone"}"
+        is Command.Reply -> if (command.contact == Names.SELF) "Message yourself" else "Reply to ${command.contact ?: "someone"}"
         is Command.UnreadSummary -> "Who has new messages"
         is Command.ScreenSummary -> "What's on screen"
         is Command.OpenApp -> "Open ${appName(command.packageName)}"

@@ -191,14 +191,18 @@ fun ConfirmScreen(nav: AppNav) {
         hint,
         "Cancelling. Not sending.",
         "I wasn't sure, so I'm cancelling. Not sending.",
-    ) + orderWords?.sheetWords.orEmpty()
+        "Sorry, I'm not sure. $confirmQuestion",
+        "Cancel", "Send", "Working", "WhatsApp", "Blinkit",
+        undoing,
+    ) + orderWords?.sheetWords.orEmpty() + confirming?.lines.orEmpty()
 
-    listener = ScreenParts.rememberScreenListener(
-        onFailed = { reason -> if (reason == ScreenParts.NOT_CAUGHT) askAgainOrCancel(dialog.silence()) },
-        genericEchoCheck = false, // the dialog's own, stricter check below
-    ) { text ->
-        val next = dialog.hear(text, echoSources = deps.voice.recentPrompts(30_000) + sheetWords)
-        Log.i("SaathiConfirm", "voice answer: $next (unclear so far ${dialog.unclear}), length ${text.length}")
+    // The shared answer pipeline (VoiceAnswer): timing, length, echo of everything above, yes word never in the prompt.
+    listener = ScreenParts.rememberAnswerListener(
+        sheetTexts = sheetWords,
+        onUnclear = { askAgainOrCancel(dialog.silence()) },
+    ) { heard, sources ->
+        val next = dialog.hear(heard, sources)
+        Log.i("SaathiConfirm", "voice answer: $next (${dialog.lastWhy}, unclear so far ${dialog.unclear}), length ${heard.text.length}, ${ScreenParts.afterSpeech(heard)}")
         when (next) {
             ConfirmDialog.Next.SEND -> send("voice")
             ConfirmDialog.Next.CANCEL -> cancel()

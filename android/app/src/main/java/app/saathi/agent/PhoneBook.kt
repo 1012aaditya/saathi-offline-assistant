@@ -41,7 +41,8 @@ object PhoneBook {
 
     /** A task names a person, contacts aren't allowed, and Saathi hasn't asked before: ask now (once). */
     fun shouldAsk(context: Context, command: Command): Boolean {
-        val namesSomeone = (command is Command.Reply && command.contact != null) || (command is Command.ReadLast && command.contact != null)
+        val namesSomeone = (command is Command.Reply && command.contact != null && command.contact != Names.SELF) ||
+            (command is Command.ReadLast && command.contact != null && command.contact != Names.SELF)
         return namesSomeone && !allowed(context) && !asked(context)
     }
 

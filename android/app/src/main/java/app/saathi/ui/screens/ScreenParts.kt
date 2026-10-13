@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.core.content.ContextCompat
 import app.saathi.agent.EchoGuard
+import app.saathi.agent.Heard
 import app.saathi.agent.Requests
 import app.saathi.feedback.Cue
 import app.saathi.feedback.Feedback
@@ -348,20 +349,82 @@ object ScreenParts {
     const val NOT_CAUGHT = "I didn't catch that."
 
     /**
-     * [genericEchoCheck]: screens whose answers don't send or change anything (Welcome, Result,
-     * Working …) drop a transcript that repeats what Saathi said in the last 15 s
-     * ([EchoGuard.looksLikeEcho]) and report it as [NOT_CAUGHT]. The Confirm and Draft choice
-     * sheets pass false and apply their own stricter checks with the sheet's words.
+     * For screens whose spoken words don't answer a question (Welcome, Result, Working, Photo …):
+     * a transcript that repeats what Saathi said in the last 15 s ([EchoGuard.looksLikeEcho]) is
+     * dropped and reported as [NOT_CAUGHT]. Short commands ("continue", "repeat") always pass;
+     * timing guards them.
+     *
+     * NEVER for a sheet that waits for an answer (yes / no, a choice, a pick): those use
+     * [rememberAnswerListener]. AnswerSheetsTest enforces it.
      */
     @Composable
     fun rememberScreenListener(
         onFailed: (String) -> Unit = {},
-        genericEchoCheck: Boolean = true,
         onHeard: (String) -> Unit,
     ): ScreenListener {
         val deps = LocalDeps.current
-        val context = LocalContext.current
         val heard by rememberUpdatedState(onHeard)
+        return rememberListener(onFailed) { l ->
+            if (EchoGuard.looksLikeEcho(l.text, deps.voice.recentPrompts(15_000))) {
+                Log.i("SaathiVoice", "screen listener: dropped an echo of Saathi's own words, length ${l.text.length}")
+                NOT_CAUGHT
+            } else {
+                heard(l.text)
+                null
+            }
+        }
+    }
+
+    /**
+     * THE way an answer sheet (Confirm, order / empty-cart confirm, Draft choice, "Which Rahul?",
+     * "Open Camera?", grocery "which one?") hears its answer. Listening goes through Voice's
+     * interlock (never while Saathi speaks, and only [EchoGuard.LISTEN_AFTER_SPEECH_MS] after);
+     * each transcript comes with how long after Saathi's speech it was heard ([Heard]) and with
+     * the echo sources: what Saathi said in the last 30 s + [sheetTexts] (every title, question,
+     * option, button label, content description and hint the sheet shows) + the listening chrome.
+     * The sheet passes both to its dialog's `hear`, i.e. the shared [app.saathi.agent.VoiceAnswer]
+     * pipeline. [onUnclear]: nothing usable was heard (silence, an error, a discarded echo).
+     */
+    @Composable
+    fun rememberAnswerListener(
+        sheetTexts: List<String>,
+        onUnclear: () -> Unit,
+        onAnswer: (heard: Heard, echoSources: List<String>) -> Unit,
+    ): ScreenListener {
+        val deps = LocalDeps.current
+        val answer by rememberUpdatedState(onAnswer)
+        val unclear by rememberUpdatedState(onUnclear)
+        val texts by rememberUpdatedState(sheetTexts)
+        return rememberListener(onFailed = { reason -> if (reason == NOT_CAUGHT) unclear() }) { l ->
+            val sources = deps.voice.recentPrompts(30_000) + texts + ANSWER_CHROME
+            answer(Heard(l.text, l.msAfterSpeech), sources)
+            null
+        }
+    }
+
+    /** "2300 ms after Saathi spoke" for the answer logs (never the transcript). */
+    fun afterSpeech(heard: Heard): String =
+        if (heard.msAfterSpeech == Heard.LONG_AFTER) "Saathi hadn't spoken" else "${heard.msAfterSpeech} ms after Saathi spoke"
+
+    /** What every answer sheet shows / TalkBack says around listening (echo sources too). */
+    val ANSWER_CHROME: List<String> = listOf(
+        "Needs your answer", "Listening", "Listening…", "Not listening", "Answer by voice", "Stop listening",
+        "Asking again…", "Default", NOT_CAUGHT, "Listening stopped.", "Sorry, I'm not sure.", "You can say",
+    )
+
+    /**
+     * Listening without leaving the screen. Asks for the microphone itself if needed. Only reacts
+     * to sessions it started. [onText] returns null when the transcript was used, or the reason
+     * to report it as not caught.
+     */
+    @Composable
+    private fun rememberListener(
+        onFailed: (String) -> Unit,
+        onText: (Voice.Listen.Heard) -> String?,
+    ): ScreenListener {
+        val deps = LocalDeps.current
+        val context = LocalContext.current
+        val handle by rememberUpdatedState(onText)
         val failed by rememberUpdatedState(onFailed)
         val listener = remember { ScreenListener(deps.voice, deps.feedback) }
         val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -378,12 +441,9 @@ object ScreenParts {
                     listener.active = false
                     deps.voice.reset()
                     deps.feedback.cue(Cue.StopListening)
-                    if (genericEchoCheck && EchoGuard.looksLikeEcho(l.text, deps.voice.recentPrompts(15_000))) {
-                        Log.i("SaathiVoice", "screen listener: dropped an echo of Saathi's own words, length ${l.text.length}")
-                        listener.problem = NOT_CAUGHT
-                        failed(NOT_CAUGHT)
-                    } else {
-                        heard(l.text)
+                    handle(l)?.let { why ->
+                        listener.problem = why
+                        failed(why)
                     }
                 }
                 is Voice.Listen.Failed -> {

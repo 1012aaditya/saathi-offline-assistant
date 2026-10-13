@@ -45,9 +45,11 @@ import kotlinx.coroutines.launch
  * Saathi stops; Back or leaving the screen = Cancel. Picking someone sends nothing: the message
  * is still read back and needs a clear yes.
  *
- * Saathi's own question isn't taken as the answer: the mic only opens after Saathi stops
- * speaking, a reply repeating the question is unclear ([ContactChoiceDialog]), and the name
- * buttons ignore a tap in the first [PICK_ARM_MS] (a touch meant for the app underneath).
+ * Saathi's own question isn't taken as the answer: voice goes through the shared answer pipeline
+ * ([ContactChoiceDialog] -> VoiceAnswer: the mic only opens after Saathi stops speaking, a long
+ * reply or one repeating anything on the sheet is unclear, a name must be said on its own, a
+ * position word is never in the sheet's texts), and the name buttons ignore a tap in the first
+ * [PICK_ARM_MS] (a touch meant for the app underneath).
  */
 @Composable
 fun ContactChoiceScreen(nav: AppNav) {
@@ -100,23 +102,31 @@ fun ContactChoiceScreen(nav: AppNav) {
     }
 
     val title = "Which $spoken?"
-    // Everything Saathi says or shows while waiting: a reply that repeats it is an echo, not a pick.
+    val body = "I found more than one match for “$spoken” in WhatsApp. Names exactly as WhatsApp shows them."
+    // The status line is read aloud by TalkBack: it doesn't repeat the names (Saathi's question does).
+    val status = "Needs your answer. $title Cancel is selected."
+    // Everything Saathi says or shows while waiting, names included: an echo of it is not a pick.
     val sheetWords = listOf(
         question,
         "Sorry, I'm not sure. $question",
         title,
-        "I found more than one match for “$spoken” in WhatsApp. Names exactly as WhatsApp shows them.",
+        body,
         t.contactChoiceHint,
         "Cancel. This is the default. Nothing will be sent.",
-        "Needs your answer. $question Cancel is selected.",
-    )
+        status,
+        "Cancel",
+    ) + options
 
-    listener = ScreenParts.rememberScreenListener(
-        onFailed = { reason -> if (reason == ScreenParts.NOT_CAUGHT) askAgainOrCancel(dialog.silence()) },
-        genericEchoCheck = false, // the dialog's own check below
-    ) { text ->
-        val next = dialog.hear(text, echoSources = deps.voice.recentPrompts(30_000) + sheetWords)
-        Log.i("SaathiConfirm", "contact pick voice: ${next::class.simpleName} (unclear so far ${dialog.unclear}), length ${text.length}")
+    listener = ScreenParts.rememberAnswerListener(
+        sheetTexts = sheetWords,
+        onUnclear = { askAgainOrCancel(dialog.silence()) },
+    ) { heard, sources ->
+        val next = dialog.hear(heard, sources)
+        Log.i(
+            "SaathiConfirm",
+            "contact pick voice: ${next::class.simpleName} (${dialog.lastWhy}, unclear so far ${dialog.unclear}), " +
+                "length ${heard.text.length}, ${ScreenParts.afterSpeech(heard)}",
+        )
         when (next) {
             is ContactChoiceDialog.Next.Pick -> answer(next.name, "voice")
             ContactChoiceDialog.Next.Cancel -> answer(null, "voice")
@@ -157,7 +167,7 @@ fun ContactChoiceScreen(nav: AppNav) {
     BackHandler { if (req == null) nav.home() else answer(null, "back") }
 
     SaathiScreen(
-        status = if (listener.active) "Listening" else "Needs your answer. $question Cancel is selected.",
+        status = if (listener.active) "Listening" else status,
         youCanSay = listOf("Cancel"),
         onTalk = { if (!asking) listener.toggle() },
         listening = listener.active,
@@ -174,12 +184,13 @@ fun ContactChoiceScreen(nav: AppNav) {
     ) {
         AskCapsule()
         LargeTitle(title, Modifier.semantics { heading() })
-        Body("I found more than one match for “$spoken” in WhatsApp. Names exactly as WhatsApp shows them.", secondary = true)
+        Body(body, secondary = true)
         options.forEachIndexed { i, name ->
             SecondaryButton(
                 name,
                 { answer(name, "tap") },
-                description = "${i + 1} of ${options.size}: $name",
+                // No "1 of 2": a position word / number must never be in what the sheet says.
+                description = name,
             )
         }
         Footnote(if (asking) "Asking again…" else t.contactChoiceHint)

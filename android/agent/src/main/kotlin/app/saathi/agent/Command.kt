@@ -48,8 +48,19 @@ sealed interface Command {
         override val isTask: Boolean get() = true
     }
 
-    /** "Reply to Mom I'll be home by 7", "Mom ko bolo main aa raha hoon". Missing parts are asked for. */
-    data class Reply(val contact: String?, val text: String?, override val utterance: String) : Command {
+    /**
+     * "Reply to Mom I'll be home by 7", "Mom ko bolo main aa raha hoon". Missing parts are asked for.
+     * [alternatives]: when it isn't clear where the name ends ("message Aaditya Goel saathi test"
+     * with no saved "Aaditya Goel"), shorter splits to try, in order, if WhatsApp has nobody
+     * under [contact] ("Aaditya" + "Goel saathi test"). Longest first; the read-back still shows
+     * the recipient and the text before anything is sent.
+     */
+    data class Reply(
+        val contact: String?,
+        val text: String?,
+        override val utterance: String,
+        val alternatives: List<NameSplit> = emptyList(),
+    ) : Command {
         override val isTask: Boolean get() = true
     }
 
@@ -69,6 +80,9 @@ sealed interface Command {
     /** Anything else: answered honestly ("I can't do that offline yet"), never guessed at. */
     data class Unsupported(override val utterance: String) : Command
 }
+
+/** One way to split "<name> <message>": who, and what to send them. */
+data class NameSplit(val contact: String, val text: String?)
 
 /**
  * Follow-ups across commands (port of saathi/session.py): the last contact talked about, and a

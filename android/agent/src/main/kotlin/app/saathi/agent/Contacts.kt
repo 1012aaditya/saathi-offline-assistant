@@ -96,8 +96,15 @@ object Recipients {
         return all.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }.take(MAX_QUERIES)
     }
 
+    /**
+     * What to search for the user's own chat. WhatsApp lists it as "<your name> (You)"; Saathi
+     * doesn't know the user's name, so it looks for that mark on the chat list, then searches "You".
+     */
+    val SELF_QUERIES = listOf("You")
+
     /** [book]: display names from the phone's contacts (empty when not allowed / not asked). */
     fun of(spoken: String, book: List<String> = emptyList()): Recipient {
+        if (spoken == Names.SELF) return Recipient(Names.SELF, null, inPhone = false, queries = SELF_QUERIES)
         val m = match(spoken, book)
         val one = m as? Match.One
         val exact = one?.exact != false
@@ -160,20 +167,25 @@ object ContactSearch {
     fun pick(screen: Screen, spoken: String, ctx: CommandContext, chosen: String? = null, exactOnly: Boolean = false): Pick {
         val rows = rows(screen).filter { it.section != Section.MESSAGES }.sortedBy { it.section.ordinal }
         if (chosen != null) return rows.firstOrNull { it.element.text == chosen }?.let { Pick.One(it.element) } ?: Pick.None
-        fun of(list: List<Row>): Pick? {
-            if (list.isEmpty()) return null
-            val names = list.map { it.element.text }.distinct()
-            if (names.size > 1) return Pick.Many(names.take(4))
-            // The same name twice in one list = two different chats / contacts with one name.
-            val twice = list.groupBy { it.section }.values.any { it.size > 1 }
-            return if (twice) Pick.Same(names.first()) else Pick.One(list.first().element)
-        }
+        // "Message myself": only the chat WhatsApp marks as the user's own ("Aaditya Goel (You)").
+        if (spoken == Names.SELF) return of(rows.filter { WhatsApp.isSelfChat(it.element.text) }) ?: Pick.None
+        // The name without WhatsApp's own-chat mark: "Aaditya Goel (You)" is "Aaditya Goel".
+        fun name(r: Row) = WhatsApp.personName(r.element.text).lowercase()
         val s = spoken.trim().lowercase()
-        of(rows.filter { it.element.text.trim().lowercase() == s })?.let { return it }
+        of(rows.filter { name(it) == s })?.let { return it }
         val spellings = ctx.names.map { it.trim().lowercase() }.toSet()
-        of(rows.filter { it.element.text.trim().lowercase() in spellings })?.let { return it }
+        of(rows.filter { name(it) in spellings || it.element.text.trim().lowercase() in spellings })?.let { return it }
         if (exactOnly) return Pick.None
-        return of(rows.filter { payeeMatches(ctx, it.element.text) }) ?: Pick.None
+        return of(rows.filter { payeeMatches(ctx, it.element.text) || payeeMatches(ctx, WhatsApp.personName(it.element.text)) }) ?: Pick.None
+    }
+
+    private fun of(list: List<Row>): Pick? {
+        if (list.isEmpty()) return null
+        val names = list.map { it.element.text }.distinct()
+        if (names.size > 1) return Pick.Many(names.take(4))
+        // The same name twice in one list = two different chats / contacts with one name.
+        val twice = list.groupBy { it.section }.values.any { it.size > 1 }
+        return if (twice) Pick.Same(names.first()) else Pick.One(list.first().element)
     }
 }
 
@@ -185,34 +197,42 @@ data class ContactChoiceRequest(val spoken: String, val options: List<String>)
  * no / cancel stops; an unclear answer (or silence) is asked once more, then stops. Picking a
  * person never sends anything: the message is still read back and needs a clear yes.
  *
- * Accepted: a short reply naming exactly one option ("Sharma", "Rahul Verma", "शर्मा"), or its
- * position ("the first one", "doosra", "दूसरा"). A reply that repeats Saathi's question (3 words
- * in a row, or mostly its other words) is an echo -> unclear.
+ * Heard only through the shared [VoiceAnswer] pipeline. Accepted: a position ("the first one",
+ * "doosra", "दूसरा"; ordinals are never in a sheet text), or a short reply naming exactly one
+ * option ("Sharma", "Rahul Verma", "शर्मा") said on its own, after the quiet gap. The names are
+ * in Saathi's question, so a name can't be told from an echo by its words alone.
  */
-class ContactChoiceDialog(private val options: List<String>, private val maxUnclear: Int = 2) {
+class ContactChoiceDialog(private val options: List<String>, maxUnclear: Int = 2) {
     sealed interface Next {
         data class Pick(val name: String) : Next
         data object Cancel : Next
         data object AskAgain : Next
     }
 
-    var unclear: Int = 0
-        private set
+    private val answers = VoiceAnswer(maxUnclear)
 
-    fun hear(reply: String, echoSources: List<String> = emptyList()): Next {
-        val optionWords = options.flatMap { words(it) }.toSet()
-        val ignore = optionWords + FILLERS + NO_WORDS + ORDINALS.keys
-        if (EchoGuard.overlap(reply, echoSources, ignore = ignore) != EchoGuard.Reason.NONE) return unclearOnce()
-        return when (val c = classify(reply, options)) {
-            null -> unclearOnce()
-            CANCEL -> Next.Cancel
-            else -> Next.Pick(c)
-        }
+    val unclear: Int get() = answers.unclear
+
+    /** Why the last reply was (not) taken, for the log. */
+    val lastWhy: VoiceAnswer.Why get() = answers.lastWhy
+
+    private val rules = object : AnswerRules<String> {
+        override val vocabulary: Set<String> = options.flatMap { words(it) }.toSet() + FILLERS + NO_WORDS + Ordinals.decisive
+        override val decisive: Set<String> = Ordinals.decisive
+        override fun read(reply: String): Reading<String> = reading(reply, options)
     }
 
-    fun silence(): Next = unclearOnce()
+    /** [echoSources]: Saathi's recent prompts and every text of the sheet (the options are added here). */
+    fun hear(heard: Heard, echoSources: List<String>): Next = when (val r = answers.hear(heard, echoSources + options, rules)) {
+        is VoiceAnswer.Result.Act -> Next.Pick(r.value)
+        VoiceAnswer.Result.Safe -> Next.Cancel
+        VoiceAnswer.Result.AskAgain -> Next.AskAgain
+    }
 
-    private fun unclearOnce(): Next = if (++unclear >= maxUnclear) Next.Cancel else Next.AskAgain
+    /** [hear] for a transcript with no timing (tests; Saathi hadn't spoken). */
+    fun hear(reply: String, echoSources: List<String> = emptyList()): Next = hear(Heard(reply), echoSources)
+
+    fun silence(): Next = if (answers.silence() == VoiceAnswer.Result.Safe) Next.Cancel else Next.AskAgain
 
     companion object {
         /** Returned by [classify] for a no / cancel. */
@@ -230,14 +250,6 @@ class ContactChoiceDialog(private val options: List<String>, private val maxUncl
             "that", "this", "person", "contact", "chat", "message", "my", "mean", "i", "वाला", "वाली", "वाले", "को", "जी",
         ).flatMap { EchoGuard.tokens(it) }.toSet()
 
-        private val ORDINALS: Map<String, Int> = mapOf(
-            "first" to 0, "1st" to 0, "pehla" to 0, "pehli" to 0, "pehle" to 0, "pahla" to 0, "pahli" to 0, "पहला" to 0, "पहली" to 0, "पहले" to 0,
-            "second" to 1, "2nd" to 1, "doosra" to 1, "dusra" to 1, "doosri" to 1, "dusri" to 1, "दूसरा" to 1, "दूसरी" to 1, "दुसरा" to 1,
-            "third" to 2, "3rd" to 2, "teesra" to 2, "tisra" to 2, "teesri" to 2, "तीसरा" to 2, "तीसरी" to 2,
-            "fourth" to 3, "4th" to 3, "chautha" to 3, "chauthi" to 3, "चौथा" to 3, "चौथी" to 3,
-            "last" to -1, "aakhri" to -1, "akhri" to -1, "आखिरी" to -1,
-        )
-
         /** Lowercase words; Devanagari ones also in Latin letters (so "शर्मा" matches "Sharma"). */
         private fun words(text: String): List<String> = EchoGuard.tokens(text)
 
@@ -252,26 +264,35 @@ class ContactChoiceDialog(private val options: List<String>, private val maxUncl
             return la.length >= 4 && lb.length >= 4 && payeeMatches(CommandContext(command = "", names = listOf(la)), lb)
         }
 
-        /** The option [reply] names, [CANCEL], or null when unclear. */
-        fun classify(reply: String, options: List<String>): String? {
+        /** How the reply picks: [Reading.Safe] (cancel), an option (by position or by name), or unclear. */
+        internal fun reading(reply: String, options: List<String>): Reading<String> {
             val w = words(reply)
-            if (w.isEmpty() || options.isEmpty()) return null
-            if (w.any { it in NO_WORDS }) return CANCEL
-            if (w.size > MAX_WORDS) return null
+            if (w.isEmpty() || options.isEmpty()) return Reading.Unclear
+            if (w.any { it in NO_WORDS }) return Reading.Safe
+            if (w.size > MAX_WORDS) return Reading.Unclear
             // Whole name, exactly.
-            options.firstOrNull { it.trim().lowercase() == reply.trim().lowercase() }?.let { return it }
-            val ordinals = w.mapNotNull { ORDINALS[it] }.distinct()
-            val content = w.filter { it !in FILLERS && it !in ORDINALS }
+            options.firstOrNull { it.trim().lowercase() == reply.trim().lowercase() }?.let { return Reading.Act(it, byName = true) }
+            // A bare number said alone is a position ("2").
+            w.singleOrNull()?.let { Ordinals.digit(it, options.size) }?.let { return Reading.Act(options[it], byName = false) }
+            val ordinals = w.mapNotNull { Ordinals.of(it) }.distinct()
+            val content = w.filter { it !in FILLERS && Ordinals.of(it) == null }
             if (ordinals.size == 1 && content.isEmpty()) {
-                val i = ordinals.first().let { if (it < 0) options.size - 1 else it }
-                return options.getOrNull(i)
+                val i = ordinals.first().let { if (it == Ordinals.LAST) options.size - 1 else it }
+                return options.getOrNull(i)?.let { Reading.Act(it, byName = false) } ?: Reading.Unclear
             }
-            if (ordinals.isNotEmpty() || content.isEmpty()) return null
+            if (ordinals.isNotEmpty() || content.isEmpty()) return Reading.Unclear
             val hits = options.filter { opt ->
                 val ow = words(opt)
                 content.all { c -> ow.any { same(c, it) } }
             }
-            return hits.singleOrNull()
+            return hits.singleOrNull()?.let { Reading.Act(it, byName = true) } ?: Reading.Unclear
+        }
+
+        /** The option [reply] names, [CANCEL], or null when unclear (no timing / echo checks). */
+        fun classify(reply: String, options: List<String>): String? = when (val r = reading(reply, options)) {
+            Reading.Safe -> CANCEL
+            is Reading.Act -> r.value
+            Reading.Unclear -> null
         }
     }
 }

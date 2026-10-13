@@ -51,7 +51,40 @@ class FakeWhatsApp(
         data object List : View
         data object Search : View
         data class Chat(val name: String) : View
+
+        /** A WhatsApp sub-screen (starred messages, settings …); [hasUp]: it has a "Navigate up" button. */
+        data class Sub(val hasUp: Boolean) : View
     }
+
+    // -- timing (13 Oct, 22:50): a virtual clock, advanced only by waitForChange ------------------
+
+    var now = 0L
+
+    /** ms from an OpenApp until WhatsApp is in front, per OpenApp (the last value repeats). 0 = at once. */
+    var openDelaysMs: List<Long> = listOf(0L)
+
+    /** ms WhatsApp shows its first, empty frame after coming to the front. Back there closes WhatsApp. */
+    var splashMs = 0L
+
+    /** Saathi's own screen changes ~100 ms after each OpenApp (its narration line), like the real Working screen. */
+    var ownScreenChanges = false
+
+    /** Back on a [View.Sub] closes WhatsApp (it was the root of WhatsApp's task); reopening shows it again. */
+    var subIsRoot = false
+
+    private var opensDone = 0
+    private var appearAt: Long? = null
+    private var splashUntil = 0L
+    private var ownChangeAt: Long? = null
+    private var ownTick = 0
+
+    /** Apply what has happened by [now]. */
+    private fun sync() {
+        appearAt?.let { if (now >= it) { pkg = WhatsApp.PKG; splashUntil = it + splashMs; appearAt = null } }
+        ownChangeAt?.let { if (now >= it) { ownTick++; ownChangeAt = null } }
+    }
+
+    private val splashing: Boolean get() = pkg == WhatsApp.PKG && now < splashUntil
 
     var pkg = "app.saathi"
     var view: View = View.List
@@ -84,14 +117,20 @@ class FakeWhatsApp(
     var onSnapshot: (FakeWhatsApp) -> Unit = {}
 
     fun render(): Screen {
+        sync()
         val els = mutableListOf<Element>()
         fun add(f: (Int) -> Element) { els += f(els.size) }
+        if (splashing) {
+            add { S.el(it, text = "WhatsApp", y = 900) } // the first frame: no chat list yet
+            return S.screen(WhatsApp.PKG, els)
+        }
         if (pinScreen) {
             add { S.el(it, text = "Enter UPI PIN") }
             return S.screen(WhatsApp.PKG, els)
         }
         if (pkg != WhatsApp.PKG) {
             add { S.el(it, text = "Stop", cls = "Button", clickable = true) }
+            if (ownScreenChanges) add { S.el(it, text = "Working, line $ownTick") }
             return S.screen(pkg, els)
         }
         when (val v = view) {
@@ -138,6 +177,11 @@ class FakeWhatsApp(
                     }
                 }
             }
+            is View.Sub -> {
+                if (v.hasUp) add { S.el(it, desc = "Navigate up", rid = "whatsapp_toolbar_home", cls = "Button", clickable = true, y = 40) }
+                add { S.el(it, text = "Starred messages", y = 45) }
+                add { S.el(it, desc = "More options", cls = "ImageButton", clickable = true, y = 45) }
+            }
             is View.Chat -> {
                 add { S.el(it, desc = "Navigate up", rid = "whatsapp_toolbar_home", cls = "Button", clickable = true, y = 40) }
                 add { S.el(it, text = v.name, rid = WhatsApp.CHAT_TITLE, y = 45) }
@@ -171,9 +215,18 @@ class FakeWhatsApp(
         check(screen.hash == render().hash) { "acted on a stale screen" }
         performed += action
         when (action) {
-            is OpenApp -> pkg = app.saathi.safety.Apps.APP_ALIASES.getValue(action.app)
-            is Back -> when (view) {
-                View.List -> pkg = "launcher"
+            is OpenApp -> {
+                val target = app.saathi.safety.Apps.APP_ALIASES.getValue(action.app)
+                val delay = openDelaysMs.getOrElse(opensDone) { openDelaysMs.last() }
+                opensDone++
+                if (ownScreenChanges && pkg != WhatsApp.PKG) ownChangeAt = now + 100
+                if (target != WhatsApp.PKG || (delay == 0L && splashMs == 0L)) pkg = target
+                else if (pkg != WhatsApp.PKG && appearAt == null) appearAt = now + delay
+            }
+            is Back -> when {
+                splashing -> pkg = "app.saathi" // Back on WhatsApp's first frame closes it
+                view is View.Sub && subIsRoot -> pkg = "app.saathi"
+                view == View.List -> pkg = "launcher"
                 else -> view = View.List
             }
             is Home -> pkg = "launcher"
@@ -228,5 +281,19 @@ class FakeWhatsApp(
         return drafts[chat]?.takeIf { it.isNotEmpty() } ?: if (placeholderAsText) "Message" else ""
     }
 
-    override suspend fun waitForChange(oldHash: String, timeoutMs: Long): Boolean = !unavailable && render().hash != oldHash
+    /** Advances the virtual clock to the next event (WhatsApp appearing, its first frame ending, Saathi's narration). */
+    override suspend fun waitForChange(oldHash: String, timeoutMs: Long): Boolean {
+        if (unavailable) return false
+        if (render().hash != oldHash) return true
+        val deadline = now + timeoutMs
+        while (true) {
+            val next = listOfNotNull(appearAt, ownChangeAt, splashUntil.takeIf { it > now }).filter { it > now && it <= deadline }.minOrNull()
+            if (next == null) {
+                now = deadline
+                return false
+            }
+            now = next
+            if (render().hash != oldHash) return true
+        }
+    }
 }

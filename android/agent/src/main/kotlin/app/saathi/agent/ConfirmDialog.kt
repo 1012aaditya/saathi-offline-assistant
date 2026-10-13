@@ -4,7 +4,8 @@ import app.saathi.safety.Answer
 import app.saathi.safety.NO
 
 /**
- * The spoken yes/no before an irreversible step (hard rule 5): defaults to cancel. Only a short,
+ * The spoken yes/no before an irreversible step (hard rule 5): defaults to cancel. Heard only
+ * through the shared [VoiceAnswer] pipeline (timing, length, echo, decisive words). Only a short,
  * explicit yes from the user sends; any no cancels; anything else (or silence) -> ask once more
  * -> still unclear -> cancel.
  *
@@ -19,32 +20,47 @@ import app.saathi.safety.NO
  *    prompts never contain a yes word (see [Texts.confirmQuestion]).
  */
 class ConfirmDialog(
-    private val maxUnclear: Int = 2,
+    maxUnclear: Int = 2,
     /** More harmless words allowed next to a yes, e.g. [ORDER_FILLERS] on the order sheet ("yes order it"). */
     private val extraFillers: Set<String> = emptySet(),
 ) {
     enum class Next { SEND, CANCEL, ASK_AGAIN }
 
-    var unclear: Int = 0
-        private set
+    /** The shared answer pipeline (timing, length, echo, decisive words): every sheet goes through it. */
+    private val answers = VoiceAnswer(maxUnclear)
+
+    private val rules = object : AnswerRules<Unit> {
+        override val vocabulary: Set<String> = IGNORE + extraFillers
+        override val decisive: Set<String> = YES_WORDS
+        override fun read(reply: String): Reading<Unit> = when (classify(reply, extraFillers)) {
+            Answer.YES -> Reading.Act(Unit, byName = false) // the yes word is decisive: never in the prompt
+            Answer.NO -> Reading.Safe
+            Answer.UNCLEAR -> Reading.Unclear
+        }
+    }
+
+    val unclear: Int get() = answers.unclear
+
+    /** Why the last reply was (not) taken, for the log. */
+    val lastWhy: VoiceAnswer.Why get() = answers.lastWhy
 
     /**
      * [echoSources]: what Saathi said lately and the sheet's own words (title, message, buttons,
      * hints). A reply that overlaps them is treated as unclear, never as yes.
      */
-    fun hear(reply: String, echoSources: List<String> = emptyList()): Next {
-        if (isEcho(reply, echoSources, extraFillers)) return unclearOnce()
-        return when (classify(reply, extraFillers)) {
-            Answer.YES -> Next.SEND
-            Answer.NO -> Next.CANCEL
-            Answer.UNCLEAR -> unclearOnce()
-        }
-    }
+    fun hear(heard: Heard, echoSources: List<String>): Next = next(answers.hear(heard, echoSources, rules))
+
+    /** [hear] for a transcript with no timing (tests; Saathi hadn't spoken). */
+    fun hear(reply: String, echoSources: List<String> = emptyList()): Next = hear(Heard(reply), echoSources)
 
     /** Nothing heard / recogniser error / discarded echo: counts as unclear. */
-    fun silence(): Next = unclearOnce()
+    fun silence(): Next = next(answers.silence())
 
-    private fun unclearOnce(): Next = if (++unclear >= maxUnclear) Next.CANCEL else Next.ASK_AGAIN
+    private fun next(r: VoiceAnswer.Result<Unit>): Next = when (r) {
+        is VoiceAnswer.Result.Act -> Next.SEND
+        VoiceAnswer.Result.Safe -> Next.CANCEL
+        VoiceAnswer.Result.AskAgain -> Next.ASK_AGAIN
+    }
 
     companion object {
         const val MAX_YES_WORDS = 4
@@ -90,10 +106,6 @@ class ConfirmDialog(
                 else -> Answer.UNCLEAR
             }
         }
-
-        /** The reply repeats Saathi's prompt / sheet, or its yes word is in them. */
-        fun isEcho(reply: String, echoSources: List<String>, extra: Set<String> = emptySet()): Boolean =
-            EchoGuard.overlap(reply, echoSources, ignore = IGNORE + extra, decisive = YES_WORDS) != EchoGuard.Reason.NONE
 
         /** True if [text] contains a word that [classify] would take as yes (prompts must not). */
         fun containsYesWord(text: String): Boolean = EchoGuard.tokens(text).any { it in YES_WORDS }

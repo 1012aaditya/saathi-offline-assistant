@@ -38,14 +38,29 @@ fun Texts.whichContact(spoken: String, names: List<String>) = s(
     "कौन से $spoken: ${orList(names)}?",
 )
 
+/** Never an ordinal word ("first", "पहला"): a real "first" must not look like an echo of the sheet ([Ordinals]). */
 val Texts.contactChoiceHint get() = s(
-    "Say the full name, or “first” or “second”, after I finish speaking. Or tap a name. If I'm not sure, I'll ask again, then stop.",
-    "मेरे बोलने के बाद पूरा नाम बोलिए, या “पहला”, “दूसरा”। या नाम दबाइए। समझ न आया तो एक बार फिर पूछूँगा, फिर रुक जाऊँगा।",
+    "After I finish speaking, say the name on its own, or its place in the list counting from the top. Or tap a name. If I'm not sure, I'll ask again, then stop.",
+    "मेरे बोलने के बाद सिर्फ़ नाम बोलिए, या ऊपर से गिनकर उसकी जगह। या नाम दबाइए। समझ न आया तो एक बार फिर पूछूँगा, फिर रुक जाऊँगा।",
 )
 
 val Texts.contactNotChosen get() = s(
     "I wasn't sure which one you meant, so I stopped. Nothing was sent.",
     "समझ नहीं आया आप किसकी बात कर रहे हैं, इसलिए रुक गया। कुछ नहीं भेजा।",
+)
+
+/** "Searching for your own chat" ("message myself"). */
+val Texts.yourOwnChat get() = s("your own chat", "आपकी अपनी चैट")
+
+val Texts.selfChatNotFound get() = s(
+    "I couldn't find your own chat in WhatsApp; it shows your name with “(You)”. Say your name as WhatsApp shows it instead. Nothing was sent.",
+    "WhatsApp में आपकी अपनी चैट नहीं मिली; उसमें आपके नाम के साथ “(You)” लिखा होता है। WhatsApp में दिखने वाला अपना नाम बोलिए। कुछ नहीं भेजा।",
+)
+
+/** WhatsApp opened on a screen whose Back closes WhatsApp, and it has no Up button. */
+val Texts.whatsappStuck get() = s(
+    "WhatsApp opened on a screen I can't leave safely by myself. Please go to the Chats list in WhatsApp, then ask me again. Nothing was sent.",
+    "WhatsApp ऐसी स्क्रीन पर खुला जिससे मैं खुद सुरक्षित नहीं निकल सकता। WhatsApp में Chats सूची खोलिए, फिर दोबारा कहिए। कुछ नहीं भेजा।",
 )
 
 fun Texts.openingPicked(name: String) = s("Opening $name's chat", "$name की चैट खोल रहा हूँ")

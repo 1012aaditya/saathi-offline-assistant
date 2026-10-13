@@ -54,9 +54,10 @@ class OrderTexts(val lang: Lang) {
         "कौन सा साइज़: ${options.joinToString(", या ") { option(it) }}?",
     )
 
+    /** Never an ordinal word ("first", "पहला"): a real "first" must not look like an echo of the sheet ([Ordinals]). */
     val pickHint get() = s(
-        "Say the name or “first”, “second”, or tap one. If I'm not sure, I'll ask again, then cancel.",
-        "नाम या “पहला”, “दूसरा” बोलिए, या बटन दबाइए। समझ न आया तो एक बार फिर पूछूँगा, फिर कैंसल।",
+        "Say the name on its own, or its place in the list counting from the top, or tap one. If I'm not sure, I'll ask again, then cancel.",
+        "सिर्फ़ नाम बोलिए, या ऊपर से गिनकर उसकी जगह, या बटन दबाइए। समझ न आया तो एक बार फिर पूछूँगा, फिर कैंसल।",
     )
 
     /** Confirm-screen question before ordering (English; Hindi uses the gate's own read-back). No yes word. */

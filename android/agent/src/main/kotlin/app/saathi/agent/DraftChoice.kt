@@ -55,31 +55,51 @@ data class DraftChoiceRequest(
  * The choice must come from the user, not from Saathi's own question (which has to name the
  * options): a reply that repeats the question / the sheet ([EchoGuard]) is unclear, and a change
  * (replace / add / send it) must be a short reply ([MAX_CHANGE_WORDS] words) naming one choice.
- * None of these sends anything: sending still needs the read-back and a clear yes.
+ * None of these sends anything: sending still needs the read-back and a clear yes. Heard only
+ * through the shared [VoiceAnswer] pipeline: a change is named on the sheet, so it must be said on
+ * its own ([VoiceAnswers.MAX_NAME_WORDS] words) after the quiet gap.
  */
-class DraftChoiceDialog(private val maxUnclear: Int = 2) {
+class DraftChoiceDialog(maxUnclear: Int = 2) {
     enum class Next { KEEP, REPLACE, ADD, SEND, ASK_AGAIN }
 
-    var unclear: Int = 0
-        private set
+    /** The shared answer pipeline (timing, length, echo): every sheet goes through it. */
+    private val answers = VoiceAnswer(maxUnclear)
 
-    /** [echoSources]: what Saathi said lately and the sheet's own words. */
-    fun hear(reply: String, canChange: Boolean = true, echoSources: List<String> = emptyList()): Next {
-        if (isEcho(reply, echoSources)) return unclearOnce()
-        val c = classify(reply) ?: return unclearOnce()
-        if (!canChange && (c == DraftChoice.REPLACE || c == DraftChoice.ADD)) return unclearOnce()
-        return when (c) {
-            DraftChoice.KEEP -> Next.KEEP
-            DraftChoice.REPLACE -> Next.REPLACE
-            DraftChoice.ADD -> Next.ADD
-            DraftChoice.SEND -> Next.SEND
+    val unclear: Int get() = answers.unclear
+
+    /** Why the last reply was (not) taken, for the log. */
+    val lastWhy: VoiceAnswer.Why get() = answers.lastWhy
+
+    private fun rules(canChange: Boolean) = object : AnswerRules<DraftChoice> {
+        override val vocabulary: Set<String> = Normed.all + FILLERS
+        override val decisive: Set<String> = emptySet() // the choices are named on the sheet: rule 5 instead
+        override fun read(reply: String): Reading<DraftChoice> = when (val c = classify(reply)) {
+            null -> Reading.Unclear
+            DraftChoice.KEEP -> Reading.Safe
+            DraftChoice.REPLACE, DraftChoice.ADD -> if (canChange) Reading.Act(c, byName = true) else Reading.Unclear
+            DraftChoice.SEND -> Reading.Act(c, byName = true)
         }
     }
 
-    /** Nothing heard / recogniser error: counts as unclear. */
-    fun silence(): Next = unclearOnce()
+    /** [echoSources]: what Saathi said lately and the sheet's own words. */
+    fun hear(heard: Heard, canChange: Boolean, echoSources: List<String>): Next =
+        when (val r = answers.hear(heard, echoSources, rules(canChange))) {
+            is VoiceAnswer.Result.Act -> when (r.value) {
+                DraftChoice.KEEP -> Next.KEEP
+                DraftChoice.REPLACE -> Next.REPLACE
+                DraftChoice.ADD -> Next.ADD
+                DraftChoice.SEND -> Next.SEND
+            }
+            VoiceAnswer.Result.Safe -> Next.KEEP
+            VoiceAnswer.Result.AskAgain -> Next.ASK_AGAIN
+        }
 
-    private fun unclearOnce(): Next = if (++unclear >= maxUnclear) Next.KEEP else Next.ASK_AGAIN
+    /** [hear] for a transcript with no timing (tests; Saathi hadn't spoken). */
+    fun hear(reply: String, canChange: Boolean = true, echoSources: List<String> = emptyList()): Next =
+        hear(Heard(reply), canChange, echoSources)
+
+    /** Nothing heard / recogniser error: counts as unclear. */
+    fun silence(): Next = if (answers.silence() == VoiceAnswer.Result.Safe) Next.KEEP else Next.ASK_AGAIN
 
     companion object {
         /** Replace / add / send it by voice: at most this many words. */
@@ -117,10 +137,6 @@ class DraftChoiceDialog(private val maxUnclear: Int = 2) {
             "naya", "wala", "wali", "ise", "isko", "use", "usko", "दो", "दीजिए", "दे", "करो", "कर", "जी", "मेरा", "मेरी", "मेरे",
             "संदेश", "नया", "इसे", "इसको", "उसे", "और",
         ).flatMap { words(it) }.toSet()
-
-        /** The reply repeats Saathi's question / the sheet's words. */
-        fun isEcho(reply: String, echoSources: List<String>): Boolean =
-            EchoGuard.overlap(reply, echoSources, ignore = Normed.all + FILLERS) != EchoGuard.Reason.NONE
 
         /** Lowercase, Devanagari nukta dropped (ड़ typed either way matches), split into words. */
         internal fun words(reply: String): Set<String> = wordList(reply).toSet()

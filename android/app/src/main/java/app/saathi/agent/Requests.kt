@@ -38,7 +38,9 @@ object Requests {
             is Command.Photo -> {
                 // Camera / last photo, described on the phone. The Photo screen picks up the mode.
                 app.saathi.photo.PhotoRequest.open(command.source)
-                nav.replace(Route.Photo)
+                // Already on the Photo screen: it switches mode in place. Re-creating it here would
+                // race the old screen for the request and lose it (seen on the tablet, 13 Oct).
+                if (nav.current() != Route.Photo) nav.replace(Route.Photo)
             }
             // Any other installed app: resolved on the phone, opened only with the user's approval.
             is Command.LaunchApp -> LaunchRequests.handle(command, deps, nav)

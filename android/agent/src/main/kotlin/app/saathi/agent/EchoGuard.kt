@@ -236,6 +236,17 @@ class VoiceInterlock(private val now: () -> Long) {
         )
     }
 
+    /**
+     * How long ago Saathi's speech ended (ms): 0 while speaking, null if Saathi hasn't spoken.
+     * Goes with every transcript to the answer sheets ([Heard.msAfterSpeech]).
+     */
+    @Synchronized
+    fun msSinceSpeechEnded(): Long? {
+        if (speaking) return 0L
+        val end = lastSpeechEndMs ?: return null
+        return (now() - end).coerceAtLeast(0L)
+    }
+
     /** What Saathi said in the last [windowMs] (newest last). */
     @Synchronized
     fun recentPrompts(windowMs: Long = RECENT_MS): List<String> {
