@@ -3,7 +3,19 @@ package app.saathi
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
+import android.util.Log
+import app.saathi.agent.BrainInput
+import app.saathi.brain.LlmEngine
+import app.saathi.agent.BrainPrompt
+import app.saathi.agent.Lang
+import app.saathi.agent.ScreenSummary
+import app.saathi.agent.SummaryProduct
 import app.saathi.ui.DebugCommands
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Debug builds only. Lets a tester type what the user would say:
@@ -21,6 +33,9 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "add" -> { app.saathi.agent.TaskRunner.choose(app.saathi.agent.DraftChoice.ADD, "debug"); return }
             "no" -> { app.saathi.agent.TaskRunner.answer(app.saathi.safety.Answer.NO, "debug"); return }
         }
+        // Timing only: how long the on-device AI takes for a typical guide prompt (made-up products,
+        // no screen text). Logged as SaathiBench; nothing is shown, said or done.
+        intent.getStringExtra("brainbench")?.let { mode -> brainBench(context.applicationContext, mode); return }
         val text = intent.getStringExtra("text")?.takeIf { it.isNotBlank() } ?: return
         // A running guide session (floating panel or Guide screen): hand the words straight to it,
         // like pressing Speak, without bringing Saathi's screen forward (that would close the panel).
@@ -33,5 +48,32 @@ class DebugCommandReceiver : BroadcastReceiver() {
             Intent(context, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
         )
+    }
+
+    /** [mode] "cpu" / "gpu": reload on that backend first; anything else: use what's loaded. */
+    private fun brainBench(app: Context, mode: String) {
+        val engine = LlmEngine
+        engine.attach(app)
+        CoroutineScope(Dispatchers.Default).launch {
+            if (mode == "cpu" || mode == "gpu") {
+                engine.cpuOnlyForTesting = mode == "cpu"
+                engine.unloadForTesting()
+                delay(3_000)
+            }
+            engine.prewarm()
+            delay(500)
+            val t0 = SystemClock.elapsedRealtime()
+            while (!engine.ready && SystemClock.elapsedRealtime() - t0 < 90_000) delay(500)
+            if (!engine.ready) { Log.i("SaathiBench", "model not ready after 90 s"); return@launch }
+            val products = (1..6).map { SummaryProduct("Sample product $it", "500 ml", "₹${40 + it}", "") }
+            val screen = ScreenSummary("Blinkit", "search results", "Search results", products, "2 items in cart", null, null, emptyList())
+            val prompt = BrainPrompt.full(BrainInput("do you see anything I can drink here", screen, emptyList(), Lang.EN))
+            repeat(2) { i ->
+                if (i > 0) delay(3_000) // let the first answer wind down
+                val t1 = SystemClock.elapsedRealtime()
+                val out = engine.complete(prompt, 60_000)
+                Log.i("SaathiBench", "run ${i + 1}: prompt ${prompt.length} chars, ${SystemClock.elapsedRealtime() - t1} ms, answer ${out?.length ?: -1} chars")
+            }
+        }
     }
 }

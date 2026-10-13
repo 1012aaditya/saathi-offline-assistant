@@ -55,10 +55,16 @@ object LlmEngine : Brain {
     const val TEMPERATURE = 0.2f
     private const val TOP_P = 0.9f
     private const val BACKGROUND_UNLOAD_MS = 60_000L
-    private const val STOP_WAIT_MS = 2_000L
     private const val POLL_MS = 20L
     private const val PREFS = "saathi_brain"
     private const val KEY_ON = "smartUnderstanding"
+    private const val KEY_TOO_SLOW = "tooSlow"
+
+    /** Missed the guide's time limit this many times in a row: too slow on this phone. */
+    const val SLOW_AFTER_MISSES = 2
+
+    /** Waiting for a stopped answer to wind down before its session may be closed. */
+    private const val WIND_DOWN_MS = 60_000L
 
     sealed interface Status {
         /** No model file in the folder. */
@@ -66,6 +72,9 @@ object LlmEngine : Brain {
 
         /** A file is there but Smart understanding is switched off. */
         data class Off(val file: String) : Status
+
+        /** It answered too slowly on this phone (missed the time limit [SLOW_AFTER_MISSES] times in a row): not loaded. */
+        data class TooSlow(val file: String) : Status
 
         /** A file is there; it loads when a guide session starts. */
         data class Installed(val file: String, val mb: Long) : Status
@@ -99,6 +108,9 @@ object LlmEngine : Brain {
     @Volatile private var unloadWhenIdle = false
     @Volatile private var loadJob: Job? = null
     @Volatile private var backgroundUnload: Job? = null
+
+    /** Debug timing only (DebugCommandReceiver brainbench): load on the CPU even if the GPU works. */
+    @Volatile var cpuOnlyForTesting = false
 
     private fun log(line: String) = Log.i(TAG, line) // sizes, timings and states only
 
@@ -136,6 +148,32 @@ object LlmEngine : Brain {
         refresh()
     }
 
+    /**
+     * 14 Oct, Galaxy Tab S6 Lite: one answer took ~22 s on the GPU and ~58 s on the CPU, against a
+     * 6 s limit, so it never helped, yet it held ~600 MB and the system ran short of memory. After
+     * [SLOW_AFTER_MISSES] missed limits in a row it is marked too slow and no longer loaded; the
+     * built-in rules answer as before. Settings > "Try again" clears it.
+     */
+    fun isTooSlow(context: Context): Boolean = prefs(context).getBoolean(KEY_TOO_SLOW, false)
+
+    fun clearTooSlow(context: Context) {
+        prefs(context).edit().remove(KEY_TOO_SLOW).apply()
+        missedInARow = 0
+        refresh()
+    }
+
+    @Volatile private var missedInARow = 0
+
+    private fun missedLimit() {
+        val ctx = app ?: return
+        missedInARow++
+        if (missedInARow < SLOW_AFTER_MISSES) return
+        prefs(ctx).edit().putBoolean(KEY_TOO_SLOW, true).apply()
+        log("too slow on this phone: missed the time limit $missedInARow times in a row; not loading it again")
+        unload("too slow on this phone")
+        refresh()
+    }
+
     /** Delete all data: the switch goes back to its default. The model file itself stays (said in Settings). */
     fun resetSetting(context: Context) {
         prefs(context).edit().clear().apply()
@@ -151,6 +189,7 @@ object LlmEngine : Brain {
         _status.value = when {
             f == null -> Status.Absent
             !isOn(ctx) -> Status.Off(f.name)
+            isTooSlow(ctx) -> Status.TooSlow(f.name)
             s is Status.Failed && loadedFile == f -> s
             else -> Status.Installed(f.name, f.length() / 1_000_000)
         }
@@ -174,7 +213,7 @@ object LlmEngine : Brain {
     fun prewarm() {
         val ctx = app ?: return
         backgroundUnload?.cancel()
-        if (!isOn(ctx) || llm != null || loadJob?.isActive == true) return
+        if (!isOn(ctx) || isTooSlow(ctx) || llm != null || loadJob?.isActive == true) return
         val f = modelFile(ctx) ?: run { refresh(); return }
         loadJob = scope.launch { load(ctx, f) }
     }
@@ -184,17 +223,27 @@ object LlmEngine : Brain {
         _status.value = Status.Loading(f.name)
         val t0 = System.currentTimeMillis()
         try {
-            val options = LlmInference.LlmInferenceOptions.builder()
+            fun options(backend: LlmInference.Backend) = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(f.absolutePath)
                 .setMaxTokens(MAX_TOKENS)
                 .setMaxTopK(TOP_K)
-                .setPreferredBackend(LlmInference.Backend.CPU)
+                .setPreferredBackend(backend)
                 .build()
-            llm = LlmInference.createFromOptions(ctx, options)
+            // The GPU reads the prompt several times faster (14 Oct, Tab S6 Lite: the CPU missed the
+            // 6 s limit); not every phone can run it, so the CPU is the fallback.
+            var backend = if (cpuOnlyForTesting) LlmInference.Backend.CPU else LlmInference.Backend.GPU
+            llm = try {
+                LlmInference.createFromOptions(ctx, options(backend))
+            } catch (t: Throwable) {
+                if (t is OutOfMemoryError) throw t
+                Log.w(TAG, "GPU load failed (${t::class.simpleName}); using the CPU")
+                backend = LlmInference.Backend.CPU
+                LlmInference.createFromOptions(ctx, options(backend))
+            }
             loadedFile = f
             val ms = System.currentTimeMillis() - t0
             _status.value = Status.Ready(f.name, f.length() / 1_000_000, ms)
-            log("model loaded in $ms ms (${f.length() / 1_000_000} MB)")
+            log("model loaded in $ms ms (${f.length() / 1_000_000} MB, $backend)")
             if (!isOn(ctx)) unloadNow("switched off while loading")
         } catch (t: Throwable) {
             llm = null
@@ -207,6 +256,9 @@ object LlmEngine : Brain {
             Log.w(TAG, "model load failed: ${t::class.simpleName}")
         }
     }
+
+    /** Debug timing only: close the engine so the next [prewarm] loads it again. */
+    fun unloadForTesting() = unload("reload for a timing test")
 
     /** Close the engine (now, or when the answer in progress ends). */
     fun unload(reason: String) {
@@ -248,7 +300,14 @@ object LlmEngine : Brain {
         scope.launch { generate(prompt, answer) }
         try {
             val text = withTimeoutOrNull(timeoutMs) { answer.await() }
+            val timedOut = !answer.isCompleted
             log(if (text == null) "no answer within $timeoutMs ms" else "answered in ${System.currentTimeMillis() - t0} ms (${text.length} chars)")
+            if (timedOut) {
+                stop()
+                missedLimit()
+            } else if (text != null) {
+                missedInARow = 0
+            }
             return text
         } finally {
             if (!answer.isCompleted) stop()
@@ -272,6 +331,7 @@ object LlmEngine : Brain {
     /** Engine thread only. Completes [answer] with the text, or null (too long, stopped, error). */
     private fun generate(prompt: String, answer: CompletableDeferred<String?>) {
         var session: LlmInferenceSession? = null
+        var future: java.util.concurrent.Future<*>? = null
         try {
             val engine = llm ?: return
             session = LlmInferenceSession.createFromOptions(engine, sessionOptions())
@@ -281,27 +341,33 @@ object LlmEngine : Brain {
             session.addQueryChunk(prompt)
             if (stopRequested) return
             val out = StringBuilder()
-            val future = session.generateResponseAsync { partial, done ->
+            val running = session.generateResponseAsync { partial, done ->
                 val text = synchronized(out) { out.append(partial); out.toString() }
                 // Stop as soon as one JSON object is complete (a small answer: ~40 tokens), or it rambles.
                 if (done || BrainParser.looksComplete(text) || text.length > MAX_OUTPUT_CHARS) answer.complete(text)
             }
-            while (!future.isDone) {
+            future = running
+            while (!running.isDone) {
                 if (answer.isCompleted || stopRequested) {
                     runCatching { session.cancelGenerateResponseAsync() }
-                    runCatching { future.get(STOP_WAIT_MS, TimeUnit.MILLISECONDS) }
                     break
                 }
                 Thread.sleep(POLL_MS)
             }
-            if (!answer.isCompleted) answer.complete(runCatching { future.get(0, TimeUnit.MILLISECONDS) }.getOrNull())
+            // 14 Oct crash (SIGABRT "invalid global reference" in the engine): the session was closed
+            // while the engine still called back into it. Wait until it has really finished.
+            runCatching { running.get(WIND_DOWN_MS, TimeUnit.MILLISECONDS) }
+            if (!answer.isCompleted) answer.complete(runCatching { running.get(0, TimeUnit.MILLISECONDS) }.getOrNull())
         } catch (t: Throwable) {
             Log.w(TAG, "generate failed: ${t::class.simpleName}")
         } finally {
             answer.complete(null) // no-op when already answered
             current = null
-            runCatching { session?.close() }
-            generating = false
+            // Never close a session the engine is still using (it would crash the whole app); a
+            // session stuck past the wind-down is left open, and the engine counts as busy.
+            val finished = future?.isDone != false
+            if (finished) runCatching { session?.close() } else Log.w(TAG, "answer still running after ${WIND_DOWN_MS} ms; session left open")
+            generating = !finished
             if (unloadWhenIdle) unloadNow("memory (after answer)")
         }
     }
@@ -313,7 +379,7 @@ object LlmEngine : Brain {
         override fun onTrimMemory(level: Int) {
             when {
                 // The system is about to kill apps: free ~600 MB now (or right after the answer).
-                level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> unload("memory critical")
+                level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> unload("memory critical (level $level)")
                 // Saathi's screen went away: guide mode does that on purpose to act in the other app.
                 level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> scheduleBackgroundUnload()
                 level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> if (!TaskRunner.isGuiding) unload("memory low")

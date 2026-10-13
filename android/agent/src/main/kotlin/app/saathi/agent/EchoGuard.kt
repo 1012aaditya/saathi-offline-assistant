@@ -313,3 +313,34 @@ class PushToTalk(private val now: () -> Long) {
         const val PRESS_VALID_MS = 2_000L
     }
 }
+
+/**
+ * Settings > "Listen after Saathi speaks" (owner request 14 Oct; default OFF, the user turns it on).
+ * Guide mode then opens the mic by itself ONCE after each Saathi turn, only when Saathi's speech
+ * has completely ended (the Voice interlock adds its gap). This is the one start that isn't a
+ * [PushToTalk] press. Everything the session checks still applies (too soon after speech, an echo
+ * of its own words, its own suggestions said back), nothing said in guide mode can answer a
+ * question, and send / order / call still go to the Confirm sheet.
+ * A noise loop (refused → listen → refused …) stops after [MAX_REFUSED_IN_A_ROW] refused turns in
+ * a row; the user's own press starts it again.
+ */
+class AutoListen {
+    private var refusedInARow = 0
+
+    /** Saathi said a turn: may the mic open by itself after its speech? */
+    @Synchronized
+    fun afterTurn(on: Boolean, refused: Boolean): Boolean {
+        refusedInARow = if (refused) refusedInARow + 1 else 0
+        return on && refusedInARow < MAX_REFUSED_IN_A_ROW
+    }
+
+    /** The user pressed Speak / the bubble / Volume-down. */
+    @Synchronized
+    fun pressed() {
+        refusedInARow = 0
+    }
+
+    companion object {
+        const val MAX_REFUSED_IN_A_ROW = 2
+    }
+}

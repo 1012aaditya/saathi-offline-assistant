@@ -166,6 +166,48 @@ fun SettingsScreen(nav: AppNav) {
             )
         }
 
+        // LISTEN AFTER SAATHI SPEAKS (doing it together: hands-free turns; default off)
+        Column {
+            SectionHeader("Doing it together")
+            Group {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 64.dp)
+                        .toggleable(
+                            value = state.listenAfterSpeaking,
+                            role = Role.Switch,
+                            onValueChange = { on ->
+                                state.updateListenAfterSpeaking(on)
+                                changed(if (on) "Saathi listens after it speaks" else "Press Speak to talk")
+                            },
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RowTitle("Listen after Saathi speaks", "No need to press Speak each time", Modifier.weight(1f))
+                    Switch(
+                        checked = state.listenAfterSpeaking,
+                        onCheckedChange = null,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = c.onAccent,
+                            checkedTrackColor = c.accent,
+                            checkedBorderColor = c.accent,
+                            uncheckedThumbColor = c.secondary,
+                            uncheckedTrackColor = c.screen,
+                            uncheckedBorderColor = c.secondary,
+                        ),
+                    )
+                }
+            }
+            Footnote(
+                "When Saathi finishes talking, you hear the listening tone and can answer right away. " +
+                    "In a noisy room it may hear other people; then turn this off and press Speak instead. " +
+                    "Sending, ordering and calling still ask you first.",
+                Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            )
+        }
+
         // APPS
         Column {
             SectionHeader("Apps")

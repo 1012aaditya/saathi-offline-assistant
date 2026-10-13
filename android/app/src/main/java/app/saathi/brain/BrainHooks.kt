@@ -13,7 +13,7 @@ object BrainHooks {
      */
     fun forGuide(context: Context, lang: Lang, log: (String) -> Unit): GuideBrain? {
         LlmEngine.attach(context)
-        if (!LlmEngine.isOn(context) || LlmEngine.modelFile(context) == null) return null
+        if (!LlmEngine.isOn(context) || LlmEngine.isTooSlow(context) || LlmEngine.modelFile(context) == null) return null
         LlmEngine.prewarm()
         return GuideBrain(LlmEngine, lang, onThinking = LlmEngine::setThinking, log = log)
     }

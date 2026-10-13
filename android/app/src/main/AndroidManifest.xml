@@ -45,6 +45,10 @@
         android:label="Saathi"
         android:supportsRtl="true"
         android:theme="@style/Theme.Saathi">
+        <!-- The on-device AI may run on the GPU (OpenCL); optional, it falls back to the CPU. -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"

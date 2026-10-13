@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.saathi.agent.AutoListen
 import app.saathi.agent.GuideTurn
 import app.saathi.agent.Heard
 import app.saathi.agent.Outcome
@@ -56,9 +57,11 @@ import app.saathi.ui.theme.Clarity
  * the safety gate and says what changed. Saathi stays in front while talking; the other app comes
  * forward only for each action (the session brings it back and forth).
  *
- * Push-to-talk ONLY: listening starts when the user presses Speak (or the small talk button, or
- * holds Volume-down). Saathi never opens the microphone after speaking, because what it says
- * contains the very words a command uses (13 Oct incidents; 14 Oct 00:40 "read more"). Every
+ * Push-to-talk by default: listening starts when the user presses Speak (or the small talk button,
+ * or holds Volume-down). Saathi doesn't open the microphone after speaking, because what it says
+ * contains the very words a command uses (13 Oct incidents; 14 Oct 00:40 "read more"), unless the
+ * user turned on Settings > "Listen after Saathi speaks" ([AutoListen]): then it opens once after
+ * each turn, only when Saathi's speech has completely ended, and the same session checks apply. Every
  * start goes through [PushToTalk]: a press arms one session, a new Saathi turn disarms it and
  * cancels any listening still open, so no listener survives into the next turn. Each transcript
  * carries its timing; the session refuses anything heard under 1.5 s after Saathi spoke. The
@@ -84,10 +87,12 @@ fun GuideScreen(nav: AppNav) {
 
     val listener = ScreenParts.rememberCommandListener { heard -> TaskRunner.guideCommand(heard, "voice") }
     val ptt = remember { PushToTalk { SystemClock.elapsedRealtime() } }
+    val auto = remember { AutoListen() }
 
     /** The user's own press (Speak, talk button, Volume-down at [at]): listen once, or finish listening. */
     fun talk(at: Long = SystemClock.elapsedRealtime()) {
         if (listener.active) { listener.finish(); return }
+        auto.pressed()
         ptt.press(at)
         if (ptt.mayListen()) listener.start()
     }
@@ -112,6 +117,9 @@ fun GuideScreen(nav: AppNav) {
             ptt.turnSpoken()
             listener.cancel()
             deps.feedback.cue(if (last.kind == GuideTurn.Kind.REFUSED) Cue.Cancelled else Cue.NeedsAnswer)
+            if (auto.afterTurn(deps.state.listenAfterSpeaking, refused = last.kind == GuideTurn.Kind.REFUSED)) {
+                ScreenParts.listenAfterSpeech(deps.voice, listener) { !leaving && TaskRunner.state.value is TaskRunner.State.Guiding }
+            }
         }
     }
     // Volume-down held while guiding: the user's own push-to-talk (only a fresh hold counts).

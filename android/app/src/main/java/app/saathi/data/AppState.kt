@@ -118,6 +118,14 @@ class AppState(context: Context) {
     var floatingSaathi by mutableStateOf(prefs.getBoolean(FLOATING_KEY, true)); private set
     fun updateFloatingSaathi(on: Boolean) { floatingSaathi = on; prefs.edit().putBoolean(FLOATING_KEY, on).apply() }
 
+    /**
+     * Settings > "Listen after Saathi speaks" (owner request 14 Oct). Default OFF: guide mode is
+     * push-to-talk. On: after each guide turn, once Saathi has finished speaking, the mic opens by
+     * itself ([app.saathi.agent.AutoListen]). The session's echo checks and the Confirm sheet stay.
+     */
+    var listenAfterSpeaking by mutableStateOf(prefs.getBoolean("listenAfterSpeaking", false)); private set
+    fun updateListenAfterSpeaking(on: Boolean) { listenAfterSpeaking = on; prefs.edit().putBoolean("listenAfterSpeaking", on).apply() }
+
     fun updateAppLevel(app: String, level: AppLevel) {
         val i = appLevels.indexOfFirst { it.first == app }
         if (i >= 0) appLevels[i] = app to level
@@ -149,7 +157,7 @@ class AppState(context: Context) {
         trustedContacts.clear(); trustedContacts.addAll(listOf("Mom", "Dad"))
         setupDone = false; theme = ThemeChoice.System; soundOn = true; languageTag = null
         speechRate = 1.0f; spendingLimit = 500; walkSensitivity = WalkSensitivity.Medium
-        allowOrders = false; floatingSaathi = true
+        allowOrders = false; floatingSaathi = true; listenAfterSpeaking = false
         listOf("WhatsApp" to AppLevel.AskFirst, "Grocery app" to AppLevel.AskFirst, "Payments" to AppLevel.Off)
             .forEach { (a, l) -> updateAppLevel(a, l) }
     }

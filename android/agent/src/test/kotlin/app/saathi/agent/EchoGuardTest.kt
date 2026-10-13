@@ -246,6 +246,23 @@ class EchoGuardTest {
     }
 
     @Test
+    fun `listen after Saathi speaks - only when the user turned it on, and a noise loop stops`() {
+        val a = AutoListen()
+        assertFalse(a.afterTurn(on = false, refused = false), "default off: push-to-talk only")
+        assertTrue(a.afterTurn(on = true, refused = false))
+        // Noise heard → "say it again" (refused) → listen once more → refused again → stop.
+        assertTrue(a.afterTurn(on = true, refused = true))
+        assertFalse(a.afterTurn(on = true, refused = true))
+        assertFalse(a.afterTurn(on = true, refused = true), "stays off until the user presses")
+        a.pressed()
+        assertTrue(a.afterTurn(on = true, refused = true))
+        // A normal turn resets it too.
+        assertFalse(a.afterTurn(on = true, refused = true))
+        assertTrue(a.afterTurn(on = true, refused = false))
+        assertFalse(a.afterTurn(on = false, refused = false), "switched off mid-session: off at once")
+    }
+
+    @Test
     fun `Saathi speaking during a session cancels it and its result is discarded`() {
         val c = Clock()
         val v = VoiceInterlock(c::now)

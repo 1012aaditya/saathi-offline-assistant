@@ -102,6 +102,10 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
     private var checkPending = false
     private var passing = false
     private var endSaidFor = 0
+    private var lastWhy: Floating.Why? = null
+
+    /** The floating run the panel was opened for by itself (once; the user may hide it after). */
+    private var panelShownFor = 0
 
     /** The app in front, for the panel's words ("Saathi · WhatsApp"). */
     private val appLabel = mutableStateOf("the app")
@@ -197,6 +201,7 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
                 panelOpen = panelOpen,
             ),
         )
+        if (shown.why != lastWhy) { lastWhy = shown.why; Log.i(TAG, "bubble ${if (shown.bubble) "shown" else "hidden"}: ${shown.why}") }
         if (shown.bubble) addBubble() else removeBubble()
         if (shown.panel) addPanel() else removePanel()
         panelParams?.let { p ->
@@ -284,6 +289,11 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
     private fun onRunnerState(s: TaskRunner.State) {
         val d = deps ?: return
         if (!TaskRunner.isFloatingRun(s.runId)) return
+        // A session moved here from Saathi's screen ("guide me in Blinkit"): show its panel once.
+        if (panelShownFor != s.runId && s !is TaskRunner.State.Finished) {
+            panelShownFor = s.runId
+            if (!panelOpen) openPanel()
+        }
         when (s) {
             is TaskRunner.State.Confirming, is TaskRunner.State.ChoosingItem -> openPanel()
             is TaskRunner.State.Finished -> if (endSaidFor != s.runId) {

@@ -39,6 +39,7 @@ import app.saathi.ui.theme.Clarity
 internal fun brainStatusText(s: LlmEngine.Status): String = when (s) {
     LlmEngine.Status.Absent -> "No model file yet"
     is LlmEngine.Status.Off -> "Off"
+    is LlmEngine.Status.TooSlow -> "Too slow on this phone · using quick commands"
     is LlmEngine.Status.Installed -> "On · loads when you do it together (${s.mb} MB)"
     is LlmEngine.Status.Loading -> "Loading the model…"
     is LlmEngine.Status.Ready -> "On · ready (${s.mb} MB)"
@@ -97,6 +98,16 @@ fun SmartUnderstandingSection(changed: (String) -> Unit, say: (String) -> Unit) 
                     ),
                 )
             }
+            if (status is LlmEngine.Status.TooSlow) {
+                GroupDivider()
+                GroupRow(
+                    title = "Try the AI model again",
+                    onClick = {
+                        LlmEngine.clearTooSlow(context)
+                        changed("I'll try the AI model again next time we do it together")
+                    },
+                )
+            }
             if (hasFile) {
                 GroupDivider()
                 GroupRow(
@@ -113,6 +124,9 @@ fun SmartUnderstandingSection(changed: (String) -> Unit, say: (String) -> Unit) 
         }
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Footnote("Understands everyday sentences in “do it together”, like “mujhe doodh chahiye”. It runs on your phone, offline: nothing is sent anywhere. Saathi still asks before sending or ordering.")
+            if (status is LlmEngine.Status.TooSlow) {
+                Footnote("This phone took too long to answer with the AI model, so Saathi isn't loading it. Everyday commands still work.")
+            }
             if (!hasFile) {
                 Footnote("To turn it on, copy a Gemma 3 1B .task file into ${LlmEngine.MODELS_PATH} on this phone (for example with adb push).")
             }

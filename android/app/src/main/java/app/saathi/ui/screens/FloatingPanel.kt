@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +46,7 @@ import app.saathi.agent.FloatingTexts
 import app.saathi.agent.GuideTurn
 import app.saathi.agent.Heard
 import app.saathi.agent.Outcome
+import app.saathi.agent.AutoListen
 import app.saathi.agent.PushToTalk
 import app.saathi.agent.TaskRunner
 import app.saathi.feedback.Cue
@@ -63,10 +65,12 @@ import kotlinx.coroutines.flow.StateFlow
  * something, the same Confirm / "which one?" question as the full-screen sheets takes its place
  * ([FloatingConfirmSheet], [FloatingPickSheet]).
  *
- * Push-to-talk ONLY, exactly like the Guide screen: every start goes through [PushToTalk]; a press
- * (Speak, the bubble, Volume-down held) arms one session; each new Saathi turn disarms it and
+ * Push-to-talk by default, exactly like the Guide screen: every start goes through [PushToTalk]; a
+ * press (Speak, the bubble, Volume-down held) arms one session; each new Saathi turn disarms it and
  * cancels any listening, so the panel never listens to Saathi's own description (13 Oct incidents;
- * 14 Oct 00:40 "read more"). Each transcript carries its timing to the session. Nothing said here
+ * 14 Oct 00:40 "read more"). With Settings > "Listen after Saathi speaks" on ([AutoListen]) the mic
+ * also opens once after each turn, when Saathi's speech has completely ended and only while the
+ * conversation waits for the user. Each transcript carries its timing to the session. Nothing said here
  * can answer a question: the guide grammar has no yes, and questions use their own sheet.
  *
  * TalkBack: the status line is a polite live region with SHORT phase words ("Your move", "Needs
@@ -95,6 +99,7 @@ fun FloatingPanel(
 
     val listener = ScreenParts.rememberCommandListener { heard -> TaskRunner.guideCommand(heard, "floating voice") }
     val ptt = remember { PushToTalk { SystemClock.elapsedRealtime() } }
+    val auto = remember { AutoListen() }
 
     val run: Floating.RunView = when {
         floating && st is TaskRunner.State.Confirming -> Floating.RunView.Confirm
@@ -106,11 +111,13 @@ fun FloatingPanel(
         else -> Floating.RunView.None
     }
     val phase = Floating.phase(run, listener.active, thinking)
+    val currentPhase by rememberUpdatedState(phase)
 
     /** The user's own press (Speak, the bubble, Volume-down at [at]): listen once, or finish listening. */
     fun talk(at: Long = SystemClock.elapsedRealtime()) {
         if (listener.active) { listener.finish(); return }
         if (!Floating.speakEnabled(phase)) return
+        auto.pressed()
         ptt.press(at)
         if (ptt.mayListen()) listener.start()
     }
@@ -128,6 +135,9 @@ fun FloatingPanel(
             ptt.turnSpoken()
             listener.cancel()
             deps.feedback.cue(if (last.kind == GuideTurn.Kind.REFUSED) Cue.Cancelled else Cue.NeedsAnswer)
+            if (auto.afterTurn(deps.state.listenAfterSpeaking, refused = last.kind == GuideTurn.Kind.REFUSED)) {
+                ScreenParts.listenAfterSpeech(deps.voice, listener) { Floating.speakEnabled(currentPhase) }
+            }
         }
     }
     // The bubble / Volume-down: the user's own push-to-talk (only a fresh press counts).

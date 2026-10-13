@@ -347,6 +347,19 @@ object TaskRunner {
         return true
     }
 
+    /** A Guide-screen session reached its app: the floating panel takes it from here (see showApp). */
+    private fun moveToBubble(id: Int) {
+        if (guideRun != id || floatingRun == id) return
+        floatingRun = id
+        log("guide session moved to the floating panel (app in front)")
+        val s = _state.value
+        if (s.runId == id) _state.value = when (s) {
+            is State.Guiding -> s.copy(turns = s.turns.toList())
+            is State.Running -> s.copy(lines = s.lines.toList())
+            else -> s
+        }
+    }
+
     private val _guideTalk = MutableSharedFlow<Long>(extraBufferCapacity = 1)
 
     /**
@@ -427,7 +440,7 @@ object TaskRunner {
             previous?.join()
             earlierCleanup?.join()
             val out = runGuide(app, id, command, title, target, null, open, lang, appState)
-            finish(app, id, command, title, out, appState, front = true)
+            finish(app, id, command, title, out, appState, front = !isFloatingRun(id))
             afterJob(app)
         }
         return true
@@ -465,7 +478,12 @@ object TaskRunner {
                 // Floating: never switch apps; the app is in front or it isn't.
                 guideTarget = packageName
                 if (isFloatingRun(id)) return device.snapshot()?.packageName == packageName
-                return bringAppForward(app, packageName, appState)
+                val ok = bringAppForward(app, packageName, appState)
+                // Owner, 14 Oct: "don't open the app again and again, everything via the bubble".
+                // Once the app is in front, the floating panel drives the session: Saathi's screen
+                // isn't brought forward again (not to talk, not at the end).
+                if (ok && appState.floatingSaathi && SaathiAccessibilityService.running != null) moveToBubble(id)
+                return ok
             }
 
             override val floating: Boolean get() = isFloatingRun(id)

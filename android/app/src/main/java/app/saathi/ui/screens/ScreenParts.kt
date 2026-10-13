@@ -400,6 +400,23 @@ object ScreenParts {
     }
 
     /**
+     * Settings > "Listen after Saathi speaks" ([app.saathi.agent.AutoListen]): call from the guide's
+     * new-turn effect, so the next turn cancels the wait. Waits for Saathi's words to start (the
+     * runner speaks them) and then to end; [Voice.startListening] adds the speech-to-listen gap and
+     * cancels the session if Saathi speaks again. [stillOk] is checked last (e.g. a question sheet
+     * took over). Never asks for the microphone permission by itself.
+     */
+    suspend fun listenAfterSpeech(voice: Voice, listener: ScreenListener, stillOk: () -> Boolean = { true }) {
+        withTimeoutOrNull(SPEECH_START_WAIT_MS) { voice.speaking.first { it } }
+        voice.speaking.first { !it }
+        if (listener.active || !listener.hasMic() || !stillOk()) return
+        Log.i("SaathiVoice", "guide: listening after Saathi's turn (Listen after Saathi speaks is on)")
+        listener.begin()
+    }
+
+    private const val SPEECH_START_WAIT_MS = 1_500L
+
+    /**
      * THE way an answer sheet (Confirm, order / empty-cart confirm, Draft choice, "Which Rahul?",
      * "Open Camera?", grocery "which one?") hears its answer. Listening goes through Voice's
      * interlock (never while Saathi speaks, and only [EchoGuard.LISTEN_AFTER_SPEECH_MS] after);
