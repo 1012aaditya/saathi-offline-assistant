@@ -142,6 +142,11 @@ object BrainPrompt {
         append("User: which is cheaper -> {\"intent\":\"compare_prices\",\"target\":null,\"quantity\":null,\"query\":null,\"reply\":\"Let me check.\"}\n")
         append("User: find bread -> {\"intent\":\"search\",\"target\":null,\"quantity\":null,\"query\":\"bread\",\"reply\":\"Okay.\"}\n")
         append("User: how are you -> {\"intent\":\"chit_chat\",\"target\":null,\"quantity\":null,\"query\":null,\"reply\":\"I'm well, thank you! What shall we do next?\"}\n")
+        // Hinglish the laptop model (14 Oct demo) got wrong without these.
+        append("User: kitne paise ho gaye total -> {\"intent\":\"cart_summary\",\"target\":null,\"quantity\":null,\"query\":null,\"reply\":\"Let me check your cart.\"}\n")
+        append("User: ye wala hata do -> {\"intent\":\"remove_item\",\"target\":null,\"quantity\":null,\"query\":null,\"reply\":\"Okay.\"}\n")
+        append("User: kuch thanda peene ko dikhao -> {\"intent\":\"search\",\"target\":null,\"quantity\":null,\"query\":\"cold drink\",\"reply\":\"Let's look for cold drinks.\"}\n")
+        append("User: bas ho gaya -> {\"intent\":\"done\",\"target\":null,\"quantity\":null,\"query\":null,\"reply\":\"Okay, we're done.\"}\n")
         append("<<<SCREEN DATA\n").append(input.summary.render()).append("\nSCREEN DATA>>>\n")
         if (input.history.isNotEmpty()) {
             append("Conversation so far:\n")

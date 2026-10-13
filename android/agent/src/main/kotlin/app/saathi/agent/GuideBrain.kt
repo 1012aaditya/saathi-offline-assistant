@@ -26,6 +26,8 @@ class GuideBrain(
     private val log: (String) -> Unit = {},
     private val timeoutMs: Long = TIMEOUT_MS,
     private val retryTimeoutMs: Long = RETRY_TIMEOUT_MS,
+    /** May this app's screen go to the model? False: rules only (e.g. WhatsApp when the model runs on the laptop). */
+    private val mayRead: (packageName: String) -> Boolean = { true },
 ) {
     companion object {
         const val TIMEOUT_MS = 6_000L
@@ -122,6 +124,7 @@ class GuideBrain(
     ): GuideCommand? {
         remember(utterance, lastSaid)
         if (view == null || !wants(parsed, utterance, view)) { lastRoute = "rules"; return parsed }
+        if (!mayRead(view.packageName)) { lastRoute = "rules (app kept on the phone)"; return parsed }
         if (!brain.ready) { lastRoute = "rules (model not ready)"; return parsed }
         val summary = ScreenSummary.of(view, appLabel)
         val input = BrainInput(utterance, summary, memory.toList().takeLast(MEMORY_TURNS), lang)

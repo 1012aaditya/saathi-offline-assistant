@@ -67,12 +67,21 @@ class DebugCommandReceiver : BroadcastReceiver() {
             if (!engine.ready) { Log.i("SaathiBench", "model not ready after 90 s"); return@launch }
             val products = (1..6).map { SummaryProduct("Sample product $it", "500 ml", "₹${40 + it}", "") }
             val screen = ScreenSummary("Blinkit", "search results", "Search results", products, "2 items in cart", null, null, emptyList())
-            val prompt = BrainPrompt.full(BrainInput("do you see anything I can drink here", screen, emptyList(), Lang.EN))
-            repeat(2) { i ->
-                if (i > 0) delay(3_000) // let the first answer wind down
+            // Made-up test sentences (never the user's words), so the short-prompt answers are logged.
+            val samples = listOf(
+                "mujhe kuch thanda peena hai", "ye wala hata do", "sabse sasta dikhao",
+                "can you put two of these in my card", "go back yaar", "kitne paise ho gaye total",
+            )
+            fun short(said: String) =
+                "<start_of_turn>user\nMap the request to one intent: search, add, remove, cart, read, cheaper, back, done. " +
+                    "Answer JSON {\"intent\":...,\"query\":...}.\nRequest: $said<end_of_turn>\n<start_of_turn>model\n"
+            val prompts = if (mode == "short") samples.map(::short) else List(2) { BrainPrompt.full(BrainInput("do you see anything I can drink here", screen, emptyList(), Lang.EN)) }
+            prompts.forEachIndexed { i, prompt ->
+                if (i > 0) delay(3_000) // let the previous answer wind down
                 val t1 = SystemClock.elapsedRealtime()
                 val out = engine.complete(prompt, 60_000)
-                Log.i("SaathiBench", "run ${i + 1}: prompt ${prompt.length} chars, ${SystemClock.elapsedRealtime() - t1} ms, answer ${out?.length ?: -1} chars")
+                val shown = if (mode == "short") " -> ${out?.replace("\n", " ")}" else ""
+                Log.i("SaathiBench", "run ${i + 1}: prompt ${prompt.length} chars, ${SystemClock.elapsedRealtime() - t1} ms, answer ${out?.length ?: -1} chars$shown")
             }
         }
     }

@@ -44,6 +44,7 @@ uv run python eval/run_flows.py --flow all --n 10   # success-rate table → eva
 uv run ruff check . && uv run ruff format .
 # Android app (branch feature/android-app; see android/README.md)
 cd android && ./gradlew :safety:test :app:assembleDebug   # needs JAVA_HOME=/opt/homebrew/opt/openjdk@17
+scripts/laptop_brain.sh                             # demo: tablet's guide uses this laptop's Ollama model over adb reverse
 ```
 
 ## Code layout

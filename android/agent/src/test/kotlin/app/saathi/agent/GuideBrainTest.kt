@@ -69,6 +69,15 @@ class GuideBrainTest {
     // -- the owner's sentences ----------------------------------------------------------------------
 
     @Test
+    fun `an app kept on the phone never reaches the model - rules only`() {
+        val brain = FakeBrain(listOf(json("add_item", "Coca-Cola Diet Coke Soft Drink")))
+        val gb = GuideBrain(brain, Lang.EN, timeoutMs = 300, retryTimeoutMs = 300, mayRead = { it != Apps.BLINKIT })
+        val r = turn("can you order diet Coke in my card on", emptyList(), brain = brain, gb = gb)
+        assertEquals(GuideCommand.Unknown("can you order diet Coke in my card on"), r.cmd)
+        assertTrue(brain.prompts.isEmpty(), "no screen text was sent")
+    }
+
+    @Test
     fun `can you order diet Coke in my card on - the user's own words name it, so it is added without asking`() {
         val r = turn("can you order diet Coke in my card on", listOf(json("add_item", "Coca-Cola Diet Coke Soft Drink")))
         assertEquals(GuideCommand.Add("Coca-Cola Diet Coke Soft Drink 300 ml", 1), r.cmd)

@@ -2,7 +2,10 @@
 <!-- Debug builds only: on-device walk-mode detector benchmark (no camera, no UI).
      Protected by DUMP so only `adb shell` can trigger it. See WalkBenchReceiver.kt. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+    <!-- Demo builds only: the guide's understanding may run on the owner's laptop, reached at
+         127.0.0.1 through `adb reverse` (LaptopBrain.kt). Release builds have no INTERNET permission. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:networkSecurityConfig="@xml/laptop_only">
         <receiver
             android:name=".walk.WalkBenchReceiver"
             android:exported="true"
