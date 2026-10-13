@@ -582,17 +582,21 @@ object GuideView {
     fun content(v: ScreenView): List<GuideItem> = v.items.filter { !it.chrome && it.spoken.isNotEmpty() && it.element !== v.cartBar }
 
     private fun generic(v: ScreenView, app: String, t: GuideTexts): Spoken {
-        val content = content(v)
+        // Don't say the screen's title (e.g. a store's slogan) a second time as an item.
+        val content = content(v).filter { v.title.isNullOrBlank() || !it.spoken.equals(v.title, ignoreCase = true) }
         val shown = content.take(GENERIC_ITEMS)
         val left = content.size - shown.size
-        val parts = mutableListOf<String?>(t.youreIn(app, v.title))
+        val order = v.packageName in Apps.ORDER_APPS
+        // A shop's home slogan isn't a place: "You're in Blinkit." reads better than the tagline.
+        val parts = mutableListOf<String?>(t.youreIn(app, if (order) null else v.title))
         v.cartCount?.let { parts += t.cartHas(it) }
         parts += if (shown.isEmpty()) t.nothingVisible else t.iCanSee(t.joinAnd(shown.map { it.spoken }))
         if (left > 0) parts += t.andMore(left)
-        val order = v.packageName in Apps.ORDER_APPS
         parts += if (order) t.whatToBuy else t.whatNext
         val sugg = buildList {
-            shown.firstOrNull { it.element?.clickable == true && it.card == null && !it.field && it.name.isNotEmpty() }?.let { add(t.sayTap(it.name)) }
+            // In a shop, a friend suggests searching, not tapping a banner.
+            if (order) add(t.saySearch("milk"))
+            else shown.firstOrNull { it.element?.clickable == true && it.card == null && !it.field && it.name.isNotEmpty() && it.name.length <= 30 }?.let { add(t.sayTap(it.name)) }
             if (v.cartBar != null) add(t.sayOpenCart)
         }.take(2)
         return spoken(parts, sugg, t, if (left > 0) t.moreHint else null)

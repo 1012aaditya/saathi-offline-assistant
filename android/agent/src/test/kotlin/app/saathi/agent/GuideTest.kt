@@ -201,7 +201,15 @@ class GuideTest {
     fun `blinkit home - cart count, content, what to buy`() {
         val fake = shop().apply { putInCart("Brown Bread", "400 g", 2); view = FakeBlinkit.View.Home }
         val s = summary(fake)
-        assertEquals("You're in Blinkit. Your cart has 2 items. I can see Shop by category. What would you like to buy? You could say \"open the cart\".", s.text)
+        assertEquals("You're in Blinkit. Your cart has 2 items. I can see Shop by category. What would you like to buy? You could say \"search for milk\" or \"open the cart\".", s.text)
+    }
+
+    @Test
+    fun `shop slogan is not read as the place and never twice (tablet, 14 Oct)`() {
+        val fake = shop().apply { view = FakeBlinkit.View.Home }
+        val s = summary(fake)
+        assertTrue(s.text.startsWith("You're in Blinkit."), s.text)
+        assertFalse(s.text.contains("tap Everything", ignoreCase = true), s.text)
     }
 
     @Test
