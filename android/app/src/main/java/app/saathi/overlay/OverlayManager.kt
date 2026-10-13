@@ -341,6 +341,17 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
         }
     }
 
+    /** Run [block] with the bubble and panel invisible (a screenshot of the app alone). */
+    suspend fun <T> hidden(block: suspend () -> T): T {
+        withContext(Dispatchers.Main) { setPassing(true) }
+        try {
+            delay(PASS_THROUGH_SETTLE_MS * 2) // let the screen redraw without them
+            return block()
+        } finally {
+            withContext(NonCancellable + Dispatchers.Main) { setPassing(false) }
+        }
+    }
+
     private fun setPassing(on: Boolean) {
         passing = on
         Log.i(TAG, "gesture ${if (on) "passes through" else "done; overlay back"}")

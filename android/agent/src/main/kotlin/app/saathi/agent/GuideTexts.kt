@@ -151,6 +151,13 @@ class GuideTexts(val lang: Lang) {
         "वह ऐप अब सामने नहीं है, इसलिए कुछ नहीं दबाऊँगा। जिस ऐप में चाहिए, वहाँ Saathi बबल दबाइए।",
     )
     val screenMoved get() = s("The screen changed before I could act, so I didn't press anything.", "दबाने से पूर्व स्क्रीन बदल गई, इसलिए कुछ नहीं दबाया।")
+    val looking get() = s("Let me look at the pictures.", "तस्वीरें देखता हूँ।")
+    val lookSays get() = s("In the pictures:", "तस्वीरों में:")
+    val lookMayBeWrong get() = s("That's my best guess, it may not be exact.", "यह मेरा अंदाज़ा है, पूरी तरह सही न भी हो।")
+    val lookNotHere get() = s("I don't look at pictures in this app, to keep it private.", "इस ऐप में मैं तस्वीरें नहीं देखता, ताकि सब निजी रहे।")
+    val lookProtected get() = s("This screen is protected, so I can't look at it.", "यह स्क्रीन सुरक्षित है, मैं इसे नहीं देख सकता।")
+    val lookUnavailable get() = s("I can't look at pictures right now. It needs the laptop connected.", "अभी तस्वीरें नहीं देख सकता। इसके लिए लैपटॉप जुड़ा होना चाहिए।")
+    val lookFailed get() = s("I couldn't see the pictures this time. Try again.", "इस बार तस्वीरें नहीं देख पाया। फिर से कोशिश करें।")
     val keptIt get() = s("OK, I've left it as it is.", "ठीक है, जैसा था वैसा छोड़ दिया।")
     fun outOfStockAsk(item: String) = s(
         "Your cart has an item that's out of stock: $item. Should I move it to your wishlist? Say \"Move to wishlist\", \"keep it\", or add one of the suggestions.",

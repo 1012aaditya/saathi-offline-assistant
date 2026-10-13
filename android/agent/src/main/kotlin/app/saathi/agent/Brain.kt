@@ -43,6 +43,7 @@ enum class BrainIntent(val wire: String) {
     BACK("back"),
     READ_MORE("read_more"),
     WHAT_ON_SCREEN("what_on_screen"),
+    LOOK_AT_PICTURE("look_at_picture"),
     CART_SUMMARY("cart_summary"),
     COMPARE_PRICES("compare_prices"),
     ASK_CLARIFY("ask_clarify"),

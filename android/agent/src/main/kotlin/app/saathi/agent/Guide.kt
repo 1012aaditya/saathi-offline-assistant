@@ -95,6 +95,22 @@ data class GuidePolicy(
  * opens the microphone by itself in guide mode: the description contains the very words a
  * command uses (13 Oct incidents).
  */
+/** What [GuideIO.lookAtScreen] found. */
+sealed interface Look {
+    data class Described(val text: String) : Look
+
+    /** A private app (chats, payments …): pictures are never sent anywhere. */
+    data object NotHere : Look
+
+    /** A PIN / password screen, or a protected screen (it shows black). */
+    data object Protected : Look
+
+    /** No vision model in this build / the laptop isn't connected. */
+    data object Unavailable : Look
+
+    data object Failed : Look
+}
+
 interface GuideIO {
     suspend fun say(turn: GuideTurn)
 
@@ -118,6 +134,13 @@ interface GuideIO {
 
     /** The "which one?" sheet (PickDialog). Null = cancel (the default). */
     suspend fun pick(request: PickRequest): Int?
+
+    /**
+     * "What does this picture say?": a screenshot of [packageName] described by a vision model
+     * (demo: the owner's laptop). The implementation refuses private apps and PIN / password /
+     * protected screens. The words are only spoken: never a target for an action.
+     */
+    suspend fun lookAtScreen(packageName: String, lang: Lang): Look = Look.Unavailable
 
     fun appLabel(packageName: String): String = when (packageName) {
         Apps.WHATSAPP -> "WhatsApp"
@@ -395,6 +418,19 @@ class GuideSession(
             }
             GuideCommand.Help -> say("${t.help} ${t.whatNext}")
             GuideCommand.Keep -> say("${t.keptIt} ${t.whatNext}")
+            GuideCommand.LookAtPicture -> {
+                val (ok, out) = refresh(); if (!ok) return out
+                say(t.looking, GuideTurn.Kind.INFO)
+                say(
+                    when (val l = io.lookAtScreen(view!!.packageName, lang)) {
+                        is Look.Described -> "${t.lookSays} ${l.text} ${t.lookMayBeWrong} ${t.whatNext}"
+                        Look.NotHere -> "${t.lookNotHere} ${t.whatNext}"
+                        Look.Protected -> "${t.lookProtected} ${t.whatNext}"
+                        Look.Unavailable -> "${t.lookUnavailable} ${t.whatNext}"
+                        Look.Failed -> "${t.lookFailed} ${t.whatNext}"
+                    },
+                )
+            }
             GuideCommand.WhatsOnScreen -> {
                 val (ok, out) = refresh(); if (!ok) return out
                 say(summary(), GuideTurn.Kind.DESCRIBE)

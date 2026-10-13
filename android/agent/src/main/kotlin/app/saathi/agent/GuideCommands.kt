@@ -32,6 +32,9 @@ sealed interface GuideCommand {
     data object More : GuideCommand
     data object WhatsOnScreen : GuideCommand
 
+    /** "What does this picture / banner say?": the pictures on the screen, described (GuideIO.lookAtScreen). */
+    data object LookAtPicture : GuideCommand
+
     /** "read everything" / "what buttons are there": every line, controls included. */
     data object Everything : GuideCommand
 
@@ -77,6 +80,16 @@ object GuideGrammar {
     private val EVERYTHING = Regex(
         "^(read everything|read it all|read all|everything|all of it|what buttons are there|which buttons are there|what are the buttons|" +
             "what buttons|read the buttons|list everything|sab padho|sab kuch padho|saare button|sab batao|सब पढ़ो|सब कुछ पढ़ो|सब बताओ|कौन से बटन हैं)$",
+        I,
+    )
+    private val LOOK = Regex(
+        "^(?:what does|what do) (?:this|the|that|these) (?:picture|image|photo|banner|poster|ad|offer|pictures|images|banners)s? (?:say|show|mean)|" +
+            "^(?:describe|read|look at|explain) (?:this|the|that|these) (?:picture|image|photo|banner|poster|ad|offer|pictures|images|banners)s?|" +
+            "^what(?:'s| is) (?:in|on) (?:this|the|that) (?:picture|image|photo|banner|poster)|" +
+            "^(?:look at the screen|what are the pictures|describe the pictures)|" +
+            "^(?:ye|yeh|is|iss|us|uss)?\\s*(?:photo|foto|tasveer|tasvir|picture|image|banner|poster)\\s*(?:mein|me|main|pe|par)\\s*kya(?: likha)?(?: hai| h)?|" +
+            "^(?:photo|tasveer|picture|banner) (?:dekh ke|dekhkar|dekh kar) batao|" +
+            "^(?:यह |इस )?(?:फोटो|तस्वीर|बैनर) (?:में|पर) क्या(?: लिखा)? है",
         I,
     )
     private val SCREEN = Regex("what'?s on (the |my |this )?screen|what is on (the |this )?screen|what do you see|what can you see|describe (the |this )?screen|read (the |this )?screen|where am i|screen (pe|par|per) kya|kya dikh|स्क्रीन (पर|पे) क्या|क्या दिख", I)
@@ -177,6 +190,7 @@ object GuideGrammar {
         HELP.matches(body) -> GuideCommand.Help
         TOTAL_Q.matches(body) -> GuideCommand.Total
         CART_Q.containsMatchIn(body) -> GuideCommand.Cart
+        LOOK.containsMatchIn(body) -> GuideCommand.LookAtPicture
         SCREEN.containsMatchIn(body) -> GuideCommand.WhatsOnScreen
         OPEN_CART.matches(body) -> GuideCommand.OpenCart
         CHECKOUT.matches(body) -> GuideCommand.Checkout

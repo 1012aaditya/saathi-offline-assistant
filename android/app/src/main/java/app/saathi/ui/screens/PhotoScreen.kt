@@ -66,6 +66,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.saathi.agent.Command
+import app.saathi.agent.Lang
+import app.saathi.brain.LaptopBrain
+import app.saathi.brain.LaptopVision
 import app.saathi.agent.CommandParser
 import app.saathi.agent.PhotoSource
 import app.saathi.agent.Requests
@@ -251,6 +254,17 @@ fun PhotoScreen(nav: AppNav) {
 
     // ---- actions --------------------------------------------------------------------------------
 
+    /**
+     * Demo mode: the laptop's vision model describes the picture in plain words (LaptopVision);
+     * null when this build can't reach the laptop or it didn't answer (then the object list).
+     */
+    suspend fun laptopSays(photo: android.graphics.Bitmap, kind: LaptopVision.Kind): String? {
+        if (!LaptopBrain.usable(context)) return null
+        say(if (lang == Lang.HI) "देख रहा हूँ।" else "Looking.")
+        val d = LaptopVision.describe(photo, kind, lang) ?: return null
+        return d + if (lang == Lang.HI) " यह पूरी तरह सही न भी हो।" else " It may not be exact."
+    }
+
     fun describeLive() {
         if (busy) return
         if (!cameraOk) return askForCamera()
@@ -266,7 +280,8 @@ fun PhotoScreen(nav: AppNav) {
                 shot = photo
                 saved = false
                 val a = engine.analyse(photo)
-                finish(Describe.describe(a.found, a.quality, lang, live = true), a.found.isNotEmpty())
+                val seen = laptopSays(photo, LaptopVision.Kind.SCENE)
+                finish(seen ?: Describe.describe(a.found, a.quality, lang, live = true), seen != null || a.found.isNotEmpty())
                 deps.state.record("Described what's in front", Outcome.Done)
             } catch (e: CancellationException) {
                 throw e
@@ -305,7 +320,9 @@ fun PhotoScreen(nav: AppNav) {
                     i, item.takenMillis, System.currentTimeMillis(), ZoneId.systemDefault(), lang,
                     screenshot = item.screenshot, limited = access == PhotoLibrary.Access.Limited,
                 )
-                finish(head + " " + Describe.describe(a.found, a.quality, lang, live = false), a.found.isNotEmpty())
+                // Never a screenshot from the gallery: it may show codes, chats or passwords.
+                val seen = if (item.screenshot) null else laptopSays(photo, LaptopVision.Kind.PHOTO)
+                finish(head + " " + (seen ?: Describe.describe(a.found, a.quality, lang, live = false)), seen != null || a.found.isNotEmpty())
                 deps.state.record("Described a photo", Outcome.Done)
             } catch (e: CancellationException) {
                 throw e

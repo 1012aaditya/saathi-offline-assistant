@@ -1,5 +1,8 @@
 package app.saathi.agent
 
+import app.saathi.brain.LaptopBrain
+import app.saathi.brain.LaptopVision
+import app.saathi.brain.ScreenPixels
 import android.content.Context
 import android.content.Intent
 import android.util.Log
@@ -501,6 +504,29 @@ object TaskRunner {
             override suspend fun confirm(request: ConfirmRequest): Answer = awaitAnswer(app, id, command, title, request)
 
             override suspend fun pick(request: PickRequest): Int? = awaitItemPick(app, id, command, title, request)
+
+            /**
+             * "What does this picture say?" (demo builds, the laptop's vision model). Refused for
+             * private apps (LaptopBrain.mayRead), PIN / password screens, a screen that changed, and
+             * a protected screen (shows black: Android blanks secure windows in screenshots).
+             */
+            override suspend fun lookAtScreen(packageName: String, lang: Lang): Look {
+                if (!LaptopBrain.usable(app)) return Look.Unavailable
+                if (!LaptopBrain.mayRead(packageName)) return Look.NotHere
+                val svc = SaathiAccessibilityService.running ?: return Look.Unavailable
+                if (svc.frontPackageName() != packageName) return Look.Failed
+                if (runCatching { svc.frontIsSensitive() }.getOrDefault(true)) return Look.Protected
+                val shot = svc.screenshot() ?: return Look.Failed
+                try {
+                    if (ScreenPixels.mostlyBlack(shot)) return Look.Protected
+                    // Still the same app after the screenshot (nothing else slipped in front).
+                    if (svc.frontPackageName() != packageName) return Look.Failed
+                    val text = LaptopVision.describe(shot, LaptopVision.Kind.SCREEN, lang) ?: return Look.Unavailable
+                    return Look.Described(text)
+                } finally {
+                    shot.recycle()
+                }
+            }
 
             override fun appLabel(packageName: String): String = appName(packageName)
         }

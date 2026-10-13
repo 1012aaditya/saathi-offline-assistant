@@ -452,6 +452,14 @@ class GuideTest {
             "aur dikhao" to GuideCommand.More,
             "और दिखाओ" to GuideCommand.More,
             "place order" to GuideCommand.Checkout,
+            // The pictures on the screen (vision model; demo mode).
+            "what does this banner say" to GuideCommand.LookAtPicture,
+            "describe the picture" to GuideCommand.LookAtPicture,
+            "what's in this image" to GuideCommand.LookAtPicture,
+            "is photo mein kya likha hai" to GuideCommand.LookAtPicture,
+            "banner pe kya hai" to GuideCommand.LookAtPicture,
+            "इस तस्वीर में क्या है" to GuideCommand.LookAtPicture,
+            "what's on the screen" to GuideCommand.WhatsOnScreen,
         )
         for ((text, want) in cases) assertEquals(want, GuideGrammar.parse(text), text)
         // Not understood: reflected back by the session, never acted on.

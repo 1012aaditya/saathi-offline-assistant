@@ -225,6 +225,47 @@ class SaathiAccessibilityService : AccessibilityService() {
     /** The package of the app in front (null if none readable). */
     fun frontPackageName(): String? = frontPackage()
 
+    /**
+     * One screenshot of the screen for "what does this picture say?" (Android 11+), with Saathi's
+     * own bubble and panel hidden for it and the status bar cut off (notifications can show
+     * message text). Null when not possible. The caller checks the app and the screen first.
+     */
+    suspend fun screenshot(): android.graphics.Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val take: suspend () -> android.graphics.Bitmap? = { capture()?.let(::withoutStatusBar) }
+        return overlay?.hidden(take) ?: take()
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private suspend fun capture(): android.graphics.Bitmap? = suspendCancellableCoroutine { cont ->
+        takeScreenshot(
+            android.view.Display.DEFAULT_DISPLAY,
+            mainExecutor,
+            object : TakeScreenshotCallback {
+                override fun onSuccess(result: ScreenshotResult) {
+                    val hb = result.hardwareBuffer
+                    val bmp = runCatching {
+                        android.graphics.Bitmap.wrapHardwareBuffer(hb, result.colorSpace)?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    }.getOrNull()
+                    hb.close()
+                    if (cont.isActive) cont.resume(bmp)
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    Log.w(TAG, "screenshot failed: $errorCode")
+                    if (cont.isActive) cont.resume(null)
+                }
+            },
+        )
+    }
+
+    private fun withoutStatusBar(b: android.graphics.Bitmap): android.graphics.Bitmap {
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+        val top = (if (id > 0) resources.getDimensionPixelSize(id) else 0).coerceIn(0, b.height / 4)
+        if (top == 0) return b
+        return android.graphics.Bitmap.createBitmap(b, 0, top, b.width, b.height - top).also { if (it !== b) b.recycle() }
+    }
+
     fun isKeyboardVisible(): Boolean = keyboardVisible()
 
     /**
