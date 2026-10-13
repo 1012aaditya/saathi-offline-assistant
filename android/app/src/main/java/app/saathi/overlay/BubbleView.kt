@@ -19,8 +19,9 @@ import kotlin.math.min
  * A classic View (not Compose) because it is dragged by moving its whole window, which needs the
  * finger's raw screen position.
  *
- * Tap (TalkBack: double-tap) = [onTap]; long-press (TalkBack: double-tap and hold, or the "Hide"
- * action in the actions menu) = [onHide]. Dragging moves it ([onDrag] with the total raw offset);
+ * Tap (TalkBack: double-tap) = [onTap]; holding it still for [HIDE_HOLD_MS] (TalkBack: the "Hide"
+ * action in the actions menu) = [onHide]. 14 Oct: the system's ~0.5 s long-press hid it by accident
+ * while the owner tested, so hiding needs a deliberate 2 s hold. Dragging moves it ([onDrag] with the total raw offset);
  * [onDown] marks where a drag starts; letting go calls [onDrop] (it snaps to the nearer edge). Never focusable: it doesn't take focus
  * or the keyboard from the app; TalkBack reaches it only when the user moves to it.
  */
@@ -46,15 +47,21 @@ internal class BubbleView(
     private var downX = 0f
     private var downY = 0f
     private var dragging = false
+    private var hidden = false
+    private val hide = Runnable { hidden = true; onHide() }
 
     init {
         contentDescription = FloatingTexts.BUBBLE
         isClickable = true
-        isLongClickable = true
+        isLongClickable = false // a deliberate hold ([hide]) instead of the quick system long-press
         isFocusable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
         setOnClickListener { onTap() }
-        setOnLongClickListener { onHide(); true }
+    }
+
+    override fun performAccessibilityAction(action: Int, arguments: android.os.Bundle?): Boolean {
+        if (action == AccessibilityNodeInfo.ACTION_LONG_CLICK) { onHide(); return true }
+        return super.performAccessibilityAction(action, arguments)
     }
 
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
@@ -83,6 +90,9 @@ internal class BubbleView(
                 downX = event.rawX
                 downY = event.rawY
                 dragging = false
+                hidden = false
+                removeCallbacks(hide)
+                postDelayed(hide, HIDE_HOLD_MS)
                 onDown()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -90,20 +100,33 @@ internal class BubbleView(
                 val dy = event.rawY - downY
                 if (!dragging && (abs(dx) > slop || abs(dy) > slop)) {
                     dragging = true
-                    cancelTouch(event) // no click / long-press from a drag
+                    removeCallbacks(hide)
+                    cancelTouch(event) // no click / hide from a drag
                 }
                 if (dragging) {
                     onDrag(dx.toInt(), dy.toInt())
                     return true
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (dragging) {
-                dragging = false
-                onDrop()
-                return true
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(hide)
+                if (hidden) { // the hold hid it: this lift is not a tap
+                    hidden = false
+                    cancelTouch(event)
+                    return true
+                }
+                if (dragging) {
+                    dragging = false
+                    onDrop()
+                    return true
+                }
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    private companion object {
+        const val HIDE_HOLD_MS = 2_000L
     }
 
     private fun cancelTouch(event: MotionEvent) {

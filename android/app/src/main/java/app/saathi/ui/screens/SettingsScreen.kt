@@ -161,7 +161,7 @@ fun SettingsScreen(nav: AppNav) {
             }
             Footnote(
                 "Tap it in any app to do things together, right there: Saathi tells you what it sees and does each step you say. " +
-                    "Hold it to hide it. It hides itself on password and PIN screens. Needs Saathi on in Accessibility settings.",
+                    "Hold it for 2 seconds to hide it; switch this off and on to bring it back. It hides itself on password and PIN screens. Needs Saathi on in Accessibility settings.",
                 Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
             )
         }

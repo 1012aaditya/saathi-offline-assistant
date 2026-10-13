@@ -136,6 +136,7 @@ class OverlayManager(private val service: SaathiAccessibilityService) {
     }
 
     private fun enable() {
+        hiddenByUser = false // Settings > Floating Saathi off and on again always brings the bubble back
         deps = SharedDeps.acquire(service)
         Log.i(TAG, "on")
         stateJob = scope.launch { TaskRunner.state.collect { onRunnerState(it) } }
