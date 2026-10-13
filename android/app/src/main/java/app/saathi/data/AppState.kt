@@ -2,6 +2,7 @@ package app.saathi.data
 
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -77,8 +78,38 @@ class AppState(context: Context) {
     fun updateWalkSensitivity(s: WalkSensitivity) { walkSensitivity = s; prefs.edit().putString("walk", s.name).apply() }
     fun updateBrailleSound(on: Boolean) { brailleSound = on; prefs.edit().putBoolean("brailleSound", on).apply() }
 
+    /** Braille reading style: rhythm (dots played in time) or touch (slide a finger over one cell). */
+    var brailleRhythm by mutableStateOf(prefs.getBoolean("brailleRhythm", true)); private set
+    /** Say each word after its rhythm (learning aid). Never for private text. */
+    var brailleSpeak by mutableStateOf(prefs.getBoolean("brailleSpeak", true)); private set
+    /** Rhythm speed, adapted to the reader (Pace.MIN..Pace.MAX). */
+    var braillePace by mutableFloatStateOf(prefs.getFloat("braillePace", 1f)); private set
+    /** Finished Learn-braille lessons (1-based). */
+    val brailleLessons = mutableStateListOf<Int>().apply {
+        addAll(prefs.getString("brailleLessons", "")!!.split(',').mapNotNull { it.toIntOrNull() })
+    }
+    fun updateBrailleRhythm(on: Boolean) { brailleRhythm = on; prefs.edit().putBoolean("brailleRhythm", on).apply() }
+    fun updateBrailleSpeak(on: Boolean) { brailleSpeak = on; prefs.edit().putBoolean("brailleSpeak", on).apply() }
+    fun updateBraillePace(p: Float) { braillePace = p; prefs.edit().putFloat("braillePace", p).apply() }
+    /** Learn braille: recent right/wrong answers per letter or quiz item (Mastery string). */
+    var brailleMastery by mutableStateOf(prefs.getString("brailleMastery", "")!!); private set
+    fun updateBrailleMastery(v: String) { brailleMastery = v; prefs.edit().putString("brailleMastery", v).apply() }
+    fun finishBrailleLesson(n: Int) {
+        if (n in brailleLessons) return
+        brailleLessons.add(n)
+        prefs.edit().putString("brailleLessons", brailleLessons.joinToString(",")).apply()
+    }
+
     /** Only ever called after the user confirmed on a sheet whose default is Cancel. */
     fun updateSpendingLimit(v: Int) { spendingLimit = v; prefs.edit().putInt("spendingLimit", v).apply() }
+
+    /**
+     * Settings > Money > "Allow placing orders". Default OFF (like ALLOW_ORDERS=false in the
+     * prototype): Blinkit tasks stop at the read-back. Turning it on needs a confirmation sheet
+     * (Cancel first); even then every order needs the read-back and a clear yes.
+     */
+    var allowOrders by mutableStateOf(prefs.getBoolean("allowOrders", false)); private set
+    fun updateAllowOrders(on: Boolean) { allowOrders = on; prefs.edit().putBoolean("allowOrders", on).apply() }
 
     fun updateAppLevel(app: String, level: AppLevel) {
         val i = appLevels.indexOfFirst { it.first == app }
@@ -111,6 +142,7 @@ class AppState(context: Context) {
         trustedContacts.clear(); trustedContacts.addAll(listOf("Mom", "Dad"))
         setupDone = false; theme = ThemeChoice.System; soundOn = true; languageTag = null
         speechRate = 1.0f; spendingLimit = 500; walkSensitivity = WalkSensitivity.Medium
+        allowOrders = false
         listOf("WhatsApp" to AppLevel.AskFirst, "Grocery app" to AppLevel.AskFirst, "Payments" to AppLevel.Off)
             .forEach { (a, l) -> updateAppLevel(a, l) }
     }

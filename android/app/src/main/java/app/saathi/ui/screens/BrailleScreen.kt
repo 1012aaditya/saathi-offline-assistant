@@ -7,15 +7,12 @@ import android.view.WindowManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -25,12 +22,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -44,14 +40,17 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.saathi.braille.BrailleCellView
 import app.saathi.braille.BrailleHaptics
 import app.saathi.braille.Cell
+import app.saathi.braille.Document
 import app.saathi.braille.OtpWaiter
 import app.saathi.braille.encode
 import app.saathi.braille.rememberOtpWaiter
 import app.saathi.ui.AppNav
 import app.saathi.ui.LocalDeps
+import app.saathi.ui.Route
 import app.saathi.ui.components.Body
 import app.saathi.ui.components.Footnote
 import app.saathi.ui.components.Group
+import app.saathi.ui.components.GroupRow
 import app.saathi.ui.components.LargeTitle
 import app.saathi.ui.components.NavRow
 import app.saathi.ui.components.PrimaryButton
@@ -64,13 +63,17 @@ import kotlinx.coroutines.delay
 /** Private text (codes, passwords) is wiped after this long, or as soon as the app leaves the screen. */
 private const val PRIVATE_WIPE_MS = 3 * 60_000L
 
-private const val PRACTICE_TEXT = "Hi 123"
+private const val PRACTICE_TEXT = "The cat sat. A dog ran 2 km!"
 
 /**
- * What's on the surface. [private] = an OTP or a typed password: never spoken, never shown as
- * dots, never in TalkBack descriptions, never saved (plain `remember`, not `rememberSaveable`).
+ * What's being read. [private] = an OTP or a typed password: never spoken, never shown as dots,
+ * never in TalkBack descriptions, never saved (plain `remember`, not `rememberSaveable`).
  */
-private class Reading(val cells: List<Cell>, val private: Boolean, val what: String)
+private class Reading(text: String, val private: Boolean, val what: String) {
+    val doc = Document(text)
+    /** Touch style reads cell by cell across the whole text. */
+    val cells: List<Cell> = encode(text)
+}
 
 private tailrec fun Context.activity(): Activity? = when (this) {
     is Activity -> this
@@ -79,8 +82,10 @@ private tailrec fun Context.activity(): Activity? = when (this) {
 }
 
 /**
- * Braille reader: one big 6-dot cell on the touchscreen. Slide a finger; a buzz is a raised dot.
- * Reads one-time codes (with Android's per-message consent), typed text, and practice text.
+ * Braille reader. Two styles:
+ * - Rhythm (default): each word plays as timed pulses, dot 1→6; read word by word.
+ * - Touch: one big 6-dot cell; slide a finger, a buzz is a raised dot.
+ * Reads one-time codes (with Android's per-message consent), typed text, Result answers and practice text.
  */
 @Composable
 fun BrailleScreen(nav: AppNav) {
@@ -91,6 +96,7 @@ fun BrailleScreen(nav: AppNav) {
     // Sound on raised dots: the user's choice, or automatic (on when this device can't vibrate).
     val soundOn = deps.state.brailleSound ?: !haptics.canVibrate
     haptics.sound = soundOn
+    val rhythmStyle = deps.state.brailleRhythm
 
     var reading by remember { mutableStateOf<Reading?>(null) }
     var index by remember { mutableIntStateOf(0) }
@@ -102,16 +108,20 @@ fun BrailleScreen(nav: AppNav) {
         typing = false
         typed = ""
         note = null
+        if (r.doc.isEmpty) return
         reading = r
         index = 0
         deps.voice.stopSpeaking()
         // Length is fine to say; the content never is.
         val overheard = if (r.private && haptics.sound && !haptics.headphonesOn()) " No headphones: people nearby can hear the dots." else ""
-        deps.voice.speak("${r.what} ready. ${r.cells.size} cells. Slide one finger slowly over the screen.$overheard")
+        val how = if (rhythmStyle) "${r.doc.wordCount} words. Tap the reading area to repeat a word."
+        else "${r.cells.size} cells. Slide one finger slowly over the screen."
+        deps.voice.speak("${r.what} ready. $how$overheard")
     }
 
     fun clear(say: String? = null) {
         haptics.off()
+        haptics.stopPulses()
         reading = null
         index = 0
         typed = ""
@@ -121,16 +131,17 @@ fun BrailleScreen(nav: AppNav) {
         }
     }
 
-    val waiter = rememberOtpWaiter { code -> show(Reading(encode(code), private = true, what = "Code")) }
+    val waiter = rememberOtpWaiter { code -> show(Reading(code, private = true, what = "Code")) }
 
-    // Opened from Result with an answer that was already read aloud: public text, "Say it" allowed.
+    // Opened from Result with an answer that was already read aloud: public text, "Hold to hear" allowed.
     LaunchedEffect(Unit) {
         deps.state.brailleText?.let { text ->
             deps.state.brailleText = null
-            show(Reading(encode(text.take(280)), private = false, what = "Text"))
+            show(Reading(text.take(280), private = false, what = "Text"))
         }
     }
 
+    // Touch style: move cell by cell.
     fun move(by: Int) {
         val r = reading ?: return
         val next = index + by
@@ -141,8 +152,17 @@ fun BrailleScreen(nav: AppNav) {
         }
     }
 
-    // Private text: block screenshots/screen sharing, wipe after a while and when the app goes away.
     val current = reading
+    val rhythm = if (current != null && rhythmStyle) rememberRhythmReader(current.doc, current.private, haptics) else null
+    // Start playing the first word once the "ready" line has been spoken.
+    LaunchedEffect(rhythm) {
+        if (rhythm != null) {
+            ScreenParts.awaitSpeechEnd(deps.voice)
+            rhythm.play()
+        }
+    }
+
+    // Private text: block screenshots/screen sharing, wipe after a while and when the app goes away.
     val isPrivate = current?.private == true
     DisposableEffect(isPrivate) {
         val window = context.activity()?.window
@@ -176,6 +196,16 @@ fun BrailleScreen(nav: AppNav) {
     val listener = ScreenParts.rememberScreenListener { text ->
         val w = ScreenParts.words(text)
         when {
+            "learn" in w -> nav.go(Route.BrailleLearn)
+            rhythm != null && "next" in w && "sentence" in w -> rhythm.nextSentence()
+            rhythm != null && "next" in w -> rhythm.next()
+            rhythm != null && ("back" in w || "previous" in w) -> rhythm.previous()
+            rhythm != null && ("again" in w || "repeat" in w) -> rhythm.repeat()
+            rhythm != null && ("faster" in w) -> rhythm.faster()
+            rhythm != null && ("slower" in w) -> rhythm.slower()
+            rhythm != null && ("stop" in w) -> rhythm.stop()
+            rhythm != null && ("read" in w || "continue" in w) -> rhythm.readOn()
+            rhythm != null && ("spell" in w || "hear" in w) -> rhythm.hear()
             "next" in w -> move(1)
             "back" in w || "previous" in w -> move(-1)
             "again" in w || "start" in w || "restart" in w -> if (reading != null) { index = 0; haptics.nextCell() }
@@ -199,18 +229,23 @@ fun BrailleScreen(nav: AppNav) {
 
     val status = when {
         listener.active -> "Listening"
+        rhythm != null -> "Word ${current!!.doc.ordinal(rhythm.pos)} of ${current.doc.wordCount}"
         current != null -> "Cell ${index + 1} of ${current.cells.size}"
         else -> waitingText ?: note ?: "Braille"
     }
 
     SaathiScreen(
         status = status,
-        youCanSay = if (current != null) listOf("Next", "Back", "Again", "Clear") else listOf("Code", "Home"),
+        youCanSay = when {
+            rhythm != null -> listOf("Next", "Repeat", "Read on", "Slower", "Clear")
+            current != null -> listOf("Next", "Back", "Again", "Clear")
+            else -> listOf("Code", "Learn", "Home")
+        },
         onTalk = { listener.toggle() },
         navRow = { NavRow("Home", { nav.home() }) },
         bottom = {
             ScreenParts.ListenHint(listener)
-            if (current != null) {
+            if (current != null && rhythm == null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SecondaryButton("Back", { move(-1) }, Modifier.weight(1f), description = "Previous cell")
                     PrimaryButton("Next", { move(1) }, Modifier.weight(1f), description = "Next cell")
@@ -228,7 +263,18 @@ fun BrailleScreen(nav: AppNav) {
         if (current == null) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 LargeTitle("Braille")
-                Body("Feel codes and short text with one finger. A buzz means a raised dot.", secondary = true)
+                Body("Read codes and short text without sound or sight: the dots play as pulses you feel.", secondary = true)
+            }
+            Group {
+                val done = deps.state.brailleLessons.size
+                GroupRow(
+                    "Learn braille",
+                    modifier = Modifier.semantics { contentDescription = "Learn braille. $done of $LESSON_COUNT lessons done" },
+                    value = "$done of $LESSON_COUNT",
+                    icon = Icons.Outlined.School,
+                    chevron = true,
+                    onClick = { nav.go(Route.BrailleLearn) },
+                )
             }
             if (waitingText != null || note != null) {
                 Text(
@@ -255,13 +301,31 @@ fun BrailleScreen(nav: AppNav) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 PrimaryButton("Feel it", {
-                    if (typed.isNotBlank()) show(Reading(encode(typed), private = true, what = "Text"))
-                }, description = "Show the typed text in braille")
+                    if (typed.isNotBlank()) show(Reading(typed, private = true, what = "Text"))
+                }, description = "Read the typed text in braille")
             } else {
                 SecondaryButton("Type text to feel", { typing = true }, description = "Type text, like a Wi-Fi password, to feel in braille")
             }
-            SecondaryButton("Practice", { show(Reading(encode(PRACTICE_TEXT), private = false, what = "Practice text")) }, description = "Practice with sample text")
-            SoundSwitch(soundOn, haptics.canVibrate) { on ->
+            SecondaryButton("Practice", { show(Reading(PRACTICE_TEXT, private = false, what = "Practice text")) }, description = "Practice with sample text")
+
+            BrailleSwitch(
+                "Read by rhythm",
+                if (rhythmStyle) "Dots play one after another, word by word." else "Off: slide a finger over one big cell instead.",
+                rhythmStyle,
+            ) { on ->
+                deps.state.updateBrailleRhythm(on)
+                deps.voice.speak(if (on) "Rhythm reading" else "Touch reading")
+            }
+            BrailleSwitch("Say each word", "After its rhythm, while you learn. Never for codes or passwords.", deps.state.brailleSpeak) { on ->
+                deps.state.updateBrailleSpeak(on)
+                deps.voice.speak(if (on) "Words spoken" else "Silent reading")
+            }
+            BrailleSwitch(
+                "Sound on dots",
+                if (haptics.canVibrate) "A tone plays with the buzz. Use headphones for codes."
+                else "This device can't vibrate, so dots play a tone. Use headphones for codes.",
+                soundOn,
+            ) { on ->
                 deps.state.updateBrailleSound(on)
                 deps.voice.speak(if (on) "Sound on" else "Sound off")
             }
@@ -270,76 +334,44 @@ fun BrailleScreen(nav: AppNav) {
                     "never says a code out loud, and never saves it. Private text clears after 3 minutes or when you leave.",
             )
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (current.private) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Footnote("Private — never spoken, dots hidden on screen.")
+                    if (soundOn && !headphones) {
+                        Text(
+                            "No headphones — people nearby can hear the dots.",
+                            style = Clarity.type.callout,
+                            color = c.dangerText,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    }
+                }
+            }
+            if (rhythm != null) {
+                RhythmReaderView(rhythm)
+            } else {
                 Text(
                     "Cell ${index + 1} of ${current.cells.size}",
                     style = Clarity.type.headline,
                     color = c.label,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
-                if (current.private) Footnote("Private — dots are hidden on screen. Feel them.")
-                if (current.private && soundOn && !headphones) {
-                    Text(
-                        "No headphones — people nearby can hear the dots.",
-                        style = Clarity.type.callout,
-                        color = c.dangerText,
-                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                    )
-                }
-            }
-            val raised = c.label.toArgb()
-            val flat = c.secondary.toArgb()
-            val divider = c.separator.toArgb()
-            val cell = current.cells.getOrNull(index)
-            AndroidView(
-                factory = { ctx -> BrailleCellView(ctx, haptics) },
-                update = { v ->
-                    v.private = current.private
-                    v.cell = cell
-                    v.colors = BrailleCellView.Colors(raised = raised, divider = divider, flat = flat)
-                    v.onNext = { move(1) }
-                },
-                modifier = Modifier.fillMaxWidth().height(420.dp),
-            )
-            TextLink("Back to choices", { clear() })
-        }
-    }
-}
-
-/** "Sound on dots" switch. Without a vibration motor, sound is the only way to feel the dots. */
-@Composable
-private fun SoundSwitch(on: Boolean, canVibrate: Boolean, onChange: (Boolean) -> Unit) {
-    val c = Clarity.colors
-    Group {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 64.dp)
-                .toggleable(value = on, role = Role.Switch, onValueChange = onChange)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Sound on dots", style = Clarity.type.body, color = c.label)
-                Text(
-                    if (canVibrate) "A tone plays with the buzz. Use headphones for codes."
-                    else "This device can't vibrate, so dots play a tone. Use headphones for codes.",
-                    style = Clarity.type.footnote,
-                    color = c.secondary,
+                val raised = c.label.toArgb()
+                val flat = c.secondary.toArgb()
+                val divider = c.separator.toArgb()
+                val cell = current.cells.getOrNull(index)
+                AndroidView(
+                    factory = { ctx -> BrailleCellView(ctx, haptics) },
+                    update = { v ->
+                        v.private = current.private
+                        v.cell = cell
+                        v.colors = BrailleCellView.Colors(raised = raised, divider = divider, flat = flat)
+                        v.onNext = { move(1) }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(420.dp),
                 )
             }
-            Switch(
-                checked = on,
-                onCheckedChange = null,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = c.onAccent,
-                    checkedTrackColor = c.accent,
-                    checkedBorderColor = c.accent,
-                    uncheckedThumbColor = c.secondary,
-                    uncheckedTrackColor = c.screen,
-                    uncheckedBorderColor = c.secondary,
-                ),
-            )
+            TextLink("Clear and go back", { clear("Cleared.") })
         }
     }
 }

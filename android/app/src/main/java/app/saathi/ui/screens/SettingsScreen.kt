@@ -97,6 +97,7 @@ private const val MAX_LIMIT = 10_000_000
 private sealed interface SettingsSheet {
     data class Raise(val to: Int) : SettingsSheet
     data object DeleteAll : SettingsSheet
+    data object EnableOrders : SettingsSheet
 }
 
 @Composable
@@ -159,6 +160,9 @@ fun SettingsScreen(nav: AppNav) {
             )
         }
 
+        // OTHER APPS (opened only with the user's approval) + phone contacts for "message anyone"
+        OtherAppsSection(changed = { changed(it) }, say = { msg = it })
+
         // MONEY
         Column {
             SectionHeader("Money")
@@ -200,6 +204,19 @@ fun SettingsScreen(nav: AppNav) {
                 }
             }
             Footnote("Raising the limit always needs your confirmation.", Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp))
+        }
+        Column {
+            // Blinkit orders (OrderSettings.kt): default off; turning on asks first (Cancel is first).
+            AllowOrdersSetting(state.allowOrders) { on ->
+                if (on) {
+                    sheet = SettingsSheet.EnableOrders
+                    msg = "Allow placing orders? Cancel is first."
+                    deps.feedback.cue(Cue.NeedsAnswer)
+                } else {
+                    state.updateAllowOrders(false)
+                    changed("Placing orders is off")
+                }
+            }
         }
 
         // TRUSTED CONTACTS
@@ -470,9 +487,29 @@ fun SettingsScreen(nav: AppNav) {
             onConfirm = {
                 sheet = null
                 state.deleteAll()
+                app.saathi.agent.SaathiContext.app?.let {
+                    app.saathi.agent.AppApprovals.clear(it)
+                    app.saathi.agent.PhoneBook.forget(it)
+                }
                 deps.feedback.soundOn = state.soundOn
                 deps.feedback.cue(Cue.Done)
                 nav.restart(Route.Welcome)
+            },
+        )
+        SettingsSheet.EnableOrders -> ConfirmSheet(
+            title = ALLOW_ORDERS_TITLE,
+            body = ALLOW_ORDERS_BODY,
+            confirmLabel = "Allow placing orders",
+            danger = false,
+            onCancel = {
+                sheet = null
+                msg = "Cancelled — nothing changed"
+                deps.feedback.cue(Cue.Cancelled)
+            },
+            onConfirm = {
+                sheet = null
+                state.updateAllowOrders(true)
+                changed("Placing orders is on. I'll still ask before every order.")
             },
         )
         null -> Unit

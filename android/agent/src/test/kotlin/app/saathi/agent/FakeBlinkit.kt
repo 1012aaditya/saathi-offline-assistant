@@ -1,0 +1,327 @@
+package app.saathi.agent
+
+import app.saathi.safety.Action
+import app.saathi.safety.Apps
+import app.saathi.safety.Back
+import app.saathi.safety.Bounds
+import app.saathi.safety.Direction
+import app.saathi.safety.Element
+import app.saathi.safety.Home
+import app.saathi.safety.OpenApp
+import app.saathi.safety.Point
+import app.saathi.safety.Screen
+import app.saathi.safety.Scroll
+import app.saathi.safety.Search
+import app.saathi.safety.Tap
+import app.saathi.safety.TypeText
+
+/**
+ * A tiny synthetic Blinkit behind the [Actuator] interface, modelled on the prototype's logic
+ * (saathi/blinkit.py): product cards "<name> is available for ₹<price>, <size>" with ADD / a
+ * "quantity N" stepper / "N options" (size picker sheet), an upsell sheet after ADD, the
+ * "View cart · N items" bar, and a checkout screen (rows above "You might also like", a
+ * "Shipment of N items" note, and a "₹X · TOTAL · Place Order" bar). All products and texts are
+ * made up. It records every performed action and every order placed, so tests can prove that
+ * nothing was ordered without a yes.
+ */
+class FakeBlinkit(val catalog: List<Item>) : Actuator {
+    data class Item(
+        val name: String,
+        val size: String,
+        val price: Int,
+        val ad: Boolean = false,
+        val inStock: Boolean = true,
+        /** Other sizes of the same product: ADD opens a size picker sheet. */
+        val variants: List<Pair<String, Int>> = emptyList(),
+        val words: Set<String> = emptySet(),
+    ) {
+        fun matches(q: String): Boolean {
+            val ws = Blinkit.withoutSize(q).lowercase().split(" ").filter { it.isNotEmpty() }
+            val hay = (name.lowercase().split(" ") + words).toSet()
+            return ws.any { it in hay }
+        }
+    }
+
+    private data class Key(val name: String, val size: String)
+
+    sealed interface View {
+        data object Home : View
+        data object SearchBox : View
+        data class Results(val query: String) : View
+        data class Sizes(val item: Item) : View
+        data object Upsell : View
+        data object Checkout : View
+        data object Payment : View
+        data object Placed : View
+        data object Login : View
+        data object Offline : View
+    }
+
+    var pkg = "app.saathi"
+    var view: View = View.Home
+    var loggedIn = true
+    var online = true
+    var addressSet = true
+    var deepLinkWorks = true
+    var upsellAfterAdd = false
+    var landscape = false
+    var paymentSaved = true
+    var pinAfterOrder = false
+    /** Snapshots that show the results page still loading (no cards yet). */
+    var loadingSnapshots = 0
+
+    private val cart = linkedMapOf<Key, Int>()
+    private var upsellShown = false
+    private var scrolled = 0
+    private var typed = ""
+
+    val performed = mutableListOf<Action>()
+    /** Taps on a "−" that the floating order bar covered (must stay 0). */
+    var coveredTaps = 0
+    val orders = mutableListOf<Map<String, Int>>()
+    val addTaps = mutableListOf<String>()
+
+    fun putInCart(name: String, size: String, qty: Int) { cart[Key(name, size)] = qty }
+    fun cartQty(name: String): Int = cart.filterKeys { it.name == name }.values.sum()
+    val cartItems: Map<String, Int> get() = cart.mapKeys { "${it.key.name} ${it.key.size}" }
+
+    private fun price(k: Key): Int {
+        val item = catalog.first { it.name == k.name }
+        return if (item.size == k.size) item.price else item.variants.first { it.first == k.size }.second
+    }
+
+    private val total: Int get() = cart.entries.sumOf { price(it.key) * it.value }
+
+    // -- rendering ----------------------------------------------------------------------------------
+
+    private class Built(val screen: Screen, val handlers: Map<Int, () -> Boolean>)
+
+    private fun build(): Built {
+        val els = mutableListOf<Element>()
+        val handlers = mutableMapOf<Int, () -> Boolean>()
+        fun add(
+            text: String = "",
+            desc: String = "",
+            rid: String = "",
+            cls: String = "View",
+            clickable: Boolean = false,
+            editable: Boolean = false,
+            b: Bounds,
+            onTap: (() -> Boolean)? = null,
+        ) {
+            val i = els.size
+            els += Element(i, cls, text, desc, rid, clickable, editable, false, b, Point((b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2))
+            if (onTap != null) handlers[i] = onTap
+        }
+        val width = if (landscape) 2000 else 1080
+        val height = if (landscape) 1200 else 2000
+        fun cartBar() {
+            if (cart.isEmpty()) return
+            val n = cart.values.sum()
+            add(text = "View cart · $n item${if (n == 1) "" else "s"}", rid = "container", clickable = true, b = Bounds(300, height - 200, 780, height - 80)) {
+                view = View.Checkout; scrolled = 0; true
+            }
+        }
+        fun card(item: Item, size: String, price: Int, x: Int, y: Int, inSheet: Boolean) {
+            val key = Key(item.name, size)
+            val qty = cart[key] ?: 0
+            add(desc = "${item.name} is available for ₹$price, $size", cls = "ViewGroup", clickable = true, b = Bounds(x, y, x + 320, y + 600))
+            if (item.ad) add(desc = "Ad", rid = "bottom_left_overlay", b = Bounds(x + 10, y + 300, x + 50, y + 330))
+            add(desc = size, rid = "tv_uom_title", b = Bounds(x + 10, y + 430, x + 170, y + 460))
+            if (!item.inStock) {
+                add(desc = "Notify me", rid = "tv_title", clickable = true, b = Bounds(x + 180, y + 420, x + 320, y + 480)) { true }
+                return
+            }
+            if (qty == 0) {
+                add(desc = "ADD", rid = "tv_title", clickable = true, b = Bounds(x + 180, y + 420, x + 320, y + 470)) {
+                    addTaps += "${item.name} $size"
+                    if (!inSheet && item.variants.isNotEmpty()) {
+                        view = View.Sizes(item)
+                    } else {
+                        cart[key] = 1
+                        if (upsellAfterAdd && !upsellShown) { upsellShown = true; view = View.Upsell }
+                    }
+                    true
+                }
+                if (!inSheet && item.variants.isNotEmpty()) {
+                    add(desc = "${item.variants.size + 1} options", rid = "tv_subtext_inside", b = Bounds(x + 180, y + 472, x + 320, y + 495))
+                }
+            } else {
+                add(desc = "Decrease quantity", rid = "icon_decrement", clickable = true, b = Bounds(x + 180, y + 420, x + 225, y + 480)) {
+                    if (qty <= 1) cart.remove(key) else cart[key] = qty - 1; true
+                }
+                add(desc = "quantity $qty", rid = "tv_title", clickable = true, b = Bounds(x + 225, y + 420, x + 275, y + 480))
+                add(desc = "Increase quantity", rid = "icon_increment", clickable = true, b = Bounds(x + 275, y + 420, x + 320, y + 480)) {
+                    addTaps += "+ ${item.name} $size"
+                    cart[key] = qty + 1; true
+                }
+            }
+        }
+        fun searchBar() = add(desc = "Search products", rid = "fl_search_bar", cls = "FrameLayout", clickable = true, b = Bounds(0, 40, width, 140)) {
+            view = View.SearchBox; typed = ""; true
+        }
+
+        if (pkg != Apps.BLINKIT) {
+            add(text = "Stop", cls = "Button", clickable = true, b = Bounds(0, 100, 500, 200))
+            return Built(Screen(pkg, els, Normalizer.screenHash(pkg, els)), handlers)
+        }
+        when (val v = view) {
+            View.Login -> {
+                add(text = "Log in or sign up", b = Bounds(0, 300, width, 360))
+                add(desc = "Enter mobile number", cls = "EditText", editable = true, clickable = true, b = Bounds(0, 400, width, 480))
+                add(text = "Continue", cls = "Button", clickable = true, b = Bounds(0, 520, width, 600)) { true }
+            }
+            View.Offline -> {
+                add(text = "No internet connection", b = Bounds(0, 300, width, 360))
+                add(text = "Retry", cls = "Button", clickable = true, b = Bounds(0, 400, width, 480)) { true }
+            }
+            View.Home -> {
+                searchBar()
+                add(text = "Shop by category", b = Bounds(0, 200, width, 260))
+                cartBar()
+            }
+            View.SearchBox -> {
+                searchBar()
+                // Blinkit hides its text field from accessibility; the service surfaces the focused
+                // one with zero bounds and desc "focused field" (Blinkit.HIDDEN_FIELD).
+                add(text = typed, desc = Blinkit.HIDDEN_FIELD, cls = "EditText", editable = true, b = Bounds(0, 0, 0, 0))
+            }
+            is View.Results -> {
+                searchBar()
+                if (loadingSnapshots > 0) {
+                    loadingSnapshots--
+                } else {
+                    add(text = "Results for ${v.query}", rid = "tv_title", b = Bounds(10, 160, 600, 200))
+                    val hits = catalog.filter { it.matches(v.query) }
+                    if (hits.isEmpty()) add(text = "No results found for ${v.query}", b = Bounds(10, 300, width, 360))
+                    hits.forEachIndexed { i, item ->
+                        card(item, item.size, item.price, 10 + (i % 3) * 340, 230 + (i / 3) * 640, inSheet = false)
+                    }
+                    cartBar()
+                }
+            }
+            is View.Sizes -> {
+                // A modal sheet: only the sheet is in the tree (the results are hidden behind it).
+                add(text = v.item.name, rid = "tv_title", b = Bounds(10, 500, 700, 540))
+                val sizes = listOf(v.item.size to v.item.price) + v.item.variants
+                sizes.forEachIndexed { i, (size, p) -> card(v.item, size, p, 10 + i * 340, 600, inSheet = true) }
+            }
+            View.Upsell -> {
+                add(text = "Frequently bought together", b = Bounds(10, 500, 700, 540))
+                card(Item("Choco Cream Biscuits", "100 g", 30), "100 g", 30, 10, 600, inSheet = true)
+                card(Item("Salted Butter", "100 g", 58), "100 g", 58, 350, 600, inSheet = true)
+            }
+            View.Checkout -> {
+                add(desc = "Checkout", rid = "title", b = Bounds(10, 40, 400, 100))
+                val n = cart.values.sum()
+                if (n > 0) add(desc = "Shipment of $n item${if (n == 1) "" else "s"}", b = Bounds(10, 120, 600, 160))
+                val top = (if (landscape) 850 else 200) - scrolled * 400
+                var y = top
+                for ((k, q) in cart.toList()) {
+                    val item = catalog.first { it.name == k.name }
+                    val rowY = y
+                    add(desc = "${k.name} is available for ₹${price(k)}, ${k.size}", cls = "ViewGroup", b = Bounds(0, rowY, width, rowY + 180))
+                    add(desc = "Decrease quantity", rid = "icon_decrement", clickable = true, b = Bounds(700, rowY + 60, 780, rowY + 120)) {
+                        if (landscape && rowY + 90 in 930..1130) coveredTaps++ // a real tap there lands on the order bar
+                        if (q <= 1) cart.remove(k) else cart[k] = q - 1; true
+                    }
+                    add(desc = "quantity $q", rid = "tv_title", b = Bounds(780, rowY + 60, 860, rowY + 120))
+                    add(desc = "Increase quantity", rid = "icon_increment", clickable = true, b = Bounds(860, rowY + 60, 940, rowY + 120)) {
+                        addTaps += "+ ${item.name} ${k.size}"; cart[k] = q + 1; true
+                    }
+                    y += 200
+                }
+                if (cart.isEmpty()) add(text = "Your cart is empty", b = Bounds(10, 300, width, 360))
+                add(text = "You might also like", b = Bounds(10, y + 20, 600, y + 60))
+                card(Item("Choco Cream Biscuits", "100 g", 30), "100 g", 30, 10, y + 80, inSheet = true)
+                if (cart.isNotEmpty()) {
+                    if (!addressSet) {
+                        add(text = "Add address to proceed", rid = "cv_checkout_container", clickable = true, b = Bounds(0, height - 200, width, height - 60)) { true }
+                    } else {
+                        val label = if (paymentSaved) "Place Order" else "Select Payment Method"
+                        val barTop = if (landscape) 930 else height - 200
+                        val barBottom = if (landscape) 1130 else height - 60
+                        add(text = "₹$total · TOTAL · $label", rid = "cv_checkout_container", clickable = true, b = Bounds(0, barTop, width, barBottom)) {
+                            orders += cart.mapKeys { "${it.key.name} ${it.key.size}" }
+                            when {
+                                pinAfterOrder -> { pkg = "com.phonepe.app"; view = View.Payment }
+                                paymentSaved -> { cart.clear(); view = View.Placed }
+                                else -> view = View.Payment
+                            }
+                            true
+                        }
+                    }
+                }
+            }
+            View.Payment -> {
+                if (pinAfterOrder) {
+                    add(text = "Enter UPI PIN", b = Bounds(0, 300, width, 360))
+                } else {
+                    add(text = "Select payment method", b = Bounds(0, 100, width, 160))
+                    add(text = "UPI", clickable = true, b = Bounds(0, 200, width, 280)) { true }
+                    add(text = "Cash on delivery", clickable = true, b = Bounds(0, 300, width, 380)) { true }
+                }
+            }
+            View.Placed -> add(text = "Order placed", b = Bounds(0, 300, width, 360))
+        }
+        return Built(Screen(pkg, els, Normalizer.screenHash(pkg, els)), handlers)
+    }
+
+    fun render(): Screen = build().screen
+
+    // -- Actuator -------------------------------------------------------------------------------------
+
+    private var lastBuilt: Built? = null
+
+    override suspend fun snapshot(): Screen {
+        if (pkg == Apps.BLINKIT && !online) view = View.Offline
+        if (pkg == Apps.BLINKIT && !loggedIn) view = View.Login
+        return build().also { lastBuilt = it }.screen
+    }
+
+    override suspend fun perform(action: Action, screen: Screen): Boolean {
+        val built = lastBuilt
+        check(built != null && screen.hash == built.screen.hash) { "acted on a stale screen" }
+        performed += action
+        when (action) {
+            is OpenApp -> { pkg = Apps.APP_ALIASES.getValue(action.app); return true }
+            is Search -> {
+                pkg = Apps.BLINKIT
+                if (deepLinkWorks) { view = View.Results(action.query); upsellShown = false }
+                return true
+            }
+            is Back -> {
+                view = when (view) {
+                    is View.Sizes, View.Upsell -> (lastResults ?: View.Home)
+                    View.Checkout -> lastResults ?: View.Home
+                    else -> View.Home
+                }
+                return true
+            }
+            is Home -> { pkg = "launcher"; return true }
+            is Scroll -> { if (action.direction == Direction.DOWN && view == View.Checkout) scrolled++; return true }
+            is Tap -> {
+                val h = built.handlers[action.index] ?: return false
+                val before = view
+                val ok = h()
+                if (before is View.Results) lastResults = before
+                return ok
+            }
+            is TypeText -> {
+                val e = screen.elements[action.index ?: return false]
+                if (view != View.SearchBox || e.desc != Blinkit.HIDDEN_FIELD) return false
+                typed = action.text
+                // The service presses Enter after typing into Blinkit's search box (device.py port).
+                view = View.Results(action.text)
+                return true
+            }
+            else -> return false
+        }
+    }
+
+    private var lastResults: View.Results? = null
+
+    override suspend fun clearText(element: Element, screen: Screen): Boolean = false
+
+    override suspend fun waitForChange(oldHash: String, timeoutMs: Long): Boolean = render().hash != oldHash
+}

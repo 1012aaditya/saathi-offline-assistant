@@ -38,6 +38,12 @@ sealed interface Plan {
      */
     data class ChooseDraft(val existing: String, val newMessage: String) : Plan
 
+    /**
+     * Several people / groups match the name the user said ([names] verbatim on screen). The loop
+     * asks which one (voice or buttons) and tells the flow via [Flow.choseContact]; unclear twice = stop.
+     */
+    data class ChooseContact(val spoken: String, val names: List<String>) : Plan
+
     data class Ask(val question: String) : Plan
     data class HandOver(val reason: String) : Plan
     data class Fail(val reason: String) : Plan
@@ -63,6 +69,9 @@ interface Flow {
     /** The user's answer to a [Plan.ChooseDraft] (never KEEP: the loop ends the task for that). */
     fun chose(choice: DraftChoice, original: String) {}
 
+    /** The user's answer to a [Plan.ChooseContact]: exactly one of its names. */
+    fun choseContact(name: String) {}
+
     fun next(screen: Screen): Plan
 
     /** Called after an action really ran (allowed by the gate, or held and confirmed). */
@@ -72,16 +81,40 @@ interface Flow {
 private fun norm(s: String): String = s.trim().split(Regex("\\s+")).joinToString(" ")
 
 /**
- * Shared navigation: open WhatsApp -> chat list -> find the contact (fuzzy, safety port's
- * matcher) -> open the chat. Returns null once the right chat is open.
+ * Shared navigation: open WhatsApp -> chat list -> find the person -> open the chat. Returns null
+ * once the right chat is open.
+ *
+ * On the chat list only an exact name / spelling is taken; anything else is searched, because a
+ * partial match there ("Rahul Sharma" for "Rahul") could hide another Rahul further down or a
+ * contact without a chat. WhatsApp's search shows chats AND contacts ([ContactSearch]); a contact
+ * without a chat opens a new chat. [queries] are tried in turn (saved name, spoken name, other
+ * spellings). Several matches -> [Plan.ChooseContact]; none -> an honest failure, never a guess.
  */
-internal class ChatOpener(private val contact: String, private val ctx: CommandContext, private val t: Texts) {
+internal class ChatOpener(
+    private val contact: String,
+    private val ctx: CommandContext,
+    private val t: Texts,
+    queries: List<String> = listOf(contact),
+    /** The phone's contacts know this person (so "not found" can say "may not be on WhatsApp"). */
+    private val inPhone: Boolean = false,
+) {
+    private val queries = queries.ifEmpty { listOf(contact) }
+    private var query = 0
     private var searchTapped = false
     private var searchTyped = false
     private var backs = 0
     private var opens = 0
 
+    /** The exact on-screen name the user picked when several matched (null: not asked). */
+    private var chosen: String? = null
+
     fun matches(name: String): Boolean = payeeMatches(ctx, name)
+
+    /** The user picked [name] (verbatim on screen): only that chat counts now, for R5 too. */
+    fun choose(name: String) {
+        chosen = name
+        ctx.names = listOf(name)
+    }
 
     fun step(screen: Screen): Plan? {
         if (!WhatsApp.isWhatsApp(screen)) {
@@ -90,68 +123,58 @@ internal class ChatOpener(private val contact: String, private val ctx: CommandC
         }
         val title = WhatsApp.chatTitle(screen)
         if (title != null) {
-            if (matches(title.text)) return null
+            val right = chosen?.let { title.text == it } ?: matches(title.text)
+            if (right) return null
             return back(t.leavingOtherChat)
         }
         if (searchTyped) {
-            return when (val p = pick(screen)) {
-                is Pick.One -> Plan.Act(Tap(p.e.index), t.openingChat(p.e.text))
-                is Pick.Many -> Plan.Ask(t.whichOne(p.names))
-                Pick.None -> Plan.Fail(t.notFound(contact))
+            return when (val p = ContactSearch.pick(screen, contact, ctx, chosen)) {
+                is ContactSearch.Pick.One -> Plan.Act(Tap(p.element.index), t.openingChat(p.element.text))
+                is ContactSearch.Pick.Many -> Plan.ChooseContact(contact, p.names)
+                is ContactSearch.Pick.Same -> Plan.Fail(t.sameName(p.name))
+                ContactSearch.Pick.None -> nextQuery(screen)
+                    ?: Plan.Fail(if (inPhone && chosen == null) t.notOnWhatsApp(contact) else t.couldntFind(chosen ?: contact))
             }
         }
         if (searchTapped) {
             val field = screen.elements.firstOrNull { it.editable && !it.password }
-                ?: return Plan.Fail(t.notFound(contact))
+                ?: return Plan.Fail(t.couldntFind(contact))
             searchTyped = true
-            return Plan.Act(TypeText(contact, field.index), t.searching(contact))
+            return Plan.Act(TypeText(queries[query], field.index), t.searching(contact))
         }
         if (WhatsApp.onChatList(screen)) {
-            when (val p = pick(screen)) {
-                is Pick.One -> return Plan.Act(Tap(p.e.index), t.openingChat(p.e.text))
-                is Pick.Many -> return Plan.Ask(t.whichOne(p.names))
-                Pick.None -> Unit
+            when (val p = ContactSearch.pick(screen, contact, ctx, chosen, exactOnly = true)) {
+                is ContactSearch.Pick.One -> return Plan.Act(Tap(p.element.index), t.openingChat(p.element.text))
+                is ContactSearch.Pick.Many -> return Plan.ChooseContact(contact, p.names)
+                is ContactSearch.Pick.Same -> return Plan.Fail(t.sameName(p.name))
+                ContactSearch.Pick.None -> Unit
             }
-            val bar = WhatsApp.byRid(screen, WhatsApp.SEARCH_BAR) ?: return Plan.Fail(t.notFound(contact))
+            val bar = WhatsApp.byRid(screen, WhatsApp.SEARCH_BAR) ?: return Plan.Fail(t.couldntFind(contact))
             searchTapped = true
             return Plan.Act(Tap(bar.index), t.searching(contact))
         }
         return back(t.backToChats) // contact info, another tab, a sheet: back out to the list
     }
 
+    /** Nobody under this spelling: type the next one into the search box (same field). */
+    private fun nextQuery(screen: Screen): Plan? {
+        if (chosen != null || query + 1 >= queries.size) return null
+        val field = screen.elements.firstOrNull { it.editable && !it.password } ?: return null
+        query++
+        return Plan.Act(TypeText(queries[query], field.index), t.searching(queries[query]))
+    }
+
     private fun back(say: String): Plan {
         if (++backs > 4) return Plan.Fail(t.stuck)
         return Plan.Act(Back, say)
     }
-
-    private sealed interface Pick {
-        data class One(val e: Element) : Pick
-        data class Many(val names: List<String>) : Pick
-        data object None : Pick
-    }
-
-    /** Exact spoken spelling first, then any exact spelling, then one fuzzy match; several -> ask. */
-    private fun pick(screen: Screen): Pick {
-        val rows = WhatsApp.nameRows(screen)
-        fun one(list: List<Element>): Pick? {
-            val names = list.map { it.text }.distinct()
-            return when {
-                names.isEmpty() -> null
-                names.size == 1 -> Pick.One(list.first())
-                else -> Pick.Many(names.take(4))
-            }
-        }
-        val spoken = contact.lowercase()
-        one(rows.filter { it.text.lowercase() == spoken })?.let { return it }
-        val spellings = ctx.names.map { it.lowercase() }.toSet()
-        one(rows.filter { it.text.lowercase() in spellings })?.let { return it }
-        return one(rows.filter { matches(it.text) }) ?: Pick.None
-    }
 }
 
 /** "Read Mom's last message": open the chat, read the newest message FROM THEM, verbatim. */
-class ReadLastFlow(contact: String, private val ctx: CommandContext, private val t: Texts) : Flow {
-    private val opener = ChatOpener(contact, ctx, t)
+class ReadLastFlow(contact: String, private val ctx: CommandContext, private val t: Texts, recipient: Recipient? = null) : Flow {
+    private val opener = ChatOpener(contact, ctx, t, recipient?.queries ?: Recipients.queries(contact), recipient?.inPhone == true)
+
+    override fun choseContact(name: String) = opener.choose(name)
     private var jumped = false
     private var scrolls = 0
 
@@ -198,8 +221,16 @@ class ReadLastFlow(contact: String, private val ctx: CommandContext, private val
  * it as it is. Whatever happens, the read-back is of the box's full text, verbatim, and on
  * anything but a yes the user's original text is put back ([afterCancel]).
  */
-class ReplyFlow(contact: String, private val text: String, private val ctx: CommandContext, private val t: Texts) : Flow {
-    private val opener = ChatOpener(contact, ctx, t)
+class ReplyFlow(
+    contact: String,
+    private val text: String,
+    private val ctx: CommandContext,
+    private val t: Texts,
+    recipient: Recipient? = null,
+) : Flow {
+    private val opener = ChatOpener(contact, ctx, t, recipient?.queries ?: Recipients.queries(contact), recipient?.inPhone == true)
+
+    override fun choseContact(name: String) = opener.choose(name)
     private var choice: DraftChoice? = null // null: the box was empty (a plain reply)
     private var existing = "" // the user's text as the screen showed it when we asked
     private var userOriginal: String? = null // the same text exactly as typed (memory only)

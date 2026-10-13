@@ -18,7 +18,11 @@ import app.saathi.safety.NO
  *    word itself appears in the prompt or on the sheet, it can't be told from an echo, so the
  *    prompts never contain a yes word (see [Texts.confirmQuestion]).
  */
-class ConfirmDialog(private val maxUnclear: Int = 2) {
+class ConfirmDialog(
+    private val maxUnclear: Int = 2,
+    /** More harmless words allowed next to a yes, e.g. [ORDER_FILLERS] on the order sheet ("yes order it"). */
+    private val extraFillers: Set<String> = emptySet(),
+) {
     enum class Next { SEND, CANCEL, ASK_AGAIN }
 
     var unclear: Int = 0
@@ -29,8 +33,8 @@ class ConfirmDialog(private val maxUnclear: Int = 2) {
      * hints). A reply that overlaps them is treated as unclear, never as yes.
      */
     fun hear(reply: String, echoSources: List<String> = emptyList()): Next {
-        if (isEcho(reply, echoSources)) return unclearOnce()
-        return when (classify(reply)) {
+        if (isEcho(reply, echoSources, extraFillers)) return unclearOnce()
+        return when (classify(reply, extraFillers)) {
             Answer.YES -> Next.SEND
             Answer.NO -> Next.CANCEL
             Answer.UNCLEAR -> unclearOnce()
@@ -64,7 +68,16 @@ class ConfirmDialog(private val maxUnclear: Int = 2) {
         /** Words to leave out of the overlap ratio: the answer vocabulary and fillers. */
         private val IGNORE: Set<String> = YES_WORDS + YES_FILLERS + NO_WORDS
 
-        fun classify(reply: String): Answer {
+        /**
+         * Grocery sheets (order / empty the cart): "yes order it", "haan order karo", "yes remove them".
+         * Still no yes without an explicit yes word; these words alone are never a yes.
+         */
+        val ORDER_FILLERS: Set<String> = setOf(
+            "order", "place", "the", "my", "them", "all", "ऑर्डर", "मंगाओ", "mangao", "mangwao", "remove", "empty", "clear",
+            "khali", "khaali", "hatao", "hata", "हटाओ", "हटा", "खाली", "cart", "कार्ट",
+        ).flatMap { EchoGuard.tokens(it) }.toSet()
+
+        fun classify(reply: String, extra: Set<String> = emptySet()): Answer {
             val w = EchoGuard.tokens(reply)
             if (w.isEmpty()) return Answer.UNCLEAR
             val lower = reply.lowercase()
@@ -73,14 +86,14 @@ class ConfirmDialog(private val maxUnclear: Int = 2) {
             return when {
                 no && yes -> Answer.UNCLEAR // "yes no", "haan nahi": ask again
                 no -> Answer.NO
-                yes && w.size <= MAX_YES_WORDS && w.all { it in YES_WORDS || it in YES_FILLERS } -> Answer.YES
+                yes && w.size <= MAX_YES_WORDS && w.all { it in YES_WORDS || it in YES_FILLERS || it in extra } -> Answer.YES
                 else -> Answer.UNCLEAR
             }
         }
 
         /** The reply repeats Saathi's prompt / sheet, or its yes word is in them. */
-        fun isEcho(reply: String, echoSources: List<String>): Boolean =
-            EchoGuard.overlap(reply, echoSources, ignore = IGNORE, decisive = YES_WORDS) != EchoGuard.Reason.NONE
+        fun isEcho(reply: String, echoSources: List<String>, extra: Set<String> = emptySet()): Boolean =
+            EchoGuard.overlap(reply, echoSources, ignore = IGNORE + extra, decisive = YES_WORDS) != EchoGuard.Reason.NONE
 
         /** True if [text] contains a word that [classify] would take as yes (prompts must not). */
         fun containsYesWord(text: String): Boolean = EchoGuard.tokens(text).any { it in YES_WORDS }

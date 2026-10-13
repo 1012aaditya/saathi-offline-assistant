@@ -7,7 +7,17 @@
     <!-- Walk mode (camera preview arrives in a later step; asked for during setup). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Optional "message anyone" help: names in the phone's contacts, to match "Mom" to a saved
+         "Mummy". Asked only the first time a task names a person; the user taps Allow themselves.
+         Display names only, kept in memory for that task, never stored or sent. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Photo description: read the newest picture only when the user asks ("describe my last photo").
+         Asked at that moment, never at install; read on the phone only (no INTERNET permission).
+         Saving ("save it") uses MediaStore on Android 10+, which needs no storage permission. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <queries>
         <intent>
@@ -15,6 +25,12 @@
         </intent>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!-- "Open any app": the phone's launcher apps only (their names and launch intents),
+             instead of QUERY_ALL_PACKAGES. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
         </intent>
         <!-- Apps Saathi may open by voice (safety Apps.APP_ALIASES); needed for their launch intents. -->
         <package android:name="com.whatsapp" />

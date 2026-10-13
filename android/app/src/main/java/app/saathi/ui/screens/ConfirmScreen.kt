@@ -101,15 +101,18 @@ fun ConfirmScreen(nav: AppNav) {
     val confirmTo = asked?.recipient.orEmpty()
     val confirmText = asked?.message.orEmpty()
     // Hindi: the gate's own read-back. English: the same on-screen strings in an English question.
+    // Blinkit order (R3) / emptying the cart: the same sheet and rules, order wording (OrderConfirmWords.kt).
+    val orderWords = remember { OrderConfirmWords.of(asked, t.lang) }
     val confirmQuestion = when {
         asked == null -> ""
+        orderWords != null -> orderWords.question
         t.lang == Lang.HI -> asked.readback
         else -> t.confirmQuestion(confirmTo, confirmText)
     }
-    val dialog = remember { ConfirmDialog() }
+    val dialog = remember { ConfirmDialog(extraFillers = if (orderWords != null) ConfirmDialog.ORDER_FILLERS else emptySet()) }
     // What Cancel does to the box (Saathi's own text removed, the user's earlier text put back, or untouched).
     val afterCancel = asked?.afterCancel ?: AfterCancel.REMOVE_TYPED
-    val undoing = when (afterCancel) {
+    val undoing = orderWords?.undoing ?: when (afterCancel) {
         AfterCancel.REMOVE_TYPED -> "I'm removing the message I typed."
         AfterCancel.RESTORE_ORIGINAL -> "I'm putting your earlier text back."
         AfterCancel.LEAVE_AS_IS -> "Your text stays as it was."
@@ -130,7 +133,7 @@ fun ConfirmScreen(nav: AppNav) {
 
     lateinit var listener: ScreenParts.ScreenListener
 
-    fun cancel(spoken: String = "Cancelling. Not sending.") {
+    fun cancel(spoken: String = orderWords?.cancelSpoken ?: "Cancelling. Not sending.") {
         if (finished) return
         finished = true
         listener.cancel()
@@ -162,7 +165,7 @@ fun ConfirmScreen(nav: AppNav) {
     fun askAgainOrCancel(next: ConfirmDialog.Next) {
         unclear = dialog.unclear
         if (next == ConfirmDialog.Next.CANCEL) {
-            cancel("I wasn't sure, so I'm cancelling. Not sending.")
+            cancel(orderWords?.unsureSpoken ?: "I wasn't sure, so I'm cancelling. Not sending.")
             return
         }
         asking = true
@@ -188,7 +191,7 @@ fun ConfirmScreen(nav: AppNav) {
         hint,
         "Cancelling. Not sending.",
         "I wasn't sure, so I'm cancelling. Not sending.",
-    )
+    ) + orderWords?.sheetWords.orEmpty()
 
     listener = ScreenParts.rememberScreenListener(
         onFailed = { reason -> if (reason == ScreenParts.NOT_CAUGHT) askAgainOrCancel(dialog.silence()) },
@@ -251,8 +254,8 @@ fun ConfirmScreen(nav: AppNav) {
 
     val status = when {
         listener.active -> "Listening"
-        cancelled -> result ?: "Cancelling — nothing was sent. $undoing"
-        else -> "Needs your answer. Send to $confirmTo: $confirmText? Cancel is selected."
+        cancelled -> result ?: orderWords?.cancellingStatus ?: "Cancelling — nothing was sent. $undoing"
+        else -> orderWords?.status ?: "Needs your answer. Send to $confirmTo: $confirmText? Cancel is selected."
     }
 
     Box(Modifier.fillMaxSize().background(c.screen)) {
@@ -269,9 +272,9 @@ fun ConfirmScreen(nav: AppNav) {
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Text("Working", style = Clarity.type.headline, color = c.secondary)
-            Text("WhatsApp", style = Clarity.type.title, color = c.label, modifier = Modifier.align(Alignment.CenterHorizontally))
+            Text(if (orderWords != null) "Blinkit" else "WhatsApp", style = Clarity.type.title, color = c.label, modifier = Modifier.align(Alignment.CenterHorizontally))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.group).padding(horizontal = 16.dp)) {
-                listOf(t.opening("WhatsApp"), t.openingChat(confirmTo), t.typing).forEach {
+                (if (orderWords != null) confirming?.lines.orEmpty().takeLast(3) else listOf(t.opening("WhatsApp"), t.openingChat(confirmTo), t.typing)).forEach {
                     Box(Modifier.heightIn(min = 64.dp), contentAlignment = Alignment.CenterStart) {
                         Text(it, style = Clarity.type.body, color = c.label)
                     }
@@ -319,12 +322,18 @@ fun ConfirmScreen(nav: AppNav) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     AskCapsule()
                     Text(
-                        "Send to $confirmTo?",
+                        orderWords?.title ?: "Send to $confirmTo?",
                         style = Clarity.type.title,
                         color = c.label,
                         modifier = Modifier.semantics { heading() },
                     )
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (orderWords != null) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            orderWords.lines.forEach { Text(it, style = Clarity.type.title.copy(fontWeight = FontWeight.Medium), color = c.label) }
+                            Text(orderWords.total, style = Clarity.type.headline, color = c.label)
+                            Footnote(orderWords.note)
+                        }
+                    } else Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("“$confirmText”", style = Clarity.type.title.copy(fontWeight = FontWeight.Medium), color = c.label)
                         Footnote("Exactly as typed on screen")
                     }
@@ -339,13 +348,13 @@ fun ConfirmScreen(nav: AppNav) {
                         "Cancel",
                         { cancel() },
                         modifier = Modifier.focusRequester(cancelFocus),
-                        description = "Cancel. This is the default. Nothing will be sent. $undoing",
+                        description = orderWords?.cancelDescription ?: "Cancel. This is the default. Nothing will be sent. $undoing",
                         tag = "Default",
                     )
                     PrimaryButton(
-                        "Send",
+                        orderWords?.confirmLabel ?: "Send",
                         { send("tap") },
-                        description = "Send “$confirmText” to $confirmTo. It will really be sent.",
+                        description = orderWords?.confirmDescription ?: "Send “$confirmText” to $confirmTo. It will really be sent.",
                     )
                 }
 
@@ -386,6 +395,7 @@ fun ConfirmScreen(nav: AppNav) {
                     when {
                         asked == null -> "Nothing to confirm. Nothing was sent."
                         result != null -> result!!
+                        orderWords != null -> "${orderWords.nothingDone} $undoing"
                         else -> "Nothing was sent. $undoing"
                     },
                     secondary = true,

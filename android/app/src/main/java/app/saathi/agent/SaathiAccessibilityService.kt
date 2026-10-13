@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
+import android.net.Uri
+import android.os.Build
 import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
@@ -29,6 +31,7 @@ import app.saathi.safety.OpenApp
 import app.saathi.safety.Point
 import app.saathi.safety.Screen
 import app.saathi.safety.Scroll
+import app.saathi.safety.Search
 import app.saathi.safety.Tap
 import app.saathi.safety.TypeText
 import kotlinx.coroutines.delay
@@ -234,8 +237,26 @@ class SaathiAccessibilityService : AccessibilityService() {
     private fun read(): Snapshot? {
         val root = currentRoot() ?: return null
         val pkg = root.packageName?.toString().orEmpty()
-        return Normalizer.normalize(listOf(raw(root, 0, intArrayOf(MAX_NODES))), pkg, keyboardVisible())
+        val snap = Normalizer.normalize(listOf(raw(root, 0, intArrayOf(MAX_NODES))), pkg, keyboardVisible())
+        // Blinkit hides its search box from accessibility: surface the focused field (order apps only).
+        if (pkg !in Apps.ORDER_APPS) return snap
+        val focused = runCatching { root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() ?: return snap
+        return HiddenField.surface(snap, rawFocused(focused))
     }
+
+    /** The focused input as a RawNode with zero bounds (it is typed into, never tapped). Never a password's text. */
+    private fun rawFocused(n: AccessibilityNodeInfo): RawNode = RawNode(
+        className = n.className?.toString(),
+        text = if (n.isPassword) null else n.text?.toString(),
+        desc = n.contentDescription?.toString(),
+        hint = n.hintText?.toString(),
+        resourceId = n.viewIdResourceName,
+        bounds = Bounds(0, 0, 0, 0),
+        editable = n.isEditable,
+        password = n.isPassword,
+        showingHint = n.isShowingHintText,
+        handle = n,
+    )
 
     // -- acting (raw; reachable only through DeviceBridge's gate) ----------------------------------
 
@@ -290,6 +311,7 @@ class SaathiAccessibilityService : AccessibilityService() {
         is Back -> performGlobalAction(GLOBAL_ACTION_BACK)
         is Home -> performGlobalAction(GLOBAL_ACTION_HOME)
         is OpenApp -> openApp(action.app)
+        is Search -> search(action.query)
         else -> false // search / look / ask_user / done / fail are not device actions here
     }
 
@@ -334,7 +356,21 @@ class SaathiAccessibilityService : AccessibilityService() {
         if (node.isPassword || !node.isEditable) return false // never type into secret fields (R7)
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text) }
-        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val target = action.index?.let { screen.elements.getOrNull(it) }
+        if (ok && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && HiddenField.submitsWithEnter(screen.packageName, target)) {
+            // Blinkit only shows results after Enter (device.py did the same). Never in WhatsApp: Enter can send.
+            node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        }
+        return ok
+    }
+
+    /** Blinkit search results via its deep link (the prototype's `am start -a VIEW -d <url> <blinkit>`). */
+    private fun search(query: String): Boolean {
+        val i = Intent(Intent.ACTION_VIEW, Uri.parse(Blinkit.searchUrl(query)))
+            .setPackage(Apps.BLINKIT)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { startActivity(i) }.isSuccess
     }
 
     private suspend fun scroll(direction: Direction): Boolean {

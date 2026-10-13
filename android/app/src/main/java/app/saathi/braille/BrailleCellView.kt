@@ -34,6 +34,9 @@ class BrailleCellView(context: Context, private val haptics: BrailleHaptics) : V
     var private: Boolean = true
         set(value) { if (field != value) { field = value; invalidate() } }
     var onNext: () -> Unit = {}
+    /** Learning: called when the finger moves onto a dot zone (dot number) or off all zones (null). */
+    var onDot: ((Int?) -> Unit)? = null
+    private var lastDot: Int? = null
     var colors = Colors(0xFF000000.toInt(), 0x33000000, 0xFF888888.toInt())
         set(value) { if (field != value) { field = value; invalidate() } }
 
@@ -79,6 +82,10 @@ class BrailleCellView(context: Context, private val haptics: BrailleHaptics) : V
     private fun feel(x: Float, y: Float) {
         val d = dotUnder(x, y)
         if (d != null && cell?.raised(d) == true) haptics.on() else haptics.off()
+        if (d != lastDot) {
+            lastDot = d
+            onDot?.invoke(d)
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility") // TalkBack users get the click via setOnClickListener.

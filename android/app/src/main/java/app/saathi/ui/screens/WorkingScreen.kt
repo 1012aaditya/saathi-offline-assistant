@@ -1,6 +1,11 @@
 package app.saathi.ui.screens
 
+import android.Manifest
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import app.saathi.agent.PhoneBook
+import app.saathi.agent.contactsWhy
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -91,13 +96,29 @@ fun WorkingScreen(nav: AppNav) {
     val firstRun = remember { TaskRunner.state.value.runId + if (TaskRunner.pending != null) 1 else 0 }
 
     // Start the waiting command once the service is on (also right after the owner switched it on).
-    LaunchedEffect(serviceOn) {
-        val cmd = TaskRunner.pending ?: return@LaunchedEffect
-        if (!serviceOn) return@LaunchedEffect
+    fun startPending() {
+        val cmd = TaskRunner.pending ?: return
         if (TaskRunner.start(context, cmd, Requests.lang(deps), deps.state) { line -> deps.voice.speak(line) }) {
             TaskRunner.pending = null
             deps.feedback.cue(Cue.Tick)
         }
+    }
+    // Phone contacts (optional): asked once, the first time a task names a person. Android shows its
+    // own dialog and the user taps Allow (or not) themselves; the task goes on either way.
+    val askContacts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
+        if (!leaving) startPending()
+    }
+    LaunchedEffect(serviceOn) {
+        val cmd = TaskRunner.pending ?: return@LaunchedEffect
+        if (!serviceOn) return@LaunchedEffect
+        if (PhoneBook.shouldAsk(context, cmd)) {
+            PhoneBook.markAsked(context)
+            deps.voice.speak(t.contactsWhy)
+            ScreenParts.awaitSpeechEnd(deps.voice)
+            if (leaving || TaskRunner.pending == null) return@LaunchedEffect
+            if (runCatching { askContacts.launch(Manifest.permission.READ_CONTACTS) }.isSuccess) return@LaunchedEffect
+        }
+        startPending()
     }
 
     // Follow the task: confirm before sending, then the result (or hand over).
@@ -106,6 +127,8 @@ fun WorkingScreen(nav: AppNav) {
         when (val s = st) {
             is TaskRunner.State.Confirming -> { leaving = true; nav.replace(Route.Confirm) }
             is TaskRunner.State.Choosing -> { leaving = true; nav.replace(Route.DraftChoice) }
+            is TaskRunner.State.ChoosingItem -> { leaving = true; nav.replace(Route.OrderPick) }
+            is TaskRunner.State.Picking -> { leaving = true; nav.replace(Route.ContactChoice) }
             is TaskRunner.State.Finished -> {
                 // Our own Stop went home already; a vanished service shows (and says) the result.
                 if (s.outcome is Outcome.Stopped && !TaskRunner.stoppedByServiceLoss) return@LaunchedEffect

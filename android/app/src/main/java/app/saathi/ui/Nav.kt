@@ -21,12 +21,17 @@ import app.saathi.data.AppState
 import app.saathi.feedback.Feedback
 import app.saathi.feedback.reducedMotion
 import app.saathi.ui.screens.ActivityScreen
+import app.saathi.ui.screens.AppApprovalScreen
+import app.saathi.ui.screens.ContactChoiceScreen
+import app.saathi.ui.screens.BrailleLearnScreen
 import app.saathi.ui.screens.BrailleScreen
 import app.saathi.ui.screens.ConfirmScreen
 import app.saathi.ui.screens.DraftChoiceScreen
+import app.saathi.ui.screens.OrderPickScreen
 import app.saathi.ui.screens.HandoverScreen
 import app.saathi.ui.screens.HomeScreen
 import app.saathi.ui.screens.ListeningScreen
+import app.saathi.ui.screens.PhotoScreen
 import app.saathi.ui.screens.ResultScreen
 import app.saathi.ui.screens.SafetyScreen
 import app.saathi.ui.screens.SettingsScreen
@@ -37,7 +42,7 @@ import app.saathi.ui.screens.WorkingScreen
 import app.saathi.voice.Voice
 
 /** The 12 Clarity screens (DESIGN.md) + Braille + the unsent-text choice sheet. */
-enum class Route { Welcome, Setup, Home, Listening, Working, Confirm, DraftChoice, Result, Handover, Walk, Activity, Settings, Safety, Braille }
+enum class Route { Welcome, Setup, Home, Listening, Working, Confirm, DraftChoice, ContactChoice, AppApproval, Result, Handover, Walk, Activity, Settings, Safety, Braille, BrailleLearn, Photo, OrderPick }
 
 /** Shared services, available to every screen via [LocalDeps]. */
 class Deps(val state: AppState, val feedback: Feedback, val voice: Voice)
@@ -73,6 +78,7 @@ fun routeForPhrase(text: String): Route? {
     return when {
         "go home" in t || t.trim() == "home" -> Route.Home
         "walk" in t -> Route.Walk
+        ("learn" in t || "सीख" in t) && ("braille" in t || "ब्रेल" in t) -> Route.BrailleLearn
         "braille" in t || "ब्रेल" in t -> Route.Braille
         "activity" in t || "history" in t -> Route.Activity
         "safety" in t -> Route.Safety
@@ -86,6 +92,7 @@ fun SaathiNavHost(deps: Deps) {
     val controller = rememberNavController()
     val nav = remember(controller) { AppNav(controller) }
     val context = LocalContext.current
+    remember(context) { app.saathi.agent.SaathiContext.attach(context); true } // request handling without a screen (open any app)
     val still = remember { reducedMotion(context) }
     val ease = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
 
@@ -124,6 +131,9 @@ fun SaathiNavHost(deps: Deps) {
             composable(Route.Working.name) { WorkingScreen(nav) }
             composable(Route.Confirm.name) { ConfirmScreen(nav) }
             composable(Route.DraftChoice.name) { DraftChoiceScreen(nav) }
+            composable(Route.OrderPick.name) { OrderPickScreen(nav) }
+            composable(Route.ContactChoice.name) { ContactChoiceScreen(nav) }
+            composable(Route.AppApproval.name) { AppApprovalScreen(nav) }
             composable(Route.Result.name) { ResultScreen(nav) }
             composable(Route.Handover.name) { HandoverScreen(nav) }
             composable(Route.Walk.name) { WalkScreen(nav) }
@@ -131,6 +141,8 @@ fun SaathiNavHost(deps: Deps) {
             composable(Route.Settings.name) { SettingsScreen(nav) }
             composable(Route.Safety.name) { SafetyScreen(nav) }
             composable(Route.Braille.name) { BrailleScreen(nav) }
+            composable(Route.BrailleLearn.name) { BrailleLearnScreen(nav) }
+            composable(Route.Photo.name) { PhotoScreen(nav) }
         }
     }
 }

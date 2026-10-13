@@ -4,7 +4,7 @@ package app.saathi.safety
  * rapidfuzz.fuzz.token_set_ratio (rapidfuzz 3.x, processor=None, score_cutoff=0), ported from
  * rapidfuzz/fuzz_py.py. Lengths and the Indel distance are over code points, like Python str.
  */
-internal object Fuzz {
+object Fuzz {
     fun tokenSetRatio(s1: String, s2: String): Double {
         val tokensA = Py.split(s1).toSet()
         val tokensB = Py.split(s2).toSet()

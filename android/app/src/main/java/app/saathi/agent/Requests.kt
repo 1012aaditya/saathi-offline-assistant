@@ -17,7 +17,10 @@ object Requests {
     fun handle(text: String, deps: Deps, nav: AppNav) {
         deps.voice.stopSpeaking()
         val t = Texts(lang(deps))
-        val command = CommandParser.parse(text, TaskRunner.session, deps.state.trustedContacts.toList())
+        // Saved names (trusted contacts, and the phone's contacts if the user allowed them) keep
+        // multi-word names whole: "message Rahul Sharma I'm on my way".
+        val people = SaathiContext.app?.let { PhoneBook.names(it) }.orEmpty()
+        val command = CommandParser.parse(text, TaskRunner.session, deps.state.trustedContacts.toList() + people)
         deps.state.lastRequest = text
         when (command) {
             is Command.Stop -> nav.home()
@@ -32,6 +35,13 @@ object Requests {
                 TaskRunner.showResult(command, Outcome.Answered(t.help, t.helpTitle))
                 nav.replace(Route.Result)
             }
+            is Command.Photo -> {
+                // Camera / last photo, described on the phone. The Photo screen picks up the mode.
+                app.saathi.photo.PhotoRequest.open(command.source)
+                nav.replace(Route.Photo)
+            }
+            // Any other installed app: resolved on the phone, opened only with the user's approval.
+            is Command.LaunchApp -> LaunchRequests.handle(command, deps, nav)
             is Command.Unsupported -> {
                 // Saathi's own screens not known to the parser (e.g. Braille) still open by name.
                 routeForPhrase(text)?.let { route ->
@@ -45,7 +55,7 @@ object Requests {
         }
     }
 
-    private fun startTask(command: Command, deps: Deps, nav: AppNav, t: Texts) {
+    internal fun startTask(command: Command, deps: Deps, nav: AppNav, t: Texts) {
         // Missing a part: ask, don't guess. A reply missing its text waits for the next utterance.
         Flows.missing(command, t)?.let { question ->
             if (command is Command.Reply && command.contact != null) TaskRunner.session.pendingReplyTo = command.contact

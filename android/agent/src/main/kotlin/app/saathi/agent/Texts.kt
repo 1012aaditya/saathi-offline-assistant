@@ -130,11 +130,11 @@ class Texts(val lang: Lang) {
     // -- help / honest limits -----------------------------------------------------------------
     val helpTitle get() = s("What I can do", "मैं क्या कर सकता हूँ")
     val help get() = s(
-        "Offline, I can read a contact's last WhatsApp message, tell you who has new messages, reply to a contact " +
-            "after you confirm, open WhatsApp, Google Pay or Blinkit, and describe the screen of the app you were in. " +
+        "Offline, I can read a contact's last WhatsApp message, tell you who has new messages, message anyone on WhatsApp " +
+            "after you confirm, open apps on your phone (I ask the first time), and describe the screen of the app you were in. " +
             "Hold Volume-down in any app to talk to me.",
-        "बिना इंटरनेट मैं WhatsApp पर किसी का आखिरी संदेश पढ़ सकता हूँ, बता सकता हूँ किसके नए संदेश हैं, आपकी पुष्टि के बाद जवाब भेज सकता हूँ, " +
-            "ऐप खोल सकता हूँ, और जिस ऐप में आप थे उसकी स्क्रीन बता सकता हूँ। किसी भी ऐप में Volume-down दबाकर बोलिए।",
+        "बिना इंटरनेट मैं WhatsApp पर किसी का आखिरी संदेश पढ़ सकता हूँ, बता सकता हूँ किसके नए संदेश हैं, आपकी पुष्टि के बाद किसी को भी संदेश भेज सकता हूँ, " +
+            "फ़ोन के ऐप खोल सकता हूँ (पहली बार पूछकर), और जिस ऐप में आप थे उसकी स्क्रीन बता सकता हूँ। किसी भी ऐप में Volume-down दबाकर बोलिए।",
     )
     val unsupportedTitle get() = s("I can't do that offline yet", "यह अभी बिना इंटरनेट नहीं कर सकता")
     val unsupported get() = s(

@@ -65,6 +65,18 @@ class FakeWhatsApp(
     /** Real WhatsApp (owner's tablet) reports its "Message" placeholder as the empty box's text. */
     var placeholderAsText = true
 
+    /** WhatsApp contacts with no chat yet: only search finds them; tapping one opens a new, empty chat. */
+    val contacts = mutableListOf<String>()
+
+    /** Search results grouped under "Chats" / "Contacts" / "Messages" headers (newer WhatsApp). */
+    var searchHeaders = false
+
+    /** Message hits shown under "Messages" in search: (chat name, message text). */
+    val messageHits = mutableListOf<Pair<String, String>>()
+
+    /** Resource id of contact rows in search (same as chat rows in the dumps seen so far). */
+    var contactRid = WhatsApp.ROW_NAME
+
     /** Accessibility service gone (unbound / reconnecting): nothing can be read or done. */
     var unavailable = false
 
@@ -101,10 +113,28 @@ class FakeWhatsApp(
                 add { S.el(it, text = query, rid = "search_input", cls = "EditText", editable = true, clickable = true, y = 100) }
                 if (query.isNotEmpty()) {
                     var y = 300
-                    for (name in chats.keys.filter { it.contains(query, ignoreCase = true) }) {
-                        val rowY = y
-                        add { S.el(it, text = name, rid = WhatsApp.ROW_NAME, y = rowY) }
-                        y += 120
+                    fun header(text: String) {
+                        val hy = y
+                        add { S.el(it, text = text, y = hy) }
+                        y += 80
+                    }
+                    fun rows(names: List<String>, rid: String = WhatsApp.ROW_NAME) {
+                        for (name in names) {
+                            val rowY = y
+                            add { S.el(it, text = name, rid = rid, y = rowY) }
+                            y += 120
+                        }
+                    }
+                    val chatHits = chats.keys.filter { it.contains(query, ignoreCase = true) }
+                    val contactHits = contacts.filter { it.contains(query, ignoreCase = true) && it !in chats.keys }
+                    val msgHits = messageHits.filter { it.second.contains(query, ignoreCase = true) }
+                    if (searchHeaders && chatHits.isNotEmpty()) header("Chats")
+                    rows(chatHits)
+                    if (searchHeaders && contactHits.isNotEmpty()) header("Contacts")
+                    rows(contactHits, rid = contactRid)
+                    if (msgHits.isNotEmpty()) {
+                        header("Messages")
+                        rows(msgHits.map { it.first })
                     }
                 }
             }
@@ -152,7 +182,8 @@ class FakeWhatsApp(
                 val e = screen.elements[action.index]
                 when {
                     e.rid == WhatsApp.SEARCH_BAR -> view = View.Search
-                    e.rid == WhatsApp.ROW_NAME -> {
+                    e.rid == WhatsApp.ROW_NAME || e.rid == "contactpicker_row_name" -> {
+                        if (e.text !in chats) chats[e.text] = mutableListOf() // a contact without a chat: new chat
                         view = View.Chat(e.text)
                         unread.remove(e.text)
                     }

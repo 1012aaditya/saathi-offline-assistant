@@ -91,9 +91,17 @@ class Detector private constructor(
 
         /**
          * Create a session on [backend] with [threads] CPU threads. Throws if the backend isn't
-         * available on this phone (the caller falls back to Cpu).
+         * available on this phone (the caller falls back to Cpu). Only [labels] are decoded.
          */
-        fun load(context: Context, model: WalkModel, backend: Backend, threads: Int, threshold: Float = 0.3f): Detector {
+        fun load(
+            context: Context,
+            model: WalkModel,
+            backend: Backend,
+            threads: Int,
+            threshold: Float = 0.3f,
+            /** Class names to keep (walk mode's list by default; photo description passes its own). */
+            labels: Set<String> = WalkCore.LABELS,
+        ): Detector {
             val env = OrtEnvironment.getEnvironment()
             val opts = OrtSession.SessionOptions().apply {
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
@@ -116,7 +124,7 @@ class Detector private constructor(
             val info = session.inputInfo.values.first().info as TensorInfo
             val size = info.shape.last().toInt().takeIf { it > 0 } ?: 256
             val names = names(context, model)
-            val keep = Yolo.keepIndices(names, WalkCore.LABELS)
+            val keep = Yolo.keepIndices(names, labels)
             Log.i(TAG, "${model.name} on $backend×$threads: ${SystemClock.elapsedRealtime() - t0} ms to load, input $size px, ${keep.size} classes kept")
             return Detector(model, backend, env, session, names, keep, size, threshold)
         }

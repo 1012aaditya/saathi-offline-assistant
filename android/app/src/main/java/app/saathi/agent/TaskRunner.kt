@@ -47,6 +47,12 @@ object TaskRunner {
         /** The chat's box already holds the user's own text: keep / replace / add / send it? */
         data class Choosing(override val runId: Int, val command: Command, val title: String, val request: DraftChoiceRequest, val lines: List<String>) : State
 
+        /** Several people match the name: which one? (names verbatim from WhatsApp's screen) */
+        data class Picking(override val runId: Int, val command: Command, val title: String, val request: ContactChoiceRequest, val lines: List<String>) : State
+
+        /** Grocery: which product / size? (options verbatim from Blinkit's screen) */
+        data class ChoosingItem(override val runId: Int, val command: Command, val title: String, val request: PickRequest, val lines: List<String>) : State
+
         data class Finished(override val runId: Int, val command: Command?, val title: String, val outcome: Outcome) : State
     }
 
@@ -67,6 +73,8 @@ object TaskRunner {
     @Volatile private var cleanupJob: Job? = null // removing an earlier draft after a reconnect
     @Volatile private var answer: CompletableDeferred<Answer>? = null
     @Volatile private var choice: CompletableDeferred<DraftChoice>? = null
+    @Volatile private var itemPick: CompletableDeferred<Int?>? = null
+    @Volatile private var picked: CompletableDeferred<String?>? = null
     private var runCounter = 0
 
     /** Why a running task was stopped (decides who says what afterwards). */
@@ -103,7 +111,9 @@ object TaskRunner {
         is Command.UnreadSummary -> "Who has new messages"
         is Command.ScreenSummary -> "What's on screen"
         is Command.OpenApp -> "Open ${appName(command.packageName)}"
+        is Command.LaunchApp -> "Open ${command.name}"
         is Command.Help -> "Help"
+        is GroceryCommand -> OrderTexts(Lang.EN).title(command)
         else -> "Couldn't do: ${command.utterance.trim().take(40)}"
     }
 
@@ -132,7 +142,15 @@ object TaskRunner {
         val app = context.applicationContext
         val t = Texts(lang)
         val cap = captured?.takeIf { System.currentTimeMillis() - it.atMillis < CAPTURE_MAX_AGE_MS }
-        val flow = Flows.forCommand(command, t, device.gate, cap?.screen, cap?.label.orEmpty(), ::appName)
+        // Phone contacts (only if the user allowed them): display names, memory only, never logged.
+        val book = if (command is Command.Reply || command is Command.ReadLast) PhoneBook.names(app) else emptyList()
+        // Blinkit: Settings (Grocery app level, Allow placing orders, spending limit) decide first.
+        val grocery = (command as? GroceryCommand)?.let { GroceryTasks.prepare(it, appState, device.gate, lang) }
+        grocery?.early?.let { early ->
+            showResult(command, early, appState.takeIf { early is Outcome.Failed })
+            return true
+        }
+        val flow = grocery?.flow ?: Flows.forCommand(command, t, device.gate, cap?.screen, cap?.label.orEmpty(), ::appName, phoneBook = book)
         if (flow == null) {
             showResult(command, Outcome.Asked(Flows.missing(command, t) ?: t.unsupported))
             return true
@@ -143,6 +161,7 @@ object TaskRunner {
         val appLabel = when (command) {
             is Command.OpenApp -> appName(command.packageName)
             is Command.ScreenSummary -> cap?.label ?: "Saathi"
+            is GroceryCommand -> "Blinkit"
             else -> "WhatsApp"
         }
         _state.value = State.Running(id, command, title, appLabel, emptyList())
@@ -160,12 +179,14 @@ object TaskRunner {
             val outcome: Outcome = try {
                 loop.run(
                     flow,
-                    Flows.contextFor(command),
+                    grocery?.ctx ?: Flows.contextFor(command, book),
                     say = { line ->
                         addLine(id, line)
                         withContext(Dispatchers.Main) { speak(line) }
                     },
                     choose = { req -> awaitChoice(app, id, command, title, req) },
+                    pick = { req -> awaitPick(app, id, command, title, req) },
+                    pickOption = { req -> awaitItemPick(app, id, command, title, req) },
                     confirm = { req -> awaitAnswer(app, id, command, title, req) },
                 )
             } catch (e: CancellationException) {
@@ -175,7 +196,8 @@ object TaskRunner {
                     val reason = stopReason
                     val note = loop.lastNote
                     val base = if (reason == StopReason.SERVICE_LOST) t.stoppedServiceLost else t.stopped
-                    val stopped = Outcome.Stopped(base).withNote(note)
+                    // Grocery: say what is left in the cart (never leave silent changes).
+                    val stopped = Outcome.Stopped(base).withNote(note).withNote((flow as? OrderAware)?.endNote(Outcome.Stopped(base)))
                     log("stopped reason=$reason draftCleanup=${loop.lastCleanup} pendingDrafts=${drafts(app).all().size}")
                     // Working's Stop already said "Stopped": add what happened to the typed text.
                     // Volume-down: the user is about to talk (a leftover is removed and said before
@@ -266,7 +288,7 @@ object TaskRunner {
         log("confirm answer $a from $source (waiting=${answer != null})")
         val s = _state.value
         if (s is State.Confirming && a == Answer.YES) {
-            _state.value = State.Running(s.runId, s.command, s.title, "WhatsApp", s.lines)
+            _state.value = State.Running(s.runId, s.command, s.title, if (s.command is GroceryCommand) "Blinkit" else "WhatsApp", s.lines)
         }
         answer?.complete(a)
     }
@@ -304,6 +326,52 @@ object TaskRunner {
         }
     }
 
+    /** The user's pick on the Which-one screen: one of the names, or null (Cancel, the default). [source] as in [answer]. */
+    fun pick(name: String?, source: String = "unknown") {
+        log("contact pick ${if (name == null) "none" else "one"} from $source (waiting=${picked != null})") // never the name
+        val s = _state.value
+        if (s is State.Picking && name != null) {
+            _state.value = State.Running(s.runId, s.command, s.title, "WhatsApp", s.lines)
+        }
+        picked?.complete(name)
+    }
+
+    private suspend fun awaitPick(context: Context, id: Int, command: Command, title: String, req: ContactChoiceRequest): String? {
+        val d = CompletableDeferred<String?>()
+        picked = d
+        val lines = (_state.value as? State.Running)?.lines.orEmpty()
+        _state.value = State.Picking(id, command, title, req, lines)
+        bringSaathiToFront(context)
+        return try {
+            d.await()
+        } finally {
+            picked = null
+        }
+    }
+
+    /** Grocery "which one?": the option's index, or null (Cancel, the default). [source] as in [answer]. */
+    fun pickItem(index: Int?, source: String = "unknown") {
+        log("item pick ${index ?: "none"} from $source (waiting=${itemPick != null})")
+        val s = _state.value
+        if (s is State.ChoosingItem && index != null) {
+            _state.value = State.Running(s.runId, s.command, s.title, "Blinkit", s.lines)
+        }
+        itemPick?.complete(index)
+    }
+
+    private suspend fun awaitItemPick(context: Context, id: Int, command: Command, title: String, req: PickRequest): Int? {
+        val d = CompletableDeferred<Int?>()
+        itemPick = d
+        val lines = (_state.value as? State.Running)?.lines.orEmpty()
+        _state.value = State.ChoosingItem(id, command, title, req, lines)
+        bringSaathiToFront(context)
+        return try {
+            d.await()
+        } finally {
+            itemPick = null
+        }
+    }
+
     private suspend fun awaitChoice(context: Context, id: Int, command: Command, title: String, req: DraftChoiceRequest): DraftChoice {
         val d = CompletableDeferred<DraftChoice>()
         choice = d
@@ -332,7 +400,8 @@ object TaskRunner {
     private fun record(appState: AppState, command: Command, outcome: Outcome) {
         val o = when (outcome) {
             is Outcome.Answered -> HistoryOutcome.Done
-            is Outcome.Cancelled, is Outcome.Stopped -> HistoryOutcome.Cancelled
+            is Outcome.Cancelled, is Outcome.Stopped ->
+                if (command is GroceryCommand) HistoryOutcome.StoppedBeforeOrder else HistoryOutcome.Cancelled
             is Outcome.HandedOver -> HistoryOutcome.HandedOver
             is Outcome.Asked, is Outcome.Failed -> HistoryOutcome.Failed
         }

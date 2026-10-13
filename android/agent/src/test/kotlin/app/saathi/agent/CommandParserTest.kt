@@ -142,7 +142,7 @@ class CommandParserTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["Pay Rahul 5 rupees", "open Instagram", "order milk", "call Mom", "Papa ko call karo", "what's the weather", ""])
+    @ValueSource(strings = ["Pay Rahul 5 rupees", "open Rahul's chat", "book a cab", "call Mom", "Papa ko call karo", "what's the weather", ""])
     fun `anything else is unsupported, never guessed`(text: String) {
         assertTrue(p(text) is Command.Unsupported, "$text -> ${p(text)}")
     }

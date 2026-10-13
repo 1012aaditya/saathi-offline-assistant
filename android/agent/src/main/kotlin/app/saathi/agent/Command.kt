@@ -6,6 +6,9 @@ enum class Lang { EN, HI }
 /** Saathi's own screens a spoken phrase can open ("Go home", "Walk mode", ...). */
 enum class Destination { HOME, WALK, ACTIVITY, SETTINGS, SAFETY }
 
+/** Where a photo to describe comes from: the back camera now, or the newest picture in the phone's photos. */
+enum class PhotoSource { CAMERA, LAST_PHOTO }
+
 /**
  * What the user asked for, decided by [CommandParser] with keywords only (no model, no network).
  * `utterance` is the recognised text as heard.
@@ -36,6 +39,15 @@ sealed interface Command {
         override val isTask: Boolean get() = true
     }
 
+    /**
+     * "Open camera", "Instagram kholo", "कैमरा खोलो": any installed app that isn't one of the
+     * safety alias apps. [name] is the app name as said; the app layer resolves it against the
+     * phone's launcher apps and only ever starts the app's launcher intent (see AppLaunch.kt).
+     */
+    data class LaunchApp(val name: String, override val utterance: String) : Command {
+        override val isTask: Boolean get() = true
+    }
+
     /** "Reply to Mom I'll be home by 7", "Mom ko bolo main aa raha hoon". Missing parts are asked for. */
     data class Reply(val contact: String?, val text: String?, override val utterance: String) : Command {
         override val isTask: Boolean get() = true
@@ -46,6 +58,13 @@ sealed interface Command {
     data class Help(override val utterance: String) : Command
 
     data class Navigate(val target: Destination, override val utterance: String) : Command
+
+    /**
+     * "Take a photo", "What's in front of me?", "सामने क्या है" ([PhotoSource.CAMERA]);
+     * "Describe my last photo", "meri last photo mein kya hai" ([PhotoSource.LAST_PHOTO]).
+     * Described on the phone (offline object detection). Not a task: it never operates another app.
+     */
+    data class Photo(val source: PhotoSource, override val utterance: String) : Command
 
     /** Anything else: answered honestly ("I can't do that offline yet"), never guessed at. */
     data class Unsupported(override val utterance: String) : Command

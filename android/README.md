@@ -32,7 +32,9 @@ app/src/main/java/app/saathi/
   feedback/Feedback.kt   earcons (generated tones) + vibration patterns
   voice/Voice.kt         SpeechRecognizer + TextToSpeech
   braille/               braille reader: touch cell view, haptics, OTP via SMS User Consent
-  ui/screens/BrailleScreen.kt  Home > Braille (OTP / typed text / practice)
+  ui/screens/BrailleScreen.kt  Home > Braille (OTP / typed text / practice; rhythm or touch reading)
+  ui/screens/BrailleParts.kt   word-by-word rhythm reader (next/repeat/read on/sentences/speed)
+  ui/screens/BrailleLearnScreen.kt  Learn braille: 5 lessons (six dots, feel a letter, rhythm, quiz, reading)
   agent/                 SaathiAccessibilityService, DeviceBridge (the gated choke point), TaskRunner, Requests
 safety/                  pure-Kotlin safety gate + JUnit 5 tests
 agent/                   pure-Kotlin parser, flows, AgentLoop, GatedDevice + tests (synthetic screens only)

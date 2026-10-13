@@ -27,7 +27,7 @@ object CommandParser {
         "whatsapp", "blinkit", "screen", "message", "messages", "msg", "aur", "us", "is", "kis", "kiske",
         "किस", "उस", "इस", "what", "that", "it", "there", "who", "today", "new", "last", "sab", "sabhi", "सब",
         "koi", "कोई", "mera", "meri", "mere", "मेरा", "मेरी", "मेरे", "my", "me", "i", "you", "app", "her", "him",
-        "them", "everyone", "anyone", "somebody", "someone", "unread", "group",
+        "them", "everyone", "anyone", "somebody", "someone", "unread",
         // Hindi verbs that can land where a name is expected ("message padho")
         "padho", "sunao", "dekho", "kholo", "bhejo", "bolo", "likho", "batao", "पढ़ो", "सुनाओ", "देखो", "खोलो",
     )
@@ -117,6 +117,29 @@ object CommandParser {
         I,
     )
 
+    // -- camera / photo description (described on the phone; "open camera" / "open photos" stay app opening) --
+
+    private const val PHOTO_NOUN = "photo|photos|picture|pic|pics|image|snap|tasveer|tasvir|foto|फ़ोटो|फोटो|तस्वीर|तसवीर|पिक्चर|इमेज"
+    private val LAST_PHOTO = Regex(
+        "(?:last|latest|newest|most recent|recent|previous|aakhri|akhri|aakhiri|pichli|pichhli|आखिरी|आख़िरी|पिछली|लास्ट|सबसे नई)\\s+(?:$PHOTO_NOUN)|" +
+            "(?:photo|picture|pic|image)\\s+(?:that\\s+)?i\\s+(?:just\\s+)?took|" +
+            "(?:describe|what'?s in|what is in)\\s+my\\s+(?:photo|picture|pic|image)|" +
+            "(?:meri|मेरी)\\s+(?:$PHOTO_NOUN)\\s+(?:mein|me|main|में)\\s+(?:kya|क्या)",
+        I,
+    )
+    private val LIVE_PHOTO = Regex(
+        "\\b(?:take|click|snap|capture)\\s+(?:a\\s+|one\\s+|my\\s+|another\\s+|the\\s+)?(?:photo|picture|pic|snap|image)|" +
+            "\\bwhat(?:'s|s| is| are)\\s+(?:there\\s+)?(?:in front|ahead|around)|" +
+            "\\bdescribe\\s+(?:this|that|it|what'?s in front|what is in front|what you see|my surroundings|the surroundings|" +
+            "surroundings|the scene|the room|around me)(?!\\s+(?:screen|photo|picture|message|chat))|" +
+            "\\bwhat (?:do|can) you see|" +
+            "(?:saamne|samne|saamane|aage|aas ?paas)\\s+(?:kya|kaun|kon)|(?:सामने|आगे|आस ?पास)\\s+(?:क्या|कौन)|" +
+            "(?:camera|कैमरा|कैमरे)\\s+(?:se|से)\\s+(?:dekh|bata|देख|बता)|" +
+            "(?:$PHOTO_NOUN)\\s+(?:khincho|kheencho|khicho|kheecho|khich|kheech|khinch|khinchiye|khichiye|kheech do|khinch do|" +
+            "lo|le lo|lijiye|le lijiye|click karo|click kar do|खींचो|खीचो|खींच दो|खिंचो|खींचिए|लो|ले लो|लीजिए|क्लिक करो)(?=\\s|$)",
+        I,
+    )
+
     // -- apps and Saathi's own screens ----------------------------------------------------------
 
     private val OPEN_VERB = Regex("\\b(open|launch|start|go to)\\b|kholo|khol do|chalu karo|खोलो|खोल दो|चालू करो|ओपन", I)
@@ -150,12 +173,15 @@ object CommandParser {
 
         if (STOP.matches(lower)) return Command.Stop(raw)
         if (wordCount(t) <= 6 && HELP.containsMatchIn(lower)) return Command.Help(raw)
+        photo(t)?.let { return Command.Photo(it, raw) } // before SCREEN: "saamne kya dikh raha hai" is the camera
         if (SCREEN.containsMatchIn(t)) return Command.ScreenSummary(raw)
 
         reply(t, session, knownNames)?.let { return it.copy(utterance = raw) }
         readLast(t, session, knownNames)?.let { return it.copy(utterance = raw) }
+        OrderParser.parse(t)?.let { return it } // Blinkit: order / add to cart / cart / place order (OrderCommands.kt)
         if (UNREAD.containsMatchIn(t)) return Command.UnreadSummary(raw)
         openApp(t)?.let { return it.copy(utterance = raw) }
+        launchApp(t)?.let { return it.copy(utterance = raw) }
         if (wordCount(t) <= 5) {
             NAV.firstOrNull { (_, rx) -> rx.containsMatchIn(t) }?.let { return Command.Navigate(it.first, raw) }
         }
@@ -194,6 +220,13 @@ object CommandParser {
         return null
     }
 
+    /** "Describe my last photo" → LAST_PHOTO; "take a photo" / "what's in front of me" → CAMERA; else null. */
+    private fun photo(t: String): PhotoSource? = when {
+        LAST_PHOTO.containsMatchIn(t) -> PhotoSource.LAST_PHOTO
+        LIVE_PHOTO.containsMatchIn(t) -> PhotoSource.CAMERA
+        else -> null
+    }
+
     private fun openApp(t: String): Command.OpenApp? {
         val lower = t.lowercase()
         if (PHONE_SETTINGS.containsMatchIn(lower)) {
@@ -208,6 +241,37 @@ object CommandParser {
         val bare = lower.trim() == alias
         if (!hasVerb && !bare) return null
         return Command.OpenApp(alias, Apps.APP_ALIASES.getValue(alias), "")
+    }
+
+    // -- any other installed app ("open camera", "Instagram kholo", "कैमरा खोलो") ------------------
+
+    private val EN_OPEN_ANY = Regex("^(?:please\\s+)?(?:open|launch|start|run|go to)\\s+(?:up\\s+)?(.+)$", I)
+    private val HI_OPEN_ANY = Regex(
+        "^(.+?)\\s+(?:kholo|khol do|kholiye|khol dijiye|khol de|open karo|open kar do|open kijiye|chalu karo|chalu kar do|" +
+            "chalao|chala do|खोलो|खोल दो|खोलिए|खोल दीजिए|खोल दे|ओपन करो|ओपन कर दो|ओपन कीजिए|चालू करो|चालू कर दो|चलाओ|चला दो)$",
+        I,
+    )
+    private val APP_FILLER = setOf(
+        "the", "my", "app", "apps", "application", "please", "up", "zara", "jara", "ज़रा", "जरा", "ab", "abhi", "अभी",
+        "saathi", "sathi", "साथी", "ऐप", "एप", "एप्प", "ko", "को", "wala", "वाला", "mera", "मेरा",
+    )
+
+    /** Saathi's own screens and WhatsApp words: never an app to launch ("start walk mode", "open Rahul's chat"). */
+    private val NOT_AN_APP = Regex(
+        "\\b(walk|braille|home|activity|history|safety|settings?|help|chat|chats)\\b|'s\\b|" +
+            "ब्रेल|वॉक|होम|गतिविधि|इतिहास|सुरक्षा|सेटिंग|मदद|चैट",
+        I,
+    )
+
+    private fun launchApp(t: String): Command.LaunchApp? {
+        val m = EN_OPEN_ANY.matchEntire(t) ?: HI_OPEN_ANY.matchEntire(t) ?: return null
+        val words = m.groupValues[1].trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
+        while (words.isNotEmpty() && words.first().lowercase() in APP_FILLER) words.removeAt(0)
+        while (words.isNotEmpty() && words.last().lowercase() in APP_FILLER) words.removeAt(words.size - 1)
+        if (words.isEmpty() || words.size > 4) return null
+        val name = words.joinToString(" ").trim('"', '“', '”', ',', '.')
+        if (name.isEmpty() || name.length > 40 || NOT_AN_APP.containsMatchIn(name)) return null
+        return Command.LaunchApp(name, "")
     }
 
     // -- helpers --------------------------------------------------------------------------------
@@ -249,6 +313,8 @@ object CommandParser {
         while (words.isNotEmpty() && words.last().lowercase() in FILLER) words.removeAt(words.size - 1)
         if (words.isEmpty() || words.size > 3) return null
         if (words.any { it.lowercase() in NOT_NAMES }) return null
+        // "group" alone isn't a name, but group chats are ("Family Group ko bolo …").
+        if (words.size == 1 && words[0].lowercase() in setOf("group", "groups", "ग्रुप")) return null
         return words.joinToString(" ")
     }
 

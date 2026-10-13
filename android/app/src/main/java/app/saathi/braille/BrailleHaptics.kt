@@ -102,9 +102,62 @@ class BrailleHaptics(context: Context) {
         )
     }
 
+    private var pulseTrack: AudioTrack? = null
+
+    /**
+     * Rhythm braille: start [pulses] now on the motor and/or speaker; returns their length in ms
+     * (the caller waits). Raised = strong long pulse, flat = faint short tick, sentence end = low pulse.
+     */
+    fun pulses(pulses: List<Pulse>): Int {
+        stopPulses()
+        val total = durationMs(pulses)
+        if (canVibrate) {
+            val v = vibrator!!
+            val amp = v.hasAmplitudeControl()
+            val timings = pulses.map { it.ms.toLong() }.toLongArray()
+            val amps = pulses.map {
+                when (it.kind) {
+                    PulseKind.Raised -> 255
+                    PulseKind.Flat -> if (amp) 60 else 255 // no amplitude control: the short length tells it apart
+                    PulseKind.SentenceEnd -> if (amp) 160 else 255
+                    PulseKind.Silence -> 0
+                }
+            }.toIntArray()
+            v.vibrate(VibrationEffect.createWaveform(timings, amps, -1))
+        }
+        if (sound) {
+            val pcm = pulses.flatMap { p ->
+                when (p.kind) {
+                    PulseKind.Raised -> tone(520.0, p.ms, 0.30)
+                    PulseKind.Flat -> tone(260.0, p.ms, 0.10)
+                    PulseKind.SentenceEnd -> tone(220.0, p.ms, 0.30)
+                    PulseKind.Silence -> List(RATE * p.ms / 1000) { 0.toShort() }
+                }
+            }.toShortArray()
+            runCatching { pulseTrack = track(pcm).also { it.play() } }
+        }
+        return total
+    }
+
+    fun stopPulses() {
+        if (canVibrate) vibrator?.cancel()
+        pulseTrack?.let { runCatching { it.stop(); it.release() } }
+        pulseTrack = null
+    }
+
+    private fun tone(hz: Double, ms: Int, gain: Double): List<Short> {
+        val n = RATE * ms / 1000
+        val fade = min(n / 2, RATE / 200) // 5 ms, no clicks
+        return List(n) { i ->
+            val env = min(1.0, min(i, n - 1 - i).toDouble() / fade.coerceAtLeast(1))
+            (sin(2 * PI * hz * i / RATE) * env * gain * Short.MAX_VALUE).toInt().toShort()
+        }
+    }
+
     /** Call when the screen goes away. */
     fun release() {
         off()
+        stopPulses()
         dotTone?.release()
         scope.cancel()
     }

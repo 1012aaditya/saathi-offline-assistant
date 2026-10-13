@@ -27,6 +27,8 @@ data class ConfirmRequest(
     val message: String, // verbatim on-screen message box text
     /** What a No / Cancel does to the box: remove Saathi's text, put the user's back, or leave it. */
     val afterCancel: AfterCancel = AfterCancel.REMOVE_TYPED,
+    /** Grocery: the cart (verbatim) for an order read-back (R3) or before emptying the cart. */
+    val order: OrderSummary? = null,
 )
 
 /** How a task ended. `message` is what Saathi says; quotes inside it are verbatim on screen. */
@@ -122,6 +124,10 @@ class AgentLoop(
         ctx: CommandContext,
         say: suspend (String) -> Unit,
         choose: suspend (DraftChoiceRequest) -> DraftChoice = { DraftChoice.KEEP },
+        /** Several people match: the user's pick (one of the options) or null (cancel). Null = just ask by name. */
+        pick: (suspend (ContactChoiceRequest) -> String?)? = null,
+        /** Grocery "which one?" (close call / size): the option's index, or null = cancel (the default). */
+        pickOption: suspend (PickRequest) -> Int? = { null },
         confirm: suspend (ConfirmRequest) -> Answer,
     ): Outcome {
         steps = 0
@@ -131,9 +137,11 @@ class AgentLoop(
         try {
             // Text typed by an earlier run that couldn't be removed then: remove it first.
             val earlier = if (flow.readOnly) null else cleanPending(say)?.note
-            val out = loop(flow, ctx, say, choose, confirm)
+            val out = loop(flow, ctx, say, choose, pick, pickOption, confirm)
             settleAtEnd(flow)
+            // Grocery: never leave silent changes ("your cart still has …").
             return out.withNote(earlier).withNote(lastNote.takeIf { out !is Outcome.Cancelled })
+                .withNote((flow as? OrderAware)?.endNote(out))
         } catch (e: CancellationException) {
             withContext(NonCancellable) { cleanupDraft(flow, "stop") }
             throw e
@@ -215,6 +223,8 @@ class AgentLoop(
         ctx: CommandContext,
         say: suspend (String) -> Unit,
         choose: suspend (DraftChoiceRequest) -> DraftChoice,
+        pick: (suspend (ContactChoiceRequest) -> String?)?,
+        pickOption: suspend (PickRequest) -> Int?,
         confirm: suspend (ConfirmRequest) -> Answer,
     ): Outcome {
         var failures = 0
@@ -257,6 +267,39 @@ class AgentLoop(
                     if (flow.readOnly) return Outcome.Failed(t.readOnly)
                     chooseDraft(flow, plan, screen, ctx, choose)?.let { return it }
                 }
+                is Plan.ChooseContact -> {
+                    if (flow.readOnly) return Outcome.Failed(t.readOnly)
+                    chooseContact(flow, plan, screen, ctx, pick)?.let { return it }
+                }
+                is WaitPlan -> {
+                    if (plan.say.isNotEmpty()) say(plan.say)
+                    device.waitForChange(screen.hash, plan.ms)
+                }
+                is PickPlan -> {
+                    if (flow.readOnly) return Outcome.Failed(t.readOnly)
+                    // Defaults to cancel: no answer in time, unclear twice or "cancel" = nothing chosen.
+                    val i = withTimeoutOrNull(confirmTimeoutMs) { pickOption(plan.request) }
+                    coroutineContext.ensureActive()
+                    if (i == null || i !in plan.request.options.indices) {
+                        log("pick: no choice, cancelling")
+                        return Outcome.Cancelled(plan.cancelled)
+                    }
+                    log("pick: option ${i + 1} of ${plan.request.options.size}")
+                    plan.onPick(i)
+                    bringBack(screen.packageName, ctx)
+                }
+                is ConfirmPlan -> {
+                    if (flow.readOnly) return Outcome.Failed(t.readOnly)
+                    // Same rules as a held tap: only a clear yes goes on; anything else (or no answer) cancels.
+                    val answer = withTimeoutOrNull(confirmTimeoutMs) { confirm(plan.request) } ?: Answer.UNCLEAR
+                    coroutineContext.ensureActive()
+                    if (answer != Answer.YES) {
+                        log("confirm (${plan.request.rule}): answer=$answer")
+                        return Outcome.Cancelled(plan.cancelled)
+                    }
+                    plan.onYes()
+                    bringBack(screen.packageName, ctx)
+                }
                 is Plan.Act -> {
                     val action = plan.action
                     if (flow.readOnly) return Outcome.Failed(t.readOnly) // "what's on screen" never acts
@@ -275,12 +318,20 @@ class AgentLoop(
                             if (failures >= maxFailures) return fail(t.stuck)
                         }
                         is Exec.Held -> {
+                            val shop = flow as? OrderAware
+                            if (r.verdict.rule == "R3") {
+                                // An order HOLD only from the grocery flow, and only within its Settings
+                                // (level, "Allow placing orders", spending limit), checked again here.
+                                if (shop == null) return fail(t.unsafe)
+                                shop.holdRefusal(r.verdict, screen)?.let { return fail(it) }
+                            }
                             val req = ConfirmRequest(
                                 readback = r.verdict.readback,
                                 rule = r.verdict.rule,
                                 recipient = WhatsApp.chatTitle(screen)?.text.orEmpty(),
                                 message = WhatsApp.entry(screen)?.text.orEmpty(),
                                 afterCancel = flow.afterCancel,
+                                order = if (r.verdict.rule == "R3") shop?.summary(screen) else null,
                             )
                             // Defaults to cancel: only a clear YES proceeds; no answer in time = cancel.
                             val answer = withTimeoutOrNull(confirmTimeoutMs) { confirm(req) }
@@ -291,7 +342,7 @@ class AgentLoop(
                                 return cancelled(flow, cleanupDraft(flow, "answer"))
                             }
                             bringBack(r.packageName, ctx)
-                            say(t.sending)
+                            say(if (r.verdict.rule == "R3" && shop != null) shop.confirmedSay else t.sending)
                             when (val done = device.executeConfirmed(r, Answer.YES, ctx)) {
                                 is Exec.Ran -> {
                                     val changed = device.waitForChange(screen.hash, TAP_WAIT_MS)
@@ -363,6 +414,38 @@ class AgentLoop(
         return null
     }
 
+    /**
+     * Several people match the spoken name: ask which one (default: stop). Only a name that is
+     * one of the on-screen options is taken; from then on the safety context (R5) and the flow
+     * accept only that exact chat. Returns the outcome when the task ends here, or null to go on.
+     */
+    private suspend fun chooseContact(
+        flow: Flow,
+        plan: Plan.ChooseContact,
+        screen: Screen,
+        ctx: CommandContext,
+        pick: (suspend (ContactChoiceRequest) -> String?)?,
+    ): Outcome? {
+        if (!grounded(plan.names, screen)) return Outcome.Failed(t.notExact)
+        if (pick == null) {
+            cleanupDraft(flow, "ask")
+            return Outcome.Asked(t.whichOne(plan.names))
+        }
+        log("contact choice: options=${plan.names.size}")
+        val chosen = withTimeoutOrNull(confirmTimeoutMs) { pick(ContactChoiceRequest(plan.spoken, plan.names)) }
+        coroutineContext.ensureActive()
+        if (chosen == null || chosen !in plan.names) {
+            log("contact choice: none")
+            cleanupDraft(flow, "pick")
+            return Outcome.Cancelled(t.contactNotChosen)
+        }
+        log("contact choice: option=${plan.names.indexOf(chosen) + 1}")
+        ctx.names = listOf(chosen)
+        flow.choseContact(chosen)
+        bringBack(WhatsApp.PKG, ctx)
+        return null
+    }
+
     /** The confirm screen may have covered the app: bring it back (a gated OpenApp) before acting. */
     private suspend fun bringBack(packageName: String, ctx: CommandContext) {
         val now = device.snapshot()
@@ -417,10 +500,16 @@ object Flows {
         captured: Screen? = null,
         capturedLabel: String = "",
         appLabel: (String) -> String = { it },
+        /** Display names from the phone's contacts (only when the user allowed it), to resolve "Mom" -> "Mummy". */
+        phoneBook: List<String> = emptyList(),
     ): Flow? = when (command) {
-        is Command.ReadLast -> command.contact?.let { ReadLastFlow(it, Names.contextFor(it, command.utterance), t) }
+        is Command.ReadLast -> command.contact?.let {
+            val r = Recipients.of(it, phoneBook)
+            ReadLastFlow(it, r.context(command.utterance), t, r)
+        }
         is Command.Reply -> if (command.contact != null && command.text != null) {
-            ReplyFlow(command.contact, command.text, Names.contextFor(command.contact, command.utterance), t)
+            val r = Recipients.of(command.contact, phoneBook)
+            ReplyFlow(command.contact, command.text, r.context(command.utterance), t, r)
         } else null
         is Command.UnreadSummary -> UnreadFlow(t)
         is Command.ScreenSummary -> ScreenSummaryFlow(captured, capturedLabel.ifEmpty { captured?.packageName.orEmpty() }, gate, t)
@@ -429,9 +518,11 @@ object Flows {
     }
 
     /** The safety context (names for R5) for a task command. */
-    fun contextFor(command: Command): CommandContext = when (command) {
-        is Command.ReadLast -> Names.contextFor(command.contact, command.utterance)
-        is Command.Reply -> Names.contextFor(command.contact, command.utterance)
+    fun contextFor(command: Command, phoneBook: List<String> = emptyList()): CommandContext = when (command) {
+        is Command.ReadLast -> command.contact?.let { Recipients.of(it, phoneBook).context(command.utterance) }
+            ?: Names.contextFor(null, command.utterance)
+        is Command.Reply -> command.contact?.let { Recipients.of(it, phoneBook).context(command.utterance) }
+            ?: Names.contextFor(null, command.utterance)
         else -> CommandContext(command = command.utterance)
     }
 
