@@ -155,11 +155,13 @@ class FlowTest {
     }
 
     @Test
-    fun `a real user draft is still never overwritten`() {
+    fun `a real user draft is still never overwritten without asking (default keep)`() {
         val fake = world()
         fake.drafts["Mom"] = "my own unsent words"
         val r = run(fake, Command.Reply("Mom", "on my way", "x")) { _, _ -> Answer.YES }
-        assertTrue(r.outcome is Outcome.Failed, "${r.outcome}")
+        assertTrue(r.outcome is Outcome.Cancelled, "${r.outcome}")
+        assertEquals(t.draftKept, r.outcome.message)
+        assertTrue(r.confirms.isEmpty())
         assertTrue(fake.sent.isEmpty())
         assertEquals("my own unsent words", fake.drafts["Mom"])
     }
@@ -195,10 +197,10 @@ class FlowTest {
     }
 
     @Test
-    fun `an existing user draft is never overwritten`() {
+    fun `an existing user draft is never overwritten without an answer`() {
         val fake = world().apply { drafts["Mom"] = "my own draft" }
         val out = run(fake, Command.Reply("Mom", "hi", "x")).outcome
-        assertTrue(out is Outcome.Failed, "$out")
+        assertTrue(out is Outcome.Cancelled, "$out")
         assertEquals("my own draft", fake.drafts["Mom"])
         assertTrue(fake.performed.none { it is TypeText })
     }

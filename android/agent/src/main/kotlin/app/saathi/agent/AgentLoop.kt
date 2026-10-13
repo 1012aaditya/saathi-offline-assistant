@@ -9,6 +9,7 @@ import app.saathi.safety.Kind
 import app.saathi.safety.Verdict
 import app.saathi.safety.OpenApp
 import app.saathi.safety.Screen
+import app.saathi.safety.TypeText
 import app.saathi.safety.grounded
 import app.saathi.safety.isCaptcha
 import kotlinx.coroutines.CancellationException
@@ -24,6 +25,8 @@ data class ConfirmRequest(
     val rule: String,
     val recipient: String, // verbatim on-screen chat title
     val message: String, // verbatim on-screen message box text
+    /** What a No / Cancel does to the box: remove Saathi's text, put the user's back, or leave it. */
+    val afterCancel: AfterCancel = AfterCancel.REMOVE_TYPED,
 )
 
 /** How a task ended. `message` is what Saathi says; quotes inside it are verbatim on screen. */
@@ -35,9 +38,12 @@ sealed interface Outcome {
         val title: String = "",
         val quote: String? = null,
         val quotes: List<String> = emptyList(),
+        /** An extra line to show under [quote] (already part of [message]). */
+        val note: String? = null,
     ) : Outcome
 
-    data class Cancelled(override val message: String, val draftCleared: Boolean = false) : Outcome
+    /** [restored]: the user's own earlier text was put back in the box (and checked). */
+    data class Cancelled(override val message: String, val draftCleared: Boolean = false, val restored: Boolean = false) : Outcome
     data class HandedOver(override val message: String) : Outcome
     data class Asked(override val message: String) : Outcome
     data class Failed(override val message: String) : Outcome
@@ -68,6 +74,11 @@ fun Outcome.withNote(note: String?): Outcome {
  * removed only once it was sent or cleaned up. If cleanup can't happen now (service gone,
  * process killed), the record survives and [cleanPending] removes the text later; the user is
  * told either way ([lastNote]).
+ *
+ * The user's own unsent text: when a reply finds text already in the box, the user is asked
+ * ([DraftChoiceRequest], default KEEP). REPLACE / ADD records what Saathi changed and the hash of
+ * the original BEFORE typing; the original text itself stays in memory only. On anything but a
+ * yes (No, unclear, timeout, Stop, error) the original is put back and re-read to prove it.
  */
 class AgentLoop(
     private val device: GatedDevice,
@@ -110,6 +121,7 @@ class AgentLoop(
         flow: Flow,
         ctx: CommandContext,
         say: suspend (String) -> Unit,
+        choose: suspend (DraftChoiceRequest) -> DraftChoice = { DraftChoice.KEEP },
         confirm: suspend (ConfirmRequest) -> Answer,
     ): Outcome {
         steps = 0
@@ -119,7 +131,7 @@ class AgentLoop(
         try {
             // Text typed by an earlier run that couldn't be removed then: remove it first.
             val earlier = if (flow.readOnly) null else cleanPending(say)?.note
-            val out = loop(flow, ctx, say, confirm)
+            val out = loop(flow, ctx, say, choose, confirm)
             settleAtEnd(flow)
             return out.withNote(earlier).withNote(lastNote.takeIf { out !is Outcome.Cancelled })
         } catch (e: CancellationException) {
@@ -148,22 +160,29 @@ class AgentLoop(
         val notes = mutableListOf<String>()
         for (p in pending) {
             log("cleanup: pending found draftLen=${p.length} attempts=${p.attempts}")
-            say(t.clearingEarlierDraft(p.chat))
-            val r = DraftCleaner(device, t, log).clean(p)
+            say(if (p.mode == DraftMode.NEW) t.clearingEarlierDraft(p.chat) else t.restoringEarlierDraft(p.chat))
+            val original = drafts.original(p)
+            val r = DraftCleaner(device, t, log).clean(p, original)
             results += r
-            settle(p, r, later = true)?.let { notes += it }
+            settle(p, r, later = true, original)?.let { notes += it }
         }
         return PendingResult(results, notes.joinToString(" ").ifEmpty { null })
     }
 
-    /** Forget or keep the record after a cleanup; returns what to tell the user. */
-    private fun settle(p: PendingDraft, r: Cleanup, later: Boolean): String? {
+    /**
+     * Forget or keep the record after a cleanup; returns what to tell the user. When the user's
+     * own earlier text couldn't be put back, they hear it (it was verbatim on screen) so it isn't lost.
+     */
+    private fun settle(p: PendingDraft, r: Cleanup, later: Boolean, original: String? = null): String? {
+        val theirs = original?.takeIf { p.mode != DraftMode.NEW }
         if (r.resolved) {
-            drafts.remove(p)
+            drafts.remove(p) // forgets the in-memory original too
             log("draft record: cleared ($r)")
             return when (r) {
                 Cleanup.CLEARED -> if (later) t.earlierDraftRemoved(p.chat) else t.draftRemoved
-                Cleanup.NOT_OURS -> t.draftChanged(p.chat)
+                Cleanup.RESTORED -> if (later) t.earlierRestored(p.chat) else t.originalRestored
+                Cleanup.ORIGINAL_LOST -> t.originalLost(p.chat)
+                Cleanup.NOT_OURS -> listOfNotNull(t.draftChanged(p.chat), theirs?.let(t::yourEarlierText)).joinToString(" ")
                 else -> null
             }
         }
@@ -171,11 +190,11 @@ class AgentLoop(
         if (later && next.attempts >= PendingDraft.MAX_ATTEMPTS) {
             drafts.remove(p)
             log("draft record: dropped after ${next.attempts} attempts")
-            return t.draftLeftGiveUp(p.chat)
+            return if (theirs != null) t.restoreGaveUp(p.chat, theirs) else t.draftLeftGiveUp(p.chat)
         }
         drafts.put(next)
         log("draft record: kept for later ($r)")
-        return t.draftLeft(p.chat)
+        return if (theirs != null) t.restoreFailed(p.chat, theirs) else t.draftLeft(p.chat)
     }
 
     /** End of a run: a sent draft's record goes; a typed draft nobody cleaned up stays, and is said. */
@@ -195,6 +214,7 @@ class AgentLoop(
         flow: Flow,
         ctx: CommandContext,
         say: suspend (String) -> Unit,
+        choose: suspend (DraftChoiceRequest) -> DraftChoice,
         confirm: suspend (ConfirmRequest) -> Answer,
     ): Outcome {
         var failures = 0
@@ -225,7 +245,7 @@ class AgentLoop(
                 is Plan.Done -> {
                     val src = plan.source ?: screen
                     if (!grounded(plan.quotes, src) && plan.quotes.isNotEmpty()) return fail(t.notExact)
-                    return Outcome.Answered(plan.answer, plan.title, plan.quote, plan.quotes)
+                    return Outcome.Answered(plan.answer, plan.title, plan.quote, plan.quotes, plan.note)
                 }
                 is Plan.Ask -> {
                     cleanupDraft(flow, "ask")
@@ -233,6 +253,10 @@ class AgentLoop(
                 }
                 is Plan.HandOver -> return Outcome.HandedOver(plan.reason)
                 is Plan.Fail -> return fail(plan.reason)
+                is Plan.ChooseDraft -> {
+                    if (flow.readOnly) return Outcome.Failed(t.readOnly)
+                    chooseDraft(flow, plan, screen, ctx, choose)?.let { return it }
+                }
                 is Plan.Act -> {
                     val action = plan.action
                     if (flow.readOnly) return Outcome.Failed(t.readOnly) // "what's on screen" never acts
@@ -256,6 +280,7 @@ class AgentLoop(
                                 rule = r.verdict.rule,
                                 recipient = WhatsApp.chatTitle(screen)?.text.orEmpty(),
                                 message = WhatsApp.entry(screen)?.text.orEmpty(),
+                                afterCancel = flow.afterCancel,
                             )
                             // Defaults to cancel: only a clear YES proceeds; no answer in time = cancel.
                             val answer = withTimeoutOrNull(confirmTimeoutMs) { confirm(req) }
@@ -263,9 +288,7 @@ class AgentLoop(
                             coroutineContext.ensureActive()
                             if (answer != Answer.YES) {
                                 log("confirm: answer=$answer")
-                                val cleared = cleanupDraft(flow, "answer")
-                                val note = lastNote.takeIf { !cleared }
-                                return Outcome.Cancelled(t.cancelled(cleared), cleared).withNote(note)
+                                return cancelled(flow, cleanupDraft(flow, "answer"))
                             }
                             bringBack(r.packageName, ctx)
                             say(t.sending)
@@ -290,6 +313,56 @@ class AgentLoop(
         return fail(t.tooManySteps)
     }
 
+    /** What a No on the send confirmation leaves the user with, from what the cleanup really did. */
+    private fun cancelled(flow: Flow, r: Cleanup?): Outcome = when (r) {
+        null -> Outcome.Cancelled(if (flow.afterCancel == AfterCancel.LEAVE_AS_IS) t.cancelledLeftAsIs else t.cancelled(false))
+        Cleanup.CLEARED -> Outcome.Cancelled(t.cancelled(true), draftCleared = true)
+        Cleanup.RESTORED -> Outcome.Cancelled(t.cancelledRestored, restored = true)
+        else -> Outcome.Cancelled(t.cancelled(false)).withNote(lastNote)
+    }
+
+    /**
+     * The box already holds the user's own text: ask what to do (default KEEP). Returns the
+     * outcome when the task ends here (keep / private / unclear), or null to carry on.
+     */
+    private suspend fun chooseDraft(
+        flow: Flow,
+        plan: Plan.ChooseDraft,
+        screen: Screen,
+        ctx: CommandContext,
+        choose: suspend (DraftChoiceRequest) -> DraftChoice,
+    ): Outcome? {
+        val chat = WhatsApp.chatTitle(screen)?.text.orEmpty()
+        val entry = WhatsApp.entry(screen) ?: return Outcome.Failed(t.cantTypeHere)
+        val shown = plan.existing
+        val raw = device.entryText(screen)
+        // A code / PIN / password is never read out, typed back or remembered: leave it alone.
+        val private = PrivateText.looksPrivate(shown) || (raw != null && PrivateText.looksPrivate(raw))
+        if (private) {
+            log("draft choice: existingLen=${shown.length} private=true, left alone")
+            return Outcome.Cancelled(t.draftPrivate)
+        }
+        if (!grounded(listOf(shown) + listOf(chat).filter { it.isNotEmpty() }, screen)) return Outcome.Failed(t.notExact)
+        // It can only be put back exactly if it's one line, the screen shows the same text, and
+        // the gate would let Saathi type it there (R2 forbids line breaks, R7 secret fields).
+        val multiline = raw != null && (raw.contains('\n') || raw.contains('\r'))
+        val same = raw == null || PendingDraft.norm(raw) == PendingDraft.norm(shown)
+        val original = if (raw != null && same) raw else shown
+        val typable = device.gate.check(TypeText(original, entry.index), screen, ctx).kind == Kind.ALLOW
+        val canChange = !multiline && same && typable
+        log("draft choice: existingLen=${shown.length} rawKnown=${raw != null} multiline=$multiline canChange=$canChange")
+        val req = DraftChoiceRequest(chat, shown, plan.newMessage, canChange)
+        val answer = withTimeoutOrNull(confirmTimeoutMs) { choose(req) }
+            ?: DraftChoice.KEEP.also { log("draft choice: no answer in ${confirmTimeoutMs / 1000} s, keeping") }
+        coroutineContext.ensureActive()
+        val choice = if (!canChange && (answer == DraftChoice.REPLACE || answer == DraftChoice.ADD)) DraftChoice.KEEP else answer
+        log("draft choice: answer=$choice")
+        if (choice == DraftChoice.KEEP) return Outcome.Cancelled(t.draftKept)
+        flow.chose(choice, original)
+        bringBack(WhatsApp.PKG, ctx)
+        return null
+    }
+
     /** The confirm screen may have covered the app: bring it back (a gated OpenApp) before acting. */
     private suspend fun bringBack(packageName: String, ctx: CommandContext) {
         val now = device.snapshot()
@@ -305,25 +378,29 @@ class AgentLoop(
         val text = flow.draft ?: return
         if (record != null) return
         val chat = WhatsApp.chatTitle(screen)?.text.orEmpty()
-        val r = PendingDraft.of(chat, text)
+        val original = flow.original
+        val r = if (original != null) PendingDraft.changing(chat, text, flow.draftMode, original) else PendingDraft.of(chat, text)
         record = r
         drafts.put(r)
-        log("draft record: saved draftLen=${r.length} chatKnown=${chat.isNotEmpty()}")
+        if (original != null) drafts.rememberOriginal(r, original) // memory only, never on disk
+        log("draft record: saved mode=${r.mode} draftLen=${r.length} originalLen=${r.originalLength} chatKnown=${chat.isNotEmpty()}")
     }
 
     /**
-     * Remove text Saathi typed and didn't send (cancel / failure / ask / stop). True if cleared.
-     * Only that exact text is removed; if it can't be done now the record stays for later.
+     * Undo text Saathi typed and didn't send (cancel / failure / ask / stop): remove it, or for
+     * REPLACE / ADD put the user's original text back. Null when there was nothing to undo.
+     * Only that exact text is touched; if it can't be done now the record stays for later.
      */
-    private suspend fun cleanupDraft(flow: Flow, reason: String): Boolean {
-        if (flow.draft == null) return false
-        val p = record ?: return false
-        log("cleanup: reason=$reason")
-        val r = DraftCleaner(device, t, log).clean(p)
+    private suspend fun cleanupDraft(flow: Flow, reason: String): Cleanup? {
+        if (flow.draft == null) return null
+        val p = record ?: return null
+        log("cleanup: reason=$reason mode=${p.mode}")
+        val original = drafts.original(p)
+        val r = DraftCleaner(device, t, log).clean(p, original)
         lastCleanup = r
-        lastNote = settle(p, r, later = false)
+        lastNote = settle(p, r, later = false, original)
         if (r.resolved) record = null
-        return r == Cleanup.CLEARED
+        return r
     }
 
     private fun pinVerdict() = Verdict(Kind.HANDOFF, "R8", "अपना पिन खुद डालिए, मैं रुक रहा हूँ।")

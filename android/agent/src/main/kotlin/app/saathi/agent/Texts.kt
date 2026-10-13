@@ -24,6 +24,9 @@ class Texts(val lang: Lang) {
     val turningOffUnread get() = s("Putting the chat list back as it was", "चैट सूची पहले जैसी कर रहा हूँ")
     val sending get() = s("Sending", "भेज रहा हूँ")
     val clearingDraft get() = s("Removing the typed message", "लिखा हुआ संदेश हटा रहा हूँ")
+    val replacing get() = s("Putting your new message in place of the old text", "पुराने की जगह आपका नया संदेश लिख रहा हूँ")
+    val adding get() = s("Adding your message after your text", "आपके लिखे के बाद आपका संदेश जोड़ रहा हूँ")
+    val readyToSendExisting get() = s("I'll read it to you before sending", "भेजने से पहले पढ़कर सुनाऊँगा")
 
     // -- answers -------------------------------------------------------------------------------
     fun lastMessage(name: String, msg: String) =
@@ -149,6 +152,66 @@ class Texts(val lang: Lang) {
     val serviceOff get() = s(
         "Saathi's Accessibility service is off, so I can't use your apps yet.",
         "साथी की Accessibility सेवा बंद है, इसलिए अभी ऐप नहीं चला सकता।",
+    )
+
+    // -- the user's own unsent text in a chat ---------------------------------------------------
+    val unsentTextHere get() = s("There's unsent text in this chat.", "इस चैट में कुछ बिना भेजा लिखा है।")
+
+    /** Asked when a reply finds the user's own text in the box. [existing] is verbatim on screen. */
+    fun draftQuestion(chat: String, existing: String, canChange: Boolean) = if (canChange) {
+        s(
+            "$chat's chat already has unsent text: \"$existing\". Keep it, replace it with your message, add your message after it, or send it as it is?",
+            "$chat की चैट में पहले से लिखा है: \"$existing\"। रहने दूँ, बदल दूँ, जोड़ दूँ, या यही भेज दूँ?",
+        )
+    } else {
+        s(
+            "$chat's chat already has unsent text: \"$existing\". It has more than one line, so I can keep it or send it as it is. Which one?",
+            "$chat की चैट में पहले से लिखा है: \"$existing\"। यह कई लाइन का है, इसलिए रहने दूँ या यही भेज दूँ?",
+        )
+    }
+    val draftCantChange get() = s(
+        "It has more than one line, so I can't put it back exactly. I can keep it or send it as it is.",
+        "यह कई लाइन का है, मैं इसे ठीक वैसा वापस नहीं रख पाऊँगा। रहने दूँ या यही भेज दूँ।",
+    )
+    val draftPrivate get() = s(
+        "There's unsent text in this chat that looks private. I didn't read it or change it, and nothing was sent. If you clear it yourself, I can send your message.",
+        "इस चैट में कुछ बिना भेजा लिखा है जो निजी लगता है। मैंने उसे न पढ़ा, न बदला, कुछ नहीं भेजा। आप उसे हटा दें तो मैं आपका संदेश भेज सकता हूँ।",
+    )
+    val draftKept get() = s("I left your text as it was. Nothing was sent.", "आपका लिखा जैसा था वैसा छोड़ दिया। कुछ नहीं भेजा।")
+    val draftChangedMeanwhile get() = s(
+        "The text in the message box changed, so I left it as it is. Nothing was sent.",
+        "संदेश बॉक्स में लिखा बदल गया, मैंने उसे वैसा ही छोड़ दिया। कुछ नहीं भेजा।",
+    )
+    val cancelledRestored get() = s(
+        "Cancelled. Nothing was sent, and I put your earlier text back.",
+        "कैंसल कर दिया। कुछ नहीं भेजा, आपका पहले का लिखा वापस रख दिया।",
+    )
+    val cancelledLeftAsIs get() = s(
+        "Cancelled. Nothing was sent. Your text is still there as it was.",
+        "कैंसल कर दिया। कुछ नहीं भेजा। आपका लिखा वैसा ही है।",
+    )
+    val originalRestored get() = s("I put your earlier text back.", "आपका पहले का लिखा वापस रख दिया।")
+    fun earlierRestored(chat: String) = s(
+        "I put your earlier text back in $chat's chat. Nothing was sent.",
+        "$chat की चैट में आपका पहले का लिखा वापस रख दिया। कुछ नहीं भेजा।",
+    )
+    fun restoringEarlierDraft(chat: String) = s(
+        "First, putting your earlier text back in $chat's chat",
+        "पहले $chat की चैट में आपका पहले का लिखा वापस रख रहा हूँ",
+    )
+    /** The user's own earlier text, read to them so it isn't lost (it was verbatim on screen). */
+    fun yourEarlierText(original: String) = s("Your earlier text was: \"$original\".", "आपका पहले का लिखा था: \"$original\"।")
+    fun restoreFailed(chat: String, original: String) = s(
+        "I couldn't put your earlier text back in $chat's chat yet; nothing was sent. Your earlier text was: \"$original\". I'll try again when I can.",
+        "$chat की चैट में आपका पहले का लिखा अभी वापस नहीं रख पाया; कुछ नहीं भेजा। आपका लिखा था: \"$original\"। मैं फिर कोशिश करूँगा।",
+    )
+    fun restoreGaveUp(chat: String, original: String) = s(
+        "I still couldn't put your earlier text back in $chat's chat. Nothing was sent. Your earlier text was: \"$original\". Please check that chat's message box.",
+        "$chat की चैट में आपका पहले का लिखा अब भी वापस नहीं रख पाया। कुछ नहीं भेजा। आपका लिखा था: \"$original\"। उस चैट का संदेश बॉक्स देख लीजिए।",
+    )
+    fun originalLost(chat: String) = s(
+        "I removed the message I typed for $chat. Your earlier unsent text there couldn't be put back because Saathi restarted, so please type it again. Nothing was sent.",
+        "$chat के लिए मेरा लिखा संदेश हटा दिया। Saathi फिर से शुरू हुआ, इसलिए आपका पहले का लिखा वापस नहीं रख पाया, उसे फिर से लिख लीजिए। कुछ नहीं भेजा।",
     )
 
     // -- confirmation --------------------------------------------------------------------------

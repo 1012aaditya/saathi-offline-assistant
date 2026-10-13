@@ -105,6 +105,7 @@ fun WorkingScreen(nav: AppNav) {
         if (leaving || TaskRunner.pending != null || st.runId < firstRun) return@LaunchedEffect
         when (val s = st) {
             is TaskRunner.State.Confirming -> { leaving = true; nav.replace(Route.Confirm) }
+            is TaskRunner.State.Choosing -> { leaving = true; nav.replace(Route.DraftChoice) }
             is TaskRunner.State.Finished -> {
                 // Our own Stop went home already; a vanished service shows (and says) the result.
                 if (s.outcome is Outcome.Stopped && !TaskRunner.stoppedByServiceLoss) return@LaunchedEffect

@@ -62,7 +62,8 @@ private fun answerFor(state: TaskRunner.State): ResultAnswer {
             section = o.title.ifBlank { f.title },
             quote = o.quote,
             detail = if (o.quote != null && f.command is Command.ReadLast) "Exactly as it appears on screen" else null,
-            body = if (o.quote != null && f.command is Command.ReadLast) null else o.message,
+            // A read message shows the quote; an extra note ("There's unsent text in this chat.") goes under it.
+            body = if (o.quote != null && f.command is Command.ReadLast) o.note else o.message,
             spoken = o.message,
             success = true,
         )

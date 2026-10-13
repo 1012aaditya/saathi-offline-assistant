@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.saathi.agent.AfterCancel
 import app.saathi.agent.ConfirmDialog
 import app.saathi.agent.Lang
 import app.saathi.agent.Requests
@@ -98,6 +99,13 @@ fun ConfirmScreen(nav: AppNav) {
         else -> t.confirmQuestion(confirmTo, confirmText)
     }
     val dialog = remember { ConfirmDialog() }
+    // What Cancel does to the box (Saathi's own text removed, the user's earlier text put back, or untouched).
+    val afterCancel = asked?.afterCancel ?: AfterCancel.REMOVE_TYPED
+    val undoing = when (afterCancel) {
+        AfterCancel.REMOVE_TYPED -> "I'm removing the message I typed."
+        AfterCancel.RESTORE_ORIGINAL -> "I'm putting your earlier text back."
+        AfterCancel.LEAVE_AS_IS -> "Your text stays as it was."
+    }
 
     var cancelled by rememberSaveable { mutableStateOf(asked == null) }
     var sheetGone by rememberSaveable { mutableStateOf(false) }
@@ -187,6 +195,7 @@ fun ConfirmScreen(nav: AppNav) {
             if (f.outcome !is Outcome.Stopped || TaskRunner.stoppedByServiceLoss) deps.voice.speak(f.outcome.message)
         } else if (f.outcome is Outcome.Cancelled) {
             ScreenParts.awaitSpeechEnd(deps.voice) // let "Cancelling" finish
+            if ((f.outcome as Outcome.Cancelled).restored) deps.feedback.cue(Cue.Done) // the user's text is back
             deps.voice.speak(f.outcome.message)
         }
     }
@@ -210,7 +219,7 @@ fun ConfirmScreen(nav: AppNav) {
 
     val status = when {
         listener.active -> "Listening"
-        cancelled -> result ?: "Cancelling — nothing was sent. Removing the message I typed."
+        cancelled -> result ?: "Cancelling — nothing was sent. $undoing"
         else -> "Needs your answer. Send to $confirmTo: $confirmText? Cancel is selected."
     }
 
@@ -298,7 +307,7 @@ fun ConfirmScreen(nav: AppNav) {
                         "Cancel",
                         { cancel() },
                         modifier = Modifier.focusRequester(cancelFocus),
-                        description = "Cancel. This is the default. Nothing will be sent.",
+                        description = "Cancel. This is the default. Nothing will be sent. $undoing",
                         tag = "Default",
                     )
                     PrimaryButton(
@@ -345,7 +354,7 @@ fun ConfirmScreen(nav: AppNav) {
                     when {
                         asked == null -> "Nothing to confirm. Nothing was sent."
                         result != null -> result!!
-                        else -> "Nothing was sent. I'm removing the message I typed."
+                        else -> "Nothing was sent. $undoing"
                     },
                     secondary = true,
                 )

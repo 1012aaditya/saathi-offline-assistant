@@ -44,6 +44,9 @@ object TaskRunner {
 
         data class Confirming(override val runId: Int, val command: Command, val title: String, val request: ConfirmRequest, val lines: List<String>) : State
 
+        /** The chat's box already holds the user's own text: keep / replace / add / send it? */
+        data class Choosing(override val runId: Int, val command: Command, val title: String, val request: DraftChoiceRequest, val lines: List<String>) : State
+
         data class Finished(override val runId: Int, val command: Command?, val title: String, val outcome: Outcome) : State
     }
 
@@ -63,6 +66,7 @@ object TaskRunner {
     private var job: Job? = null
     @Volatile private var cleanupJob: Job? = null // removing an earlier draft after a reconnect
     @Volatile private var answer: CompletableDeferred<Answer>? = null
+    @Volatile private var choice: CompletableDeferred<DraftChoice>? = null
     private var runCounter = 0
 
     /** Why a running task was stopped (decides who says what afterwards). */
@@ -161,6 +165,7 @@ object TaskRunner {
                         addLine(id, line)
                         withContext(Dispatchers.Main) { speak(line) }
                     },
+                    choose = { req -> awaitChoice(app, id, command, title, req) },
                     confirm = { req -> awaitAnswer(app, id, command, title, req) },
                 )
             } catch (e: CancellationException) {
@@ -261,6 +266,15 @@ object TaskRunner {
         answer?.complete(a)
     }
 
+    /** The user's answer on the Draft choice sheet. KEEP (the default) ends the task untouched. */
+    fun choose(c: DraftChoice) {
+        val s = _state.value
+        if (s is State.Choosing && c != DraftChoice.KEEP) {
+            _state.value = State.Running(s.runId, s.command, s.title, "WhatsApp", s.lines)
+        }
+        choice?.complete(c)
+    }
+
     /** Stop now: the loop ends and removes a draft it typed; nothing else runs. */
     fun stop(reason: StopReason = StopReason.USER) {
         if (job?.isActive == true) {
@@ -281,6 +295,19 @@ object TaskRunner {
             d.await().also { log("confirm answered yes=${it == Answer.YES}") }
         } finally {
             answer = null
+        }
+    }
+
+    private suspend fun awaitChoice(context: Context, id: Int, command: Command, title: String, req: DraftChoiceRequest): DraftChoice {
+        val d = CompletableDeferred<DraftChoice>()
+        choice = d
+        val lines = (_state.value as? State.Running)?.lines.orEmpty()
+        _state.value = State.Choosing(id, command, title, req, lines)
+        bringSaathiToFront(context)
+        return try {
+            d.await().also { log("draft choice answered: $it") } // the choice only, never text
+        } finally {
+            choice = null
         }
     }
 

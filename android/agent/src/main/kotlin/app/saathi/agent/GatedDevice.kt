@@ -31,6 +31,12 @@ interface Actuator {
 
     /** True once the screen hash differs from [oldHash] (polling), false on timeout. */
     suspend fun waitForChange(oldHash: String, timeoutMs: Long): Boolean
+
+    /**
+     * The field's text exactly as the app holds it (line breaks and spaces kept; the [Screen]
+     * collapses them). Read only. Null when unknown; never a password field's text.
+     */
+    suspend fun fieldText(element: Element, screen: Screen): String? = null
 }
 
 /** What happened to an action at the choke point. */
@@ -120,6 +126,30 @@ class GatedDevice(val gate: SafetyGate, private val actuator: Actuator) {
         val v = gate.check(TypeText(typed, entry.index), screen, ctx)
         if (v.kind != Kind.ALLOW) return false
         return actuator.clearText(entry, screen)
+    }
+
+    /** WhatsApp's message box text exactly as typed (for deciding if it can be put back as it was). */
+    suspend fun entryText(screen: Screen): String? {
+        if (screen.packageName != WhatsApp.PKG) return null
+        val e = WhatsApp.entry(screen) ?: return null
+        if (e.password) return null
+        return actuator.fieldText(e, screen)
+    }
+
+    /**
+     * Undo of a REPLACE / ADD: put the user's [original] text back in WhatsApp's message box. Only
+     * when the box holds exactly what Saathi typed (or is empty), only text whose hash is the
+     * recorded original (never anything else), and only if the gate allows typing it there (R7
+     * secret fields, R2 line breaks). Runs through [execute], like every other action.
+     */
+    suspend fun restoreDraft(screen: Screen, draft: PendingDraft, original: String, ctx: CommandContext): Boolean {
+        if (screen.packageName != WhatsApp.PKG || draft.mode == DraftMode.NEW) return false
+        val entry = WhatsApp.entry(screen) ?: return false
+        val typed = WhatsApp.typedText(screen)
+        if (entry.password || (typed.isNotEmpty() && !draft.matches(typed))) return false
+        if (PendingDraft.hashOf(original) != draft.originalHash) return false
+        val r = execute(TypeText(original, entry.index), screen, ctx)
+        return r is Exec.Ran && r.ok
     }
 
     private fun changed(rule: String) =

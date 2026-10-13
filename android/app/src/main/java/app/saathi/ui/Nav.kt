@@ -23,6 +23,7 @@ import app.saathi.feedback.reducedMotion
 import app.saathi.ui.screens.ActivityScreen
 import app.saathi.ui.screens.BrailleScreen
 import app.saathi.ui.screens.ConfirmScreen
+import app.saathi.ui.screens.DraftChoiceScreen
 import app.saathi.ui.screens.HandoverScreen
 import app.saathi.ui.screens.HomeScreen
 import app.saathi.ui.screens.ListeningScreen
@@ -35,8 +36,8 @@ import app.saathi.ui.screens.WelcomeScreen
 import app.saathi.ui.screens.WorkingScreen
 import app.saathi.voice.Voice
 
-/** The 12 Clarity screens (DESIGN.md) + Braille. */
-enum class Route { Welcome, Setup, Home, Listening, Working, Confirm, Result, Handover, Walk, Activity, Settings, Safety, Braille }
+/** The 12 Clarity screens (DESIGN.md) + Braille + the unsent-text choice sheet. */
+enum class Route { Welcome, Setup, Home, Listening, Working, Confirm, DraftChoice, Result, Handover, Walk, Activity, Settings, Safety, Braille }
 
 /** Shared services, available to every screen via [LocalDeps]. */
 class Deps(val state: AppState, val feedback: Feedback, val voice: Voice)
@@ -122,6 +123,7 @@ fun SaathiNavHost(deps: Deps) {
             composable(Route.Listening.name) { ListeningScreen(nav) }
             composable(Route.Working.name) { WorkingScreen(nav) }
             composable(Route.Confirm.name) { ConfirmScreen(nav) }
+            composable(Route.DraftChoice.name) { DraftChoiceScreen(nav) }
             composable(Route.Result.name) { ResultScreen(nav) }
             composable(Route.Handover.name) { HandoverScreen(nav) }
             composable(Route.Walk.name) { WalkScreen(nav) }

@@ -28,7 +28,15 @@ sealed interface Plan {
         val title: String = "",
         val quote: String? = null,
         val source: Screen? = null,
+        /** An extra line shown under a quoted answer (already part of [answer]). */
+        val note: String? = null,
     ) : Plan
+
+    /**
+     * The chat's message box already holds the user's own text ([existing], verbatim on screen).
+     * The loop asks the user (keep / replace / add / send it) and tells the flow via [Flow.chose].
+     */
+    data class ChooseDraft(val existing: String, val newMessage: String) : Plan
 
     data class Ask(val question: String) : Plan
     data class HandOver(val reason: String) : Plan
@@ -42,6 +50,18 @@ interface Flow {
 
     /** Text Saathi typed and hasn't sent; the loop clears it on cancel / failure / stop. */
     val draft: String? get() = null
+
+    /** What Saathi did to the box ([DraftMode.REPLACE] / [DraftMode.ADD] change the user's own text). */
+    val draftMode: DraftMode get() = DraftMode.NEW
+
+    /** The user's own text that was in the box before Saathi changed it (REPLACE / ADD), else null. */
+    val original: String? get() = null
+
+    /** What a No / Cancel on the send confirmation does to the box. */
+    val afterCancel: AfterCancel get() = AfterCancel.REMOVE_TYPED
+
+    /** The user's answer to a [Plan.ChooseDraft] (never KEEP: the loop ends the task for that). */
+    fun chose(choice: DraftChoice, original: String) {}
 
     fun next(screen: Screen): Plan
 
@@ -144,20 +164,24 @@ class ReadLastFlow(contact: String, private val ctx: CommandContext, private val
                 return Plan.Act(Tap(it.index), t.jumpingToLatest)
             }
         }
+        // The user's own unsent text in this chat: mention it (never read it unless asked).
+        val note = if (WhatsApp.typedText(screen).isNotEmpty()) t.unsentTextHere else null
+        fun withNote(answer: String) = if (note == null) answer else "$answer $note"
         val msg = WhatsApp.lastFromThem(screen)
         if (msg != null) {
             return Plan.Done(
-                answer = t.lastMessage(title.text, msg.text),
+                answer = withNote(t.lastMessage(title.text, msg.text)),
                 quotes = listOf(title.text, msg.text),
                 title = t.lastMessageTitle(title.text),
                 quote = msg.text,
+                note = note,
             )
         }
         if (scrolls < 3) {
             scrolls++
             return Plan.Act(Scroll(Direction.UP), t.lookingFurther)
         }
-        return Plan.Done(t.noMessageFromThem(title.text), listOf(title.text), t.lastMessageTitle(title.text))
+        return Plan.Done(withNote(t.noMessageFromThem(title.text)), listOf(title.text), t.lastMessageTitle(title.text), note = note)
     }
 
     override fun executed(action: Action, changed: Boolean) {
@@ -168,20 +192,54 @@ class ReadLastFlow(contact: String, private val ctx: CommandContext, private val
 /**
  * "Reply to Mom I'll be home by 7": open the chat -> type into the message box -> Tap(send).
  * The gate HOLDs that tap (R2) with a read-back; it only runs after the user's yes.
+ *
+ * If the box already holds the user's own unsent text, it is never silently overwritten: the
+ * flow asks ([Plan.ChooseDraft]) and then, per the answer, replaces it, adds after it, or sends
+ * it as it is. Whatever happens, the read-back is of the box's full text, verbatim, and on
+ * anything but a yes the user's original text is put back ([afterCancel]).
  */
 class ReplyFlow(contact: String, private val text: String, private val ctx: CommandContext, private val t: Texts) : Flow {
     private val opener = ChatOpener(contact, ctx, t)
+    private var choice: DraftChoice? = null // null: the box was empty (a plain reply)
+    private var existing = "" // the user's text as the screen showed it when we asked
+    private var userOriginal: String? = null // the same text exactly as typed (memory only)
+    private var asked = false
     private var typed = false
     private var sendTapped = false
     private var sentTo = ""
+    private var sentText = ""
+    private var toType = text
 
-    override val draft: String? get() = if (typed && !sendTapped) text else null
+    override val draft: String? get() = if (typed && !sendTapped) toType else null
+
+    override val draftMode: DraftMode
+        get() = when (choice) {
+            DraftChoice.REPLACE -> DraftMode.REPLACE
+            DraftChoice.ADD -> DraftMode.ADD
+            else -> DraftMode.NEW
+        }
+
+    override val original: String? get() = userOriginal.takeIf { draftMode != DraftMode.NEW }
+
+    override val afterCancel: AfterCancel
+        get() = when (choice) {
+            DraftChoice.REPLACE, DraftChoice.ADD -> AfterCancel.RESTORE_ORIGINAL
+            DraftChoice.SEND -> AfterCancel.LEAVE_AS_IS
+            else -> AfterCancel.REMOVE_TYPED
+        }
+
+    override fun chose(choice: DraftChoice, original: String) {
+        if (choice == DraftChoice.KEEP) return
+        this.choice = choice
+        userOriginal = original
+        if (choice == DraftChoice.ADD) toType = "$original $text"
+    }
 
     override fun next(screen: Screen): Plan {
         if (sendTapped) {
             val entry = WhatsApp.entry(screen)
             return if (entry != null && WhatsApp.typedText(screen).isEmpty() || entry == null && WhatsApp.isWhatsApp(screen)) {
-                Plan.Done(t.sent(sentTo), quotes = listOf(sentTo).filter { it.isNotEmpty() }, title = t.sentTitle(sentTo), quote = text)
+                Plan.Done(t.sent(sentTo), quotes = listOf(sentTo).filter { it.isNotEmpty() }, title = t.sentTitle(sentTo), quote = sentText.ifEmpty { text })
             } else {
                 Plan.Fail(t.notSureSent)
             }
@@ -189,19 +247,44 @@ class ReplyFlow(contact: String, private val text: String, private val ctx: Comm
         opener.step(screen)?.let { return it }
         val entry = WhatsApp.entry(screen) ?: return Plan.Fail(t.cantTypeHere)
         if (entry.password) return Plan.Fail(t.cantTypeHere)
-        if (!typed) {
-            if (WhatsApp.typedText(screen).isNotEmpty()) return Plan.Fail(t.draftExists) // never overwrite the user's draft
-            typed = true
-            return Plan.Act(TypeText(text, entry.index), t.typing)
+        val box = WhatsApp.typedText(screen)
+        if (choice == DraftChoice.SEND) {
+            // Send the user's own text as it is: nothing typed; the gate's read-back is that text.
+            if (box.isEmpty() || norm(box) != norm(existing)) return Plan.Fail(t.draftChangedMeanwhile)
+            return tapSend(screen, t.readyToSendExisting)
         }
-        if (norm(entry.text) != norm(text)) return Plan.Fail(t.typedMismatch)
+        if (!typed) {
+            if (choice == null) {
+                if (box.isNotEmpty()) {
+                    if (asked) return Plan.Fail(t.draftExists) // never overwrite without an answer
+                    asked = true
+                    existing = box
+                    return Plan.ChooseDraft(box, text)
+                }
+            } else if (box.isEmpty() || norm(box) != norm(existing)) {
+                return Plan.Fail(t.draftChangedMeanwhile) // the user's text changed while we asked
+            }
+            typed = true
+            val say = when (choice) {
+                DraftChoice.REPLACE -> t.replacing
+                DraftChoice.ADD -> t.adding
+                else -> t.typing
+            }
+            return Plan.Act(TypeText(toType, entry.index), say)
+        }
+        if (norm(entry.text) != norm(toType)) return Plan.Fail(t.typedMismatch)
+        return tapSend(screen, t.readyToSend)
+    }
+
+    private fun tapSend(screen: Screen, say: String): Plan {
         val send = WhatsApp.sendButton(screen) ?: return Plan.Fail(t.noSendButton)
         sentTo = WhatsApp.chatTitle(screen)?.text.orEmpty()
-        return Plan.Act(Tap(send.index), t.readyToSend)
+        sentText = WhatsApp.entry(screen)?.text.orEmpty()
+        return Plan.Act(Tap(send.index), say)
     }
 
     override fun executed(action: Action, changed: Boolean) {
-        if (typed && action is Tap && sentTo.isNotEmpty()) sendTapped = true
+        if ((typed || choice == DraftChoice.SEND) && action is Tap && sentTo.isNotEmpty()) sendTapped = true
     }
 }
 

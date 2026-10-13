@@ -117,7 +117,8 @@ class FakeWhatsApp(
                     add { S.el(it, text = m.text, rid = WhatsApp.MESSAGE, sender = m.sender, y = rowY) }
                     y += 80
                 }
-                val draft = drafts[v.name].orEmpty()
+                // The box holds raw text (line breaks kept); the screen shows it collapsed, like Normalizer.
+                val draft = Normalizer.clean(drafts[v.name].orEmpty())
                 val boxText = if (draft.isEmpty() && placeholderAsText) "Message" else draft
                 add { S.el(it, text = boxText, rid = WhatsApp.ENTRY, cls = "EditText", editable = true, clickable = true, y = 1850) }
                 if (draft.isNotEmpty()) {
@@ -186,6 +187,14 @@ class FakeWhatsApp(
         cleared += chat
         drafts.remove(chat)
         return true
+    }
+
+    /** Raw message-box text, like AccessibilityNodeInfo.getText() (placeholder when empty). */
+    override suspend fun fieldText(element: Element, screen: Screen): String? {
+        if (unavailable) return null
+        val chat = (view as? View.Chat)?.name ?: return null
+        if (element.rid != WhatsApp.ENTRY) return null
+        return drafts[chat]?.takeIf { it.isNotEmpty() } ?: if (placeholderAsText) "Message" else ""
     }
 
     override suspend fun waitForChange(oldHash: String, timeoutMs: Long): Boolean = !unavailable && render().hash != oldHash

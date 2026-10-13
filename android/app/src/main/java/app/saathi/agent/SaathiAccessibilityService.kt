@@ -256,6 +256,15 @@ class SaathiAccessibilityService : AccessibilityService() {
             return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         }
 
+        /** The field's text as the app holds it (line breaks kept). Read only; never a password field. */
+        override suspend fun fieldText(element: Element, screen: Screen): String? {
+            val node = handleFor(screen, element.index) ?: return null
+            node.refresh()
+            if (node.isPassword || !node.isEditable) return null
+            if (node.isShowingHintText) return ""
+            return node.text?.toString()
+        }
+
         override suspend fun waitForChange(oldHash: String, timeoutMs: Long): Boolean {
             val end = System.currentTimeMillis() + timeoutMs
             while (System.currentTimeMillis() < end) {
