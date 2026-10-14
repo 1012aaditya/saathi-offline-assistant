@@ -115,8 +115,39 @@ internal class FloatingHome(
                 else -> describeLastPhoto()
             }
             is Command.LaunchApp -> handOff(text) // the approval sheet is on Saathi's screen
-            is Command.Unsupported -> say("Sorry, I didn't get that. ${app.saathi.agent.FloatingTexts.HOME_HINT}")
+            is Command.Unsupported -> understandFreely(text)
             else -> startTask(command, t)
+        }
+    }
+
+    /**
+     * Words the rules didn't match: ask the model what the user meant (demo builds: the laptop /
+     * OpenAI bridge). It may only pick one of the home panel's own actions below; a message's
+     * words or an order are never composed by it (those need the exact phrases, then the Confirm
+     * sheet). Invalid or no answer: "Sorry, I didn't get that".
+     */
+    private fun understandFreely(text: String) {
+        val sorry = "Sorry, I didn't get that. ${app.saathi.agent.FloatingTexts.HOME_HINT}"
+        if (!LaptopBrain.usable(service)) { say(sorry); return }
+        if (!LaptopBrain.ready) {
+            // Not checked yet in this run (only guide sessions checked it): check, then try once.
+            LaptopBrain.probeAsync { up -> scope.launch { if (up) understandFreely(text) else say(sorry) } }
+            return
+        }
+        scope.launch {
+            val raw = LaptopBrain.complete(HomeIntent.prompt(text), HomeIntent.TIMEOUT_MS)
+            val (intent, app) = HomeIntent.parse(raw) ?: run { say(sorry); return@launch }
+            Log.i(TAG, "home panel (model): $intent") // never the words
+            when (intent) {
+                HomeIntent.HELP_HERE -> helpHere()
+                HomeIntent.WALK -> startWalk()
+                HomeIntent.LOOK -> look()
+                HomeIntent.LAST_PHOTO -> describeLastPhoto()
+                HomeIntent.MESSAGES -> readMessages()
+                HomeIntent.STOP -> stopAll()
+                HomeIntent.GUIDE_APP -> if (app != null) startTask(Command.Guide(app.lowercase(), text), Texts(lang())) else helpHere()
+                else -> say(sorry)
+            }
         }
     }
 
@@ -276,5 +307,43 @@ internal class FloatingHome(
         } finally {
             owner.destroy()
         }
+    }
+}
+
+/** The home panel's free-speech understanding: the only answers the model may give. */
+internal object HomeIntent {
+    const val HELP_HERE = "help_here"
+    const val WALK = "walk"
+    const val LOOK = "look"
+    const val LAST_PHOTO = "last_photo"
+    const val MESSAGES = "messages"
+    const val STOP = "stop"
+    const val GUIDE_APP = "guide_app"
+    const val NONE = "none"
+    private val ALL = setOf(HELP_HERE, WALK, LOOK, LAST_PHOTO, MESSAGES, STOP, GUIDE_APP, NONE)
+    const val TIMEOUT_MS = 8_000L
+
+    fun prompt(said: String): String =
+        "A blind person pressed the floating button of Saathi, their phone assistant, and said something. " +
+            "Work out which ONE action they want. Answer with JSON only: {\"intent\": ..., \"app\": ...}.\n" +
+            "intent: help_here (help or guide me in the app on screen), walk (walk mode, obstacle warnings while walking), " +
+            "look (describe what is in front of me, use the camera), last_photo (describe my latest photo), " +
+            "messages (read my new messages), stop (stop or cancel), guide_app (do it together in an app they name), " +
+            "none (anything else).\napp: the app name for guide_app, else null.\n" +
+            "They may speak Hindi, English or Hinglish, and speech recognition makes mistakes " +
+            "(\"help me hear\" means help me here).\n" +
+            "Walk means keep watching the way and warning them while they move (\"batate rehna\", \"on the way\"); " +
+            "look means describe once, now. If it is none of these (weather, a question, chit-chat), answer none.\n" +
+            "Examples: \"I'm going out, warn me on the way\" -> walk; \"chalte waqt batate rehna\" -> walk; " +
+            "\"is app mein meri help karo\" -> help_here; \"ye kya cheez hai saamne\" -> look; \"aaj mausam kaisa hai\" -> none.\n" +
+            "User said: " + said.replace(Regex("[\\r\\n\"{}<>]"), " ").take(160)
+
+    /** (intent, app) from the model's answer, or null when it isn't one of the allowed answers. */
+    fun parse(raw: String?): Pair<String, String?>? {
+        raw ?: return null
+        val o = runCatching { org.json.JSONObject(app.saathi.agent.BrainPrompt.PREFILL + raw) }.getOrNull() ?: return null
+        val intent = o.optString("intent").trim().lowercase().takeIf { it in ALL } ?: return null
+        val app = o.optString("app").trim().takeIf { it.isNotEmpty() && it != "null" }?.take(40)
+        return intent to app
     }
 }
