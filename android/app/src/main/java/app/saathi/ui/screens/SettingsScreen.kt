@@ -199,6 +199,39 @@ fun SettingsScreen(nav: AppNav) {
                         ),
                     )
                 }
+                GroupDivider()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 64.dp)
+                        .toggleable(
+                            value = state.hindiSpeech,
+                            role = Role.Switch,
+                            onValueChange = { on ->
+                                state.updateHindiSpeech(on)
+                                deps.voice.listenLocale = if (on) app.saathi.ui.SharedDeps.HINDI else null
+                                // The user turned it on: ask the phone for the Hindi speech pack (offline later).
+                                if (on) deps.voice.downloadOfflineSpeech()
+                                changed(if (on) "I'll understand Hindi now. Aap Hindi mein bol sakte hain." else "Back to English listening")
+                            },
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RowTitle("Understand Hindi speech", "Hindi and Hinglish; Saathi's voice stays the same", Modifier.weight(1f))
+                    Switch(
+                        checked = state.hindiSpeech,
+                        onCheckedChange = null,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = c.onAccent,
+                            checkedTrackColor = c.accent,
+                            checkedBorderColor = c.accent,
+                            uncheckedThumbColor = c.secondary,
+                            uncheckedTrackColor = c.screen,
+                            uncheckedBorderColor = c.secondary,
+                        ),
+                    )
+                }
             }
             Footnote(
                 "When Saathi finishes talking, you hear the listening tone and can answer right away. " +

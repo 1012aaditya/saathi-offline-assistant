@@ -124,6 +124,10 @@ class AppState(context: Context) {
      * itself ([app.saathi.agent.AutoListen]). The session's echo checks and the Confirm sheet stay.
      */
     var listenAfterSpeaking by mutableStateOf(prefs.getBoolean("listenAfterSpeaking", false)); private set
+
+    /** Settings > "Understand Hindi speech": listen in hi-IN (takes Hinglish too); Saathi's own voice is unchanged. */
+    var hindiSpeech by mutableStateOf(prefs.getBoolean("hindiSpeech", false)); private set
+    fun updateHindiSpeech(on: Boolean) { hindiSpeech = on; prefs.edit().putBoolean("hindiSpeech", on).apply() }
     fun updateListenAfterSpeaking(on: Boolean) { listenAfterSpeaking = on; prefs.edit().putBoolean("listenAfterSpeaking", on).apply() }
 
     fun updateAppLevel(app: String, level: AppLevel) {
@@ -157,7 +161,7 @@ class AppState(context: Context) {
         trustedContacts.clear(); trustedContacts.addAll(listOf("Mom", "Dad"))
         setupDone = false; theme = ThemeChoice.System; soundOn = true; languageTag = null
         speechRate = 1.0f; spendingLimit = 500; walkSensitivity = WalkSensitivity.Medium
-        allowOrders = false; floatingSaathi = true; listenAfterSpeaking = false
+        allowOrders = false; floatingSaathi = true; listenAfterSpeaking = false; hindiSpeech = false
         listOf("WhatsApp" to AppLevel.AskFirst, "Grocery app" to AppLevel.AskFirst, "Payments" to AppLevel.Off)
             .forEach { (a, l) -> updateAppLevel(a, l) }
     }

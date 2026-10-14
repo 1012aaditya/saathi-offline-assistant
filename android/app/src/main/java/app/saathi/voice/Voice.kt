@@ -143,6 +143,21 @@ class Voice(private val context: Context) {
             }
         }
 
+    /**
+     * The language Saathi LISTENS in, when it differs from the one it speaks ([locale]). Settings >
+     * "Understand Hindi speech" (14 Oct, owner: "it is not understanding Hindi"): hi-IN, which also
+     * takes English words, while Saathi keeps speaking in [locale]. Null: listen in [locale].
+     */
+    var listenLocale: Locale? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            onDeviceRefused = false
+            main.post { refreshOfflineStatus() }
+        }
+
+    private val listening: Locale get() = listenLocale ?: locale
+
     /** 0.7 .. 1.5, Settings > Voice > Speaking rate. */
     var rate: Float = 1.0f
 
@@ -365,7 +380,7 @@ class Voice(private val context: Context) {
 
     private fun recognizerIntent(onDevice: Boolean): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE, (if (onDevice) onDeviceTag else null) ?: locale.toLanguageTag())
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, (if (onDevice) onDeviceTag else null) ?: listening.toLanguageTag())
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
     }
@@ -580,14 +595,14 @@ class Voice(private val context: Context) {
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun checkSupport33() {
-        val loc = locale
+        val loc = listening
         runCatching {
             supportRecognizer().checkRecognitionSupport(
                 recognizerIntent(onDevice = false),
                 context.mainExecutor,
                 object : RecognitionSupportCallback {
                     override fun onSupportResult(s: RecognitionSupport) {
-                        if (loc != locale) return
+                        if (loc != listening) return
                         val installed = match(s.installedOnDeviceLanguages, loc)
                         val pending = match(s.pendingOnDeviceLanguages, loc)
                         val supported = match(s.supportedOnDeviceLanguages, loc)
@@ -656,7 +671,7 @@ class Voice(private val context: Context) {
                 _offlinePack.value = OfflinePack.Downloading
                 publishMode()
             }
-            Log.i(TAG, "speech in: model download requested for ${locale.toLanguageTag()}")
+            Log.i(TAG, "speech in: model download requested for ${listening.toLanguageTag()}")
         }.onFailure { Log.w(TAG, "speech in: triggerModelDownload failed", it) }
     }
 

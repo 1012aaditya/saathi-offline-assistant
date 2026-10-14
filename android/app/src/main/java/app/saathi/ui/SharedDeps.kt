@@ -30,6 +30,7 @@ object SharedDeps {
         val feedback = Feedback(app).also { it.soundOn = state.soundOn }
         val voice = Voice(app).also {
             it.locale = state.languageTag?.let(Locale::forLanguageTag) ?: Locale.getDefault()
+            it.listenLocale = if (state.hindiSpeech) HINDI else null
             it.rate = state.speechRate
             it.init()
         }
@@ -49,4 +50,7 @@ object SharedDeps {
 
     /** The services if someone holds them (never creates them). */
     fun peek(): Deps? = deps
+
+    /** Settings > "Understand Hindi speech": what Saathi listens in. */
+    val HINDI: Locale = Locale.forLanguageTag("hi-IN")
 }
