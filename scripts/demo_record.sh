@@ -11,6 +11,8 @@ DIR="$HOME/Desktop/Saathi-demo"
 NAME="${2:?scene name}"
 mkdir -p "$DIR"
 cd "$DIR"
+# pgrep / pkill take a regex: escape the scene name ("Scene 1 (take 3)" has brackets).
+RE="$(printf '%s' "$NAME" | sed 's/[][\.*^$()+?{}|]/\\&/g')"
 SERIAL="${ADB_SERIAL:-$(adb devices | awk -F'\t' 'NR>1 && $2=="device"{print $1; exit}')}"
 
 case "$1" in
@@ -24,18 +26,19 @@ start)
   nohup ffmpeg -hide_banner -loglevel error -y -f avfoundation -framerate 30 -video_size 1280x720 -i "0:0" \
     -c:v h264_videotoolbox -b:v 6M -c:a aac -b:a 160k "$NAME.camera.mp4" >"$NAME.ffmpeg.log" 2>&1 &
   sleep 1.5
-  pgrep -f "record=$NAME.video.mp4" >/dev/null && pgrep -f "$NAME.camera.mp4" >/dev/null && echo "RECORDING: $NAME"
+  pgrep -f "record=$RE\.video\.mp4" >/dev/null && pgrep -f "$RE\.camera\.mp4" >/dev/null && echo "RECORDING: $NAME"
   ;;
 stop)
-  pkill -TERM -f "$NAME.camera.mp4" || true
+  pkill -TERM -f "$RE\.camera\.mp4" || true
   pkill -f "app_process / com.genymobile.scrcpy.Server" || true # stream ends -> scrcpy finalizes
-  for _ in $(seq 1 40); do pgrep -f "record=$NAME.video.mp4" >/dev/null || break; sleep 0.25; done
+  for _ in $(seq 1 40); do pgrep -f "record=$RE\.video\.mp4" >/dev/null || break; sleep 0.25; done
   sleep 1
   # scrcpy writes frames only when the screen changes: hold each picture (constant 30 fps, last
   # frame kept) for as long as the sound runs.
   DUR="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$NAME.camera.mp4")"
-  # The Mac's mic is far from the voices (~-46 dB): even out and raise to normal video loudness, stereo.
-  AUDIO="highpass=f=80,dynaudnorm=f=200:g=15:p=0.9,loudnorm=I=-16:TP=-1.5:LRA=11"
+  # The Mac's mic is far from the voices (peaks ~-36 dB): cut the hiss first, then +30 dB with a
+  # limiter (owner checked by ear, 14 Oct; plain loudness normalising mostly raised the hiss).
+  AUDIO="highpass=f=120,lowpass=f=7500,afftdn=nf=-30:nr=18,volume=30dB,alimiter=limit=0.9:level=disabled"
   ffmpeg -hide_banner -loglevel error -y -i "$NAME.camera.mp4" -i "$NAME.video.mp4" \
     -filter_complex "[1:v]tpad=stop_mode=clone:stop_duration=600,fps=30,scale=-2:720[scr];[0:v]fps=30,scale=1280:720[cam];[cam][scr]hstack[v]" \
     -map "[v]" -map 0:a -c:v h264_videotoolbox -b:v 10M -af "$AUDIO" -ac 2 -ar 48000 -c:a aac -b:a 192k -t "$DUR" "$NAME.mp4"
