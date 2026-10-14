@@ -39,8 +39,17 @@ if not settings.openai_api_key:
 MODEL = os.environ.get("OPENAI_TEXT_MODEL", "gpt-4.1-mini")
 # Pictures: a fast non-reasoning vision model (14 Oct: gpt-4.1-mini ~2.6 s vs gpt-5-nano ~5 s).
 VISION_MODEL = os.environ.get("OPENAI_VISION_MODEL", "gpt-4.1-mini")
+# Speech to text for the tablet's own recordings (14 Oct: the phone's offline recognizer misheard).
+STT_MODEL = os.environ.get("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe")
+STT_PROMPT = (
+    "Short voice commands to a phone assistant called Saathi, in English, Hindi or Hinglish. "
+    "Write Hindi words in Roman letters (Hinglish), e.g. 'mujhe doodh chahiye', 'sabse sasta kaun sa hai'. "
+    "Words you may hear: Saathi, Blinkit, YouTube, WhatsApp, Samsung Notes, cart, checkout, doodh, lofi."
+)
 # A stuck request is retried quickly (the tablet waits 6-8 s for words, 30 s for pictures).
 client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or None, timeout=6, max_retries=2)
+# Speech to text: a recording takes longer to upload and process than a short text answer.
+stt_client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or None, timeout=15, max_retries=1)
 
 
 def to_openai(messages: list[dict]) -> list[dict]:
@@ -89,6 +98,9 @@ class Bridge(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/api/transcribe":
+            self.transcribe()
+            return
         if self.path != "/api/chat":
             self._send(404, {"error": "not found"})
             return
@@ -105,6 +117,25 @@ class Bridge(BaseHTTPRequestHandler):
             print(f"{kind}: the tablet stopped waiting after {time.time() - t0:.1f}s", flush=True)
         except Exception as e:  # never the content; the error type is enough
             print(f"{kind}: failed after {time.time() - t0:.1f}s ({type(e).__name__})", flush=True)
+            self._send(502, {"error": type(e).__name__})
+
+    def transcribe(self) -> None:
+        """The tablet's recording (WAV, base64) -> text. Never stored or logged."""
+        import base64
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        t0 = time.time()
+        try:
+            wav = base64.b64decode(body.get("audio_b64", ""))
+            r = stt_client.audio.transcriptions.create(model=STT_MODEL, file=("speech.wav", wav, "audio/wav"), prompt=STT_PROMPT)
+            text = (r.text or "").strip()
+            print(f"speech: transcribed in {time.time() - t0:.1f}s ({len(text)} chars)", flush=True)
+            if os.environ.get("BRIDGE_DEBUG"):
+                print("   heard:", text[:120], flush=True)
+            self._send(200, {"text": text})
+        except BrokenPipeError:
+            pass
+        except Exception as e:
+            print(f"speech: failed after {time.time() - t0:.1f}s ({type(e).__name__})", flush=True)
             self._send(502, {"error": type(e).__name__})
 
     def log_message(self, *args) -> None:  # silence per-request access logs

@@ -23,8 +23,14 @@ start)
     --max-size=1280 --video-bit-rate=8M >"$NAME.scrcpy.log" 2>&1 &
   # Start the sound once the first video frame is written, so both begin together.
   for _ in $(seq 1 40); do [ -s "$NAME.video.mp4" ] && break; sleep 0.25; done
-  nohup ffmpeg -hide_banner -loglevel error -y -f avfoundation -framerate 30 -video_size 1280x720 -i "0:0" \
-    -c:v h264_videotoolbox -b:v 6M -c:a aac -b:a 160k "$NAME.camera.mp4" >"$NAME.ffmpeg.log" 2>&1 &
+  if [ "${CAMERA:-1}" = "0" ]; then
+    # Screen-only scene (nobody on camera): the room's sound alone, from the Mac's mic.
+    nohup ffmpeg -hide_banner -loglevel error -y -f avfoundation -i ":0" -c:a aac -b:a 160k "$NAME.camera.mp4" \
+      >"$NAME.ffmpeg.log" 2>&1 &
+  else
+    nohup ffmpeg -hide_banner -loglevel error -y -f avfoundation -framerate 30 -video_size 1280x720 -i "0:0" \
+      -c:v h264_videotoolbox -b:v 6M -c:a aac -b:a 160k "$NAME.camera.mp4" >"$NAME.ffmpeg.log" 2>&1 &
+  fi
   sleep 1.5
   pgrep -f "record=$RE\.video\.mp4" >/dev/null && pgrep -f "$RE\.camera\.mp4" >/dev/null && echo "RECORDING: $NAME"
   ;;
@@ -39,13 +45,17 @@ stop)
   # The Mac's mic is far from the voices (peaks ~-36 dB): cut the hiss first, then +30 dB with a
   # limiter (owner checked by ear, 14 Oct; plain loudness normalising mostly raised the hiss).
   AUDIO="highpass=f=120,lowpass=f=7500,afftdn=nf=-30:nr=18,volume=30dB,alimiter=limit=0.9:level=disabled"
+  if ffprobe -v error -select_streams v -show_entries stream=index -of csv=p=0 "$NAME.camera.mp4" | grep -q .; then
   ffmpeg -hide_banner -loglevel error -y -i "$NAME.camera.mp4" -i "$NAME.video.mp4" \
     -filter_complex "[1:v]tpad=stop_mode=clone:stop_duration=600,fps=30,scale=-2:720[scr];[0:v]fps=30,scale=1280:720[cam];[cam][scr]hstack[v]" \
     -map "[v]" -map 0:a -c:v h264_videotoolbox -b:v 10M -af "$AUDIO" -ac 2 -ar 48000 -c:a aac -b:a 192k -t "$DUR" "$NAME.mp4"
+  fi
   ffmpeg -hide_banner -loglevel error -y -i "$NAME.video.mp4" -i "$NAME.camera.mp4" -map 0:v -map 1:a \
     -vf "tpad=stop_mode=clone:stop_duration=600,fps=30" -c:v h264_videotoolbox -b:v 8M \
     -af "$AUDIO" -ac 2 -ar 48000 -c:a aac -b:a 192k -t "$DUR" "$NAME (screen).mp4"
-  rm -f "$NAME.scrcpy.log" "$NAME.ffmpeg.log"
+  # Screen-only scene: the screen version is the scene.
+  [ -f "$NAME.mp4" ] || mv "$NAME (screen).mp4" "$NAME.mp4"
+  rm -f "$NAME.scrcpy.log" "$NAME.ffmpeg.log" "$NAME.camera.mp4" "$NAME.video.mp4"
   printf "SAVED: %s.mp4 (%.0f s)\n" "$NAME" "$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$NAME.mp4")"
   ;;
 *) echo "usage: $0 start|stop <scene name>"; exit 2 ;;

@@ -1,5 +1,7 @@
 package app.saathi.ui
 
+import app.saathi.brain.LaptopBrain
+import app.saathi.brain.LaptopTranscriber
 import android.content.Context
 import android.os.Looper
 import app.saathi.data.AppState
@@ -31,6 +33,11 @@ object SharedDeps {
         val voice = Voice(app).also {
             it.locale = state.languageTag?.let(Locale::forLanguageTag) ?: Locale.getDefault()
             it.listenLocale = if (state.hindiSpeech) HINDI else null
+            // Demo builds: speech to text on the laptop / OpenAI when it's connected (else the phone's recognizer).
+            if (LaptopBrain.usable(context)) {
+                it.transcriber = LaptopTranscriber
+                LaptopBrain.probeAsync()
+            }
             it.rate = state.speechRate
             it.init()
         }

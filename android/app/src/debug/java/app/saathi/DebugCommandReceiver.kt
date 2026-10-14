@@ -35,6 +35,7 @@ class DebugCommandReceiver : BroadcastReceiver() {
         }
         // Timing only: how long the on-device AI takes for a typical guide prompt (made-up products,
         // no screen text). Logged as SaathiBench; nothing is shown, said or done.
+        intent.getStringExtra("transcripts")?.let { app.saathi.voice.VoiceDebug.transcripts = it == "on"; return }
         intent.getStringExtra("brainbench")?.let { mode -> brainBench(context.applicationContext, mode); return }
         // "Do it for me" on the app in front, as if said on the bubble's home panel (testing only).
         intent.getStringExtra("goal")?.takeIf { it.isNotBlank() }?.let { goal ->

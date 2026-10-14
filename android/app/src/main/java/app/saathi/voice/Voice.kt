@@ -400,7 +400,20 @@ class Voice(private val context: Context) {
     }
 
     /** Session id of the listening session in progress (or waiting for Saathi's speech to clear). */
-    private var sessionId = 0
+    @Volatile private var sessionId = 0
+
+    /**
+     * Demo builds: speech to text by a cloud model ([Transcriber], the laptop / OpenAI bridge) instead
+     * of the phone's recognizer, when [Transcriber.available]. Saathi records the utterance itself
+     * ([Recorder]); the same interlock and echo checks apply. Falls back to the recognizer when the
+     * microphone is blocked for Saathi's own recording.
+     */
+    var transcriber: Transcriber? = null
+    @Volatile private var cloudBlocked = false
+    @Volatile private var cloudStop = false
+    @Volatile private var cloudActive = false
+
+    private fun useCloud(): Boolean = transcriber?.available == true && !cloudBlocked
     private var openRunnable: Runnable? = null
 
     /**
@@ -412,7 +425,8 @@ class Voice(private val context: Context) {
     fun startListening(onOpen: (() -> Unit)? = null) {
         stopSpeaking()
         val onDevice = useOnDevice()
-        if (!onDevice && !recognitionAvailable) {
+        val cloud = useCloud()
+        if (!cloud && !onDevice && !recognitionAvailable) {
             _listen.value = Listen.Failed("Speech recognition isn't available on this phone.", FailCode.Unavailable)
             return
         }
@@ -438,7 +452,7 @@ class Voice(private val context: Context) {
                 return
             }
             onOpen?.invoke()
-            startSession(onDevice, id)
+            if (cloud) startCloudSession(id, onDevice) else startSession(onDevice, id)
         }
         tryOpen()
     }
@@ -453,6 +467,64 @@ class Voice(private val context: Context) {
         _listen.value = Listen.Failed("Listening stopped.", FailCode.Interrupted)
     }
 
+    /** One utterance recorded by Saathi and turned into text by [transcriber]. Main thread. */
+    private fun startCloudSession(id: Int, onDevice: Boolean) {
+        val t = transcriber ?: return startSession(onDevice, id)
+        cloudStop = false
+        cloudActive = true
+        _listen.value = Listen.Hearing("", 0f)
+        fun live() = id == sessionId && interlock.isCurrent(id)
+        Thread({
+            val rec = Recorder(
+                stillWanted = { id == sessionId },
+                stopAsked = { cloudStop },
+                onOpen = { Log.i(TAG, "speech in: mic open") }, // timing only, never words
+                onLevel = { lvl -> main.post { val cur = _listen.value; if (id == sessionId && cur is Listen.Hearing) _listen.value = Listen.Hearing(cur.partial, lvl) } },
+            ).record()
+            main.post {
+                when (rec) {
+                    Recorder.Result.Cancelled -> cloudActive = false
+                    Recorder.Result.Blocked -> {
+                        cloudActive = false
+                        cloudBlocked = true
+                        Log.i(TAG, "speech in: Saathi's own recording got no sound here; using the phone's recognizer")
+                        if (live()) startSession(onDevice, id)
+                    }
+                    Recorder.Result.NoSpeech -> {
+                        cloudActive = false
+                        if (!live()) return@post
+                        interlock.close(id)
+                        Log.i(TAG, "speech in: nothing usable (no speech)")
+                        _listen.value = Listen.Failed(messageFor(FailCode.SpeechTimeout), FailCode.SpeechTimeout)
+                    }
+                    is Recorder.Result.Speech -> {
+                        if (!live()) { cloudActive = false; return@post }
+                        // Judged when the utterance ended, exactly like the recognizer's results.
+                        val why = interlock.judge(id)
+                        val after = interlock.msSinceSpeechEnded() ?: app.saathi.agent.Heard.LONG_AFTER
+                        interlock.close(id)
+                        if (why != EchoGuard.Reason.NONE) {
+                            cloudActive = false
+                            Log.i(TAG, "speech in: result discarded ($why)")
+                            _listen.value = Listen.Failed("I didn't catch that.", FailCode.Echo)
+                            return@post
+                        }
+                        Thread({
+                            val text = runCatching { t.transcribe(rec.wav) }.getOrNull().orEmpty().trim()
+                            main.post {
+                                cloudActive = false
+                                if (id != sessionId) return@post // cancelled meanwhile
+                                Log.i(TAG, "speech in: heard, length ${text.length}") // never the words
+                                if (VoiceDebug.transcripts) Log.i(TAG, "speech in (debug test): \"$text\"")
+                                _listen.value = if (text.isBlank()) Listen.Failed("I didn't catch that.", FailCode.NoMatch) else Listen.Heard(text, after)
+                            }
+                        }, "saathi-stt").start()
+                    }
+                }
+            }
+        }, "saathi-rec").start()
+    }
+
     private fun startSession(onDevice: Boolean, id: Int) {
         if (id != sessionId || !interlock.isCurrent(id)) return
         if (recognizer != null && recognizerIsOnDevice != onDevice) { recognizer?.destroy(); recognizer = null }
@@ -465,7 +537,11 @@ class Voice(private val context: Context) {
             /** Callbacks of a cancelled / replaced session are dropped. */
             private fun stale() = id != sessionId || !interlock.isCurrent(id)
 
-            override fun onReadyForSpeech(params: Bundle?) { if (!stale()) _listen.value = Listen.Hearing("", 0f) }
+            override fun onReadyForSpeech(params: Bundle?) {
+                if (stale()) return
+                Log.i(TAG, "speech in: mic open") // timing only (demo driver / debugging), never words
+                _listen.value = Listen.Hearing("", 0f)
+            }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {
                 if (stale()) return
@@ -477,6 +553,7 @@ class Voice(private val context: Context) {
             override fun onEndOfSpeech() {}
             override fun onError(error: Int) {
                 if (stale()) return
+                Log.i(TAG, "speech in: nothing usable (error $error)")
                 val code = codeFor(error)
                 // On-device recognizer has no model for this language: quietly retry with the default one.
                 if (onDevice && (code == FailCode.LanguageNotSupported || code == FailCode.LanguageUnavailable) && recognitionAvailable) {
@@ -503,6 +580,8 @@ class Voice(private val context: Context) {
                     _listen.value = Listen.Failed("I didn't catch that.", FailCode.Echo)
                     return
                 }
+                Log.i(TAG, "speech in: heard, length ${text.length}") // never the words
+                if (VoiceDebug.transcripts) Log.i(TAG, "speech in (debug test): \"$text\"") // only when a debug build's tester turned it on
                 if (onDevice && _offlinePack.value == OfflinePack.Unknown) {
                     _offlinePack.value = OfflinePack.Installed // it just worked on-device
                     publishMode()
@@ -546,6 +625,7 @@ class Voice(private val context: Context) {
 
     /** Finish the current utterance. If the mic hasn't opened yet (waiting for Saathi's speech to clear), give up. */
     fun stopListening() {
+        if (cloudActive) { cloudStop = true; return } // finish the utterance now and transcribe it
         if (openRunnable != null) {
             main.removeCallbacks(openRunnable!!)
             openRunnable = null
@@ -699,4 +779,9 @@ class Voice(private val context: Context) {
             return tags.firstOrNull { Locale.forLanguageTag(it).language == loc.language }
         }
     }
+}
+
+/** Debug builds only (DebugCommandReceiver --es transcripts on): log what was heard, for accuracy tests. Never set in release. */
+object VoiceDebug {
+    @Volatile var transcripts = false
 }
