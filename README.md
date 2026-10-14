@@ -1,88 +1,111 @@
 # Saathi
 
-**A Hindi + English voice agent that operates everyday Android apps for blind and low-vision users, with a hard safety layer for anything irreversible.**
+**A voice-first assistant that lets blind and low-vision people use any Android app by talking: in Hindi, English or Hinglish, with a hard safety layer so it never sends, orders or pays without a clear "yes".**
 
-You say *"WhatsApp kholo aur Mummy ka last message padho"*. Saathi opens WhatsApp, finds Mummy's chat and reads her last message aloud, word for word. You say *"Mummy ko reply karo: main 7 baje aaunga"*. Saathi types it, reads back who it's going to and the exact words, and sends only after you say *"haan"*.
+Tap the floating Saathi bubble (or hold Volume-down) in any app and talk:
 
-Built for HACK47: OFFGRID (Oct 2026).
+> *"is app mein meri help karo"* → Saathi describes the screen, then does each step you say.
+> *"sabse sasta kaun sa hai"* → "The cheapest here: Amul Taaza Toned Milk, 200 ml, ₹17…"
+> *"YouTube kholo aur lofi song chalao"* → it opens YouTube, searches and plays one, saying each step.
+> *"Mummy ko message karo: main 7 baje aaunga"* → it types it, reads back who and what, and sends only after *"haan"*.
+> *"walk mode"* → the camera watches the way and warns you by voice and vibration.
+
+Built for **HACK47: OFFGRID** (October 2026).
+
+![Saathi on a Galaxy Tab S6 Lite: home screen, the floating panel, guide mode in Blinkit, Settings](docs/images/screens.png)
+
+*Left to right: Saathi's home screen · the bubble's "What shall we do?" panel over Blinkit · guide mode answering "which one is the cheapest" · Settings ("Allow placing orders" is off by default).*
 
 ---
 
-## What works today
+## What it does
 
-| Command (Hindi / Hinglish / English) | What Saathi does | Measured on a real device |
-|---|---|---|
-| "Mummy ka last message padho" | Opens WhatsApp, finds the chat, reads the last message the **contact** sent, quoted exactly | 3/3 |
-| "Mummy ko reply karo: …" | Types the reply, reads back recipient + text from the screen, sends only on a clear "haan" | 3/3 to the read-back |
-| "Screen pe kya hai?" | One sentence about the screen + the top 3 things you can do. Read-only | 3/3 |
-| "Blinkit se Amul doodh 1 litre mangao" | Searches, picks the best match (asks if two tie), adds one, opens the cart, reads back the cart items and stops before ordering | 10/10 to the read-back |
-| "Kiske message aaye hain?" | Opens WhatsApp, uses the Unread filter, reads names + unread counts, turns the filter back off | Unit-tested; device test pending |
-| Voice controls | "phir se bolo", "dheere / tez bolo", "madad", "bas"; follow-ups like "reply karo: …" reuse the last contact; Enter stops a running task; "और कुछ?" after each task | Unit-tested |
-| Walk mode (beta, separate page) | Phone camera → spoken Hindi obstacle warnings with rough distance, on-device | Unit-tested; not yet field-tested |
+| You say (any mix of Hindi / English) | What Saathi does |
+|---|---|
+| Tap the bubble / hold Volume-down | A panel opens over the app you're in: *"What shall we do?"* — Help me here · Walk · What's in front · Read messages |
+| "help me here", "is app mein meri help karo" | **Guide mode**: reads the screen (exact labels, prices, cart), then does each step you say — search, add, open cart, scroll, go back |
+| "YouTube kholo aur lofi song chalao", "Samsung Notes mein note likho: kal doodh lena hai" | **Do it for me**: GPT plans one step at a time in the app, every step through the safety gate; it says each step and stops when done |
+| "Mummy ka last message padho", "kiske message aaye hain?" | Reads WhatsApp messages and unread senders, word for word |
+| "Mummy ko message karo: …" | Types the message, reads back recipient + exact text from the screen, sends only on a clear "yes" (Cancel is the default) |
+| "mujhe doodh chahiye", "sabse sasta kaun sa hai", "checkout karo" | Blinkit shopping up to the payment page — then **"your turn"**: Saathi never pays |
+| "walk mode" | On-device obstacle warnings (YOLOv8) by voice + vibration, from the bubble over any app |
+| "what's in front of me", "what does this picture say" | Describes the camera view or the pictures on screen (vision model) |
+| — | Braille reader, TalkBack-friendly Clarity design, Hindi/English voice, Settings for every permission |
 
-Measured on 12 Oct 2026 on a Samsung Galaxy Tab S6 Lite (Android 13), model `gpt-5-nano`, about ₹0.05 per task. Details: [`eval/results.md`](eval/results.md). Samples are small (3–10 runs).
-
-**Not done yet:** payments (GPay) are paused; the safety rules for them are built and unit-tested but not run on GPay. Sending a real WhatsApp message has not been tested (every test answered "nahi"). No blind tester session yet.
+Tested on a Samsung Galaxy Tab S6 Lite (Android 13). See [`PROJECT.md`](PROJECT.md) for the dated decision log and what was measured.
 
 ---
 
 ## Safety: the model never decides anything irreversible
 
-Every action passes a deterministic gate ([`saathi/safety.py`](saathi/safety.py), 88 safety tests; 155 Python + 21 walk-mode tests in total) before it touches the phone.
+![Safety gate](docs/images/safety.svg)
 
-| Rule | What it does |
-|---|---|
-| R1–R3 holds | Send / pay / order → read-back from the screen, then an explicit spoken yes. Unclear → ask once more → cancel. "No" anywhere wins |
-| R4 grounding | Read-backs and read-outs may only quote text that is on screen verbatim |
-| R5 / R6 | Payee must match the name you said; amount capped at `MAX_AMOUNT_INR` (₹10) and must match what you said |
-| R7 / R8 / R9 | Never types PINs, OTPs or passwords; stops at PIN screens (incl. black secure screenshots) and CAPTCHAs and hands over |
-| R10 | Blocks calls, deleting, logging out, WhatsApp payments, and granting Android permissions |
-| R11 | Blocks a tap whose point is covered by a Pay / Order / Send control (found on device: a floating checkout bar over a "−" button) |
-| Extra | Cart never gets more than you asked for; "Screen pe kya hai?" can't change anything; a cancelled send deletes its own draft |
+Every tap, typing and app switch — from a fixed phrase, GPT, the agent or a scripted task — passes the same **deterministic safety gate** ([`android/safety`](android/safety), a 1:1 port of [`saathi/safety.py`](saathi/safety.py); 95 Kotlin + 187 Python tests):
 
-TalkBack and your keyboard are always restored, even on a crash. Traces with screenshots stay on the laptop (`traces/`, gitignored). OpenAI data sharing is off.
+- **Send / order / pay** → read-back of exactly what's on screen → Confirm sheet with **Cancel as the default** → only a clear spoken "yes" runs it. Unclear → ask once more → cancel.
+- **Never** types or reads PINs, OTPs or passwords; **never** solves CAPTCHAs; PIN, sign-in and payment pages → **hand over** to the user.
+- Blocks calls, deleting, logging out and payments in WhatsApp; risky buttons (pay, buy, post, subscribe…) are never pressed by the agent.
+- "Allow placing orders" is **off** by default; a spending limit applies; the cart never gets more than you asked for.
+- TalkBack is always restored; Saathi never reads its own windows; screen text is never logged.
 
 ---
 
 ## How it works
 
-```
- you ──speak──▶ Sarvam saaras:v4 (STT)
-                      │
-                      ▼
-              agent loop (saathi/agent.py)
-     observe screen ─▶ decide (gpt-5-nano, strict JSON) ─▶ SAFETY GATE ─▶ act
-          ▲                                                  │
-          └──────── Android device (Mobilerun Portal, wireless ADB) ◀┘
-                      │
- you ◀──hear── Sarvam bulbul:v4-flash (TTS, Hindi)
-```
+![Architecture](docs/images/architecture.svg)
 
-- **Perception:** the accessibility tree via Mobilerun Portal, normalised to a short element list. Screenshots only when the tree isn't enough.
-- **Blinkit** is mostly scripted ([`saathi/blinkit.py`](saathi/blinkit.py)): search deep link, product-card ranking, cart, checkout. The model only handles screens the code doesn't recognise. Blinkit hides its search box from accessibility. That's exactly the kind of app Saathi is for.
-- **Prototype topology:** a laptop runs the brain and controls the phone over wireless ADB. The production path is an on-device Android app ([SYSTEM_DESIGN §15](SYSTEM_DESIGN.md)).
+**"Do it for me"** — a small planner, not an autonomous agent: one step at a time, each one checked and gated.
+
+![Do it for me loop](docs/images/agent-loop.svg)
+
+- **Android app** (Kotlin, Jetpack Compose) — [`android/`](android): an AccessibilityService reads the screen and acts; the floating bubble and panel are accessibility overlays (no "draw over apps" permission).
+- **Understanding** — fixed phrases first (instant, offline), then a model for free speech: **GPT** (gpt-4.1-mini) through a laptop bridge in demo builds, or **Gemma 3 1B** on-device ([MediaPipe](https://ai.google.dev/edge/mediapipe)) on phones fast enough for it. Every model answer is validated; invalid → retry once → stop.
+- **Voice** — the phone's speech recogniser, or OpenAI speech-to-text through the bridge (much better for Hinglish); Saathi never listens while it is talking (echo guard).
+- **Vision** — on-device YOLOv8 for walk mode and object lists; a vision model (gpt-4.1-mini) for scene / picture descriptions in demo builds.
+
+### Privacy
+
+- **Release builds have no internet permission at all.** Everything runs on the phone.
+- **Demo builds** may use the owner's laptop (Ollama models, or OpenAI with a key kept in the laptop's `.env`) through `adb reverse` to `127.0.0.1` only.
+- **Private apps never reach any model:** WhatsApp, payment apps, SMS, email, phone, contacts, Settings — those use the built-in offline flows only.
 
 ---
 
 ## Run it
 
-Requirements: macOS/Linux, Python 3.12, [`uv`](https://docs.astral.sh/uv/), `adb`, an Android phone with Developer options.
+### Android app
+
+Requirements: JDK 17, Android SDK (compileSdk 35), an Android 8+ phone with Developer options and wireless debugging.
+
+```bash
+cd android
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17          # or your JDK 17
+./gradlew :safety:test :agent:test :app:assembleDebug   # 95 + 506 tests
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+On the phone: open Saathi → allow the microphone → **Settings → Accessibility → Installed apps → Saathi → On**. The bubble appears over other apps.
+
+Optional, for the demo build's smarter understanding and vision (run on the laptop the phone is connected to):
+
+```bash
+scripts/laptop_brain.sh                     # local Ollama models (qwen3:4b, qwen3-vl:2b)
+uv run python scripts/openai_bridge.py      # or: OpenAI (OPENAI_API_KEY in .env, never in code)
+```
+
+Optional on-device model: copy a Gemma 3 1B `.task` file to `Android/data/app.saathi/files/models/` (see [`ANDROID_APP.md`](ANDROID_APP.md)).
+
+### Laptop prototype (the first version)
+
+The original prototype runs the agent in Python on a laptop and controls a phone over ADB via [Mobilerun](https://github.com/droidrun/mobilerun), with Sarvam speech and OpenAI. See [`SYSTEM_DESIGN.md`](SYSTEM_DESIGN.md).
 
 ```bash
 uv sync
-uv tool install mobilerun && mobilerun setup -d <serial>      # installs the Portal accessibility service
-# create .env with OPENAI_API_KEY, SARVAM_API_KEY, ADB_SERIAL (keys listed below)
-uv run pytest -q                                              # all tests must pass
-
+uv run pytest -q                            # 187 tests
 uv run python -m saathi.main --text "WhatsApp kholo aur Mummy ka last message padho"
-uv run python -m saathi.main                                  # voice: Enter to talk, q to quit, Ctrl+C stops a task
-uv run python eval/run_flows.py --flow all --n 10             # success table → eval/results.md (never orders/sends)
 ```
 
-`.env` keys: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-5-nano`), `SARVAM_API_KEY`, `ADB_SERIAL`, `MAX_AMOUNT_INR` (10), `ALLOW_ORDERS` (false), `SAATHI_LANG` (hi-IN), optional `OPENAI_BASE_URL` (e.g. Ollama).
-
-**Walk mode:** `python3 -m http.server 8790 -d walk`. See [`walk/README.md`](walk/README.md) (the camera needs https on a real phone).
-**Website:** from the repo root, `python3 -m http.server 8765`, then open `/site/` (the walk-mode link needs `/walk/` next to it). Refresh the Activity page's real data with `uv run python scripts/export_activity.py` (anonymised: no names, messages or screens). Lighthouse accessibility: 100 on all three pages.
+`.env` keys: `OPENAI_API_KEY`, `OPENAI_MODEL`, `SARVAM_API_KEY`, `ADB_SERIAL`, `MAX_AMOUNT_INR` (10), `ALLOW_ORDERS` (false).
 
 ---
 
@@ -90,30 +113,27 @@ uv run python eval/run_flows.py --flow all --n 10             # success table �
 
 | Path | What |
 |---|---|
-| `saathi/` | The agent: voice, device, agent loop, actions, safety, Blinkit helper, prompts |
-| `eval/` | Flow definitions, runner, results |
-| `tests/` | Unit tests (safety, actions, normalizer, Blinkit, agent, eval scoring) |
-| `scripts/` | Device experiments and utilities (screen dumps, TalkBack test, Sarvam test, model probe, cart cleanup) |
-| `walk/` | Walk mode (beta) |
-| `site/` | Project website and app-screen prototypes (sample data, not connected) |
-| `PRD.md` · `SYSTEM_DESIGN.md` · `SCOPE.md` · `PROJECT.md` | Product, architecture, scope and decision log |
+| [`android/`](android) | The Android app: `app` (screens, voice, overlay, accessibility service), `agent` (guide, flows, planner), `safety` (the gate), `braille` |
+| [`saathi/`](saathi) · [`tests/`](tests) · [`eval/`](eval) | The laptop prototype, its tests and on-device evaluation |
+| [`walk/`](walk) | Walk mode for the web (on-device YOLOv8 in the browser) |
+| [`scripts/`](scripts) | Laptop bridge (Ollama / OpenAI), demo recorder, device utilities |
+| [`site/`](site) | Project website and screen prototypes |
+| [`docs/images/`](docs/images) | Diagrams and screenshots |
+| [`PRD.md`](PRD.md) · [`SYSTEM_DESIGN.md`](SYSTEM_DESIGN.md) · [`ANDROID_APP.md`](ANDROID_APP.md) · [`DESIGN.md`](DESIGN.md) · [`SCOPE.md`](SCOPE.md) · [`PROJECT.md`](PROJECT.md) | Product, architecture, Android plan, design system, scope, decision log |
 
 ---
 
-## Device safety checklist (after testing)
+## Status and honest limits
 
-- Turn **Google Play Protect** back on (Play Store → Play Protect → ⚙️ → Scan apps).
-- Developer options → turn off **Wireless debugging** and tap **Revoke USB debugging authorisations**.
-- Xiaomi/POCO: turn off **Install via USB** and **USB debugging (Security settings)** if you enabled them.
-- Uninstall **Mobilerun Portal** if you're done (it can read and tap the screen).
-- Delete local personal data: `tests/fixtures/raw/`, `traces/`, `scratch/`, `cache/` (all gitignored).
+- Built and tested by the team on one tablet; **no blind user study yet**.
+- Payments are never automated; Blinkit stops at the payment page by design.
+- On the Tab S6 Lite, on-device Gemma 3 1B takes ~22 s per answer, so Saathi marks it "too slow" and uses its rules; the demo uses the laptop bridge instead.
+- The "do it for me" planner can make mistakes; it stops when stuck, after 15 steps, or when you say stop, and it can't press risky buttons.
+- In a noisy room, "Listen after Saathi speaks" may hear other people — turn it off and use the Speak button.
 
 ---
 
-## Third-party tech and licences
+## Licences
 
-- [Mobilerun](https://github.com/droidrun/mobilerun) (MIT): Android control
-- [Sarvam AI](https://docs.sarvam.ai): speech-to-text (Saaras), text-to-speech (Bulbul), transliteration
-- [OpenAI](https://platform.openai.com): reasoning + vision (`gpt-5-nano`)
-- Walk mode: YOLOv8 weights by Ultralytics (**AGPL-3.0**), onnxruntime-web (MIT), COCO and Open Images class lists
-- Website: GSAP (cdnjs), Google Fonts, Pexels stock photos (credited on the page)
+Saathi is released under the **GNU AGPL-3.0** ([`LICENSE`](LICENSE)), because walk mode uses YOLOv8 weights by Ultralytics (AGPL-3.0).
+Also used: ONNX Runtime (MIT), MediaPipe LLM Inference (Apache-2.0), CameraX / Jetpack (Apache-2.0), Mobilerun (MIT), Sarvam AI and OpenAI APIs (prototype / demo builds), Pexels stock photos on the website (credited there).
