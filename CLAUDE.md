@@ -45,6 +45,7 @@ uv run ruff check . && uv run ruff format .
 # Android app (branch feature/android-app; see android/README.md)
 cd android && ./gradlew :safety:test :app:assembleDebug   # needs JAVA_HOME=/opt/homebrew/opt/openjdk@17
 scripts/laptop_brain.sh                             # demo: tablet's guide uses this laptop's Ollama model over adb reverse
+uv run python scripts/openai_bridge.py               # demo recording: same tablet link, answered by OpenAI (key from .env)
 ```
 
 ## Code layout
