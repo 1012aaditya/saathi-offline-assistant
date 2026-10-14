@@ -74,7 +74,8 @@ object AgentPrompt {
         append("typing into a search box also runs the search. Never repeat a step that changed nothing: try another way. ")
         append("Never type passwords, PINs or codes. Never tap pay, buy, place order, delete or uninstall. ")
         append("Tap send or post only if the goal says to send it; the person is asked to confirm first. ")
-        append("If the goal is already done on screen, answer done. Make sensible choices yourself (e.g. search the words they gave, ")
+        append("Answer done as soon as the goal is reached: e.g. the video or song is now playing, the note is saved, the search results show. ")
+        append("Do not keep tapping after that. Make sensible choices yourself (e.g. search the words they gave, ")
         append("pick the first good result); ask only when you cannot go on without them, e.g. what a note or message should say. ")
         append("If you are going in circles, answer fail.\n")
     }
