@@ -38,7 +38,8 @@ if not settings.openai_api_key:
 MODEL = settings.openai_model
 # Pictures: a fast non-reasoning vision model (14 Oct: gpt-4.1-mini ~2.6 s vs gpt-5-nano ~5 s).
 VISION_MODEL = os.environ.get("OPENAI_VISION_MODEL", "gpt-4.1-mini")
-client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or None, timeout=40)
+# A stuck request is retried after 15 s (14 Oct: one first request took 42 s; the tablet waits 30 s).
+client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or None, timeout=15, max_retries=1)
 
 
 def to_openai(messages: list[dict]) -> list[dict]:
@@ -97,6 +98,8 @@ class Bridge(BaseHTTPRequestHandler):
             text = answer(body, vision=kind == "vision")
             print(f"{kind}: answered in {time.time() - t0:.1f}s ({len(text)} chars)", flush=True)
             self._send(200, {"model": body.get("model"), "message": {"role": "assistant", "content": text}, "done": True})
+        except BrokenPipeError:
+            print(f"{kind}: the tablet stopped waiting after {time.time() - t0:.1f}s", flush=True)
         except Exception as e:  # never the content; the error type is enough
             print(f"{kind}: failed after {time.time() - t0:.1f}s ({type(e).__name__})", flush=True)
             self._send(502, {"error": type(e).__name__})
@@ -116,7 +119,20 @@ def link_tablet() -> None:
     print(f"Tablet linked: {serials[0]}")
 
 
+def warm_up() -> None:
+    """One tiny call per model, so the first real answer isn't a slow cold start."""
+    t0 = time.time()
+    for vision in (False, True):
+        try:
+            answer({"messages": [{"role": "user", "content": "Say OK."}]}, vision)
+        except Exception as e:
+            print(f"warm-up failed ({type(e).__name__}); check the key and network", flush=True)
+            return
+    print(f"Warmed up in {time.time() - t0:.1f}s", flush=True)
+
+
 if __name__ == "__main__":
     link_tablet()
+    warm_up()
     print(f"OpenAI bridge on 127.0.0.1:{PORT}: understanding {MODEL}, pictures {VISION_MODEL}. Ctrl+C to stop.", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Bridge).serve_forever()
