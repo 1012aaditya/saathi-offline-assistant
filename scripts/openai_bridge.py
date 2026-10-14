@@ -35,11 +35,12 @@ TABLET_MODELS = ["qwen3:4b", "qwen3-vl:2b-instruct"]
 settings = get_settings()
 if not settings.openai_api_key:
     sys.exit("No OPENAI_API_KEY in .env: add it there (never in code).")
-MODEL = settings.openai_model
+# Understanding: gpt-4.1-mini answered in ~1.0 s every time (14 Oct); gpt-5-nano sometimes took 12 s.
+MODEL = os.environ.get("OPENAI_TEXT_MODEL", "gpt-4.1-mini")
 # Pictures: a fast non-reasoning vision model (14 Oct: gpt-4.1-mini ~2.6 s vs gpt-5-nano ~5 s).
 VISION_MODEL = os.environ.get("OPENAI_VISION_MODEL", "gpt-4.1-mini")
-# A stuck request is retried after 15 s (14 Oct: one first request took 42 s; the tablet waits 30 s).
-client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or None, timeout=15, max_retries=1)
+# A stuck request is retried quickly (the tablet waits 6-8 s for words, 30 s for pictures).
+client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or None, timeout=6, max_retries=2)
 
 
 def to_openai(messages: list[dict]) -> list[dict]:
