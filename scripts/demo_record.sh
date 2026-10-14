@@ -34,12 +34,14 @@ stop)
   # scrcpy writes frames only when the screen changes: hold each picture (constant 30 fps, last
   # frame kept) for as long as the sound runs.
   DUR="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$NAME.camera.mp4")"
+  # The Mac's mic is far from the voices (~-46 dB): even out and raise to normal video loudness, stereo.
+  AUDIO="highpass=f=80,dynaudnorm=f=200:g=15:p=0.9,loudnorm=I=-16:TP=-1.5:LRA=11"
   ffmpeg -hide_banner -loglevel error -y -i "$NAME.camera.mp4" -i "$NAME.video.mp4" \
     -filter_complex "[1:v]tpad=stop_mode=clone:stop_duration=600,fps=30,scale=-2:720[scr];[0:v]fps=30,scale=1280:720[cam];[cam][scr]hstack[v]" \
-    -map "[v]" -map 0:a -c:v h264_videotoolbox -b:v 10M -c:a aac -b:a 160k -t "$DUR" "$NAME.mp4"
+    -map "[v]" -map 0:a -c:v h264_videotoolbox -b:v 10M -af "$AUDIO" -ac 2 -ar 48000 -c:a aac -b:a 192k -t "$DUR" "$NAME.mp4"
   ffmpeg -hide_banner -loglevel error -y -i "$NAME.video.mp4" -i "$NAME.camera.mp4" -map 0:v -map 1:a \
     -vf "tpad=stop_mode=clone:stop_duration=600,fps=30" -c:v h264_videotoolbox -b:v 8M \
-    -c:a aac -b:a 160k -t "$DUR" "$NAME (screen).mp4"
+    -af "$AUDIO" -ac 2 -ar 48000 -c:a aac -b:a 192k -t "$DUR" "$NAME (screen).mp4"
   rm -f "$NAME.scrcpy.log" "$NAME.ffmpeg.log"
   printf "SAVED: %s.mp4 (%.0f s)\n" "$NAME" "$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$NAME.mp4")"
   ;;
