@@ -12,7 +12,11 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import app.saathi.MainActivity
+import app.saathi.agent.AppLauncher
+import app.saathi.agent.AppResolver
 import app.saathi.agent.Command
+import app.saathi.agent.LaunchDecision
+import app.saathi.safety.Apps
 import app.saathi.agent.CommandParser
 import app.saathi.agent.Destination
 import app.saathi.agent.Flows
@@ -136,7 +140,7 @@ internal class FloatingHome(
         }
         scope.launch {
             val raw = LaptopBrain.complete(HomeIntent.prompt(text), HomeIntent.TIMEOUT_MS)
-            val (intent, app) = HomeIntent.parse(raw) ?: run { say(sorry); return@launch }
+            val (intent, app, goal) = HomeIntent.parse(raw) ?: run { say(sorry); return@launch }
             Log.i(TAG, "home panel (model): $intent") // never the words
             when (intent) {
                 HomeIntent.HELP_HERE -> helpHere()
@@ -145,10 +149,31 @@ internal class FloatingHome(
                 HomeIntent.LAST_PHOTO -> describeLastPhoto()
                 HomeIntent.MESSAGES -> readMessages()
                 HomeIntent.STOP -> stopAll()
-                HomeIntent.GUIDE_APP -> if (app != null) startTask(Command.Guide(app.lowercase(), text), Texts(lang())) else helpHere()
+                HomeIntent.GUIDE_APP -> if (app != null) openTogether(app, text, goal = null) else helpHere()
+                HomeIntent.DO_TASK -> if (app != null) openTogether(app, text, goal) else { TaskRunner.pendingGoal = goal; helpHere() }
                 else -> say(sorry)
             }
         }
+    }
+
+    /**
+     * Open [app] and work in it from this panel (optionally doing [goal] right away). An app Saathi
+     * isn't allowed to open yet goes to Saathi's own approval sheet first (never approved from here).
+     */
+    private fun openTogether(app: String, said: String, goal: String?) {
+        val name = app.lowercase().trim()
+        if (name !in Apps.APP_ALIASES) {
+            val r = AppResolver.resolve(name, AppLauncher.installed(service), service.packageName)
+            val approved = r is AppResolver.Result.One &&
+                AppLauncher.decide(service, r.app, deps.state) == LaunchDecision.Launch
+            if (!approved) {
+                say("First allow Saathi to open $app, on Saathi's screen. Then ask me again.")
+                handOff("open $app")
+                return
+            }
+        }
+        TaskRunner.pendingGoal = goal
+        startTask(Command.Guide(name, said), Texts(lang()))
     }
 
     private fun startTask(command: Command, t: Texts) {
@@ -319,31 +344,40 @@ internal object HomeIntent {
     const val MESSAGES = "messages"
     const val STOP = "stop"
     const val GUIDE_APP = "guide_app"
+    const val DO_TASK = "do_task"
     const val NONE = "none"
-    private val ALL = setOf(HELP_HERE, WALK, LOOK, LAST_PHOTO, MESSAGES, STOP, GUIDE_APP, NONE)
+    private val ALL = setOf(HELP_HERE, WALK, LOOK, LAST_PHOTO, MESSAGES, STOP, GUIDE_APP, DO_TASK, NONE)
     const val TIMEOUT_MS = 8_000L
+
+    /** The model's answer: what to do, in which app (or null), and the job for do_task. */
+    data class Answer(val intent: String, val app: String?, val goal: String?)
 
     fun prompt(said: String): String =
         "A blind person pressed the floating button of Saathi, their phone assistant, and said something. " +
-            "Work out which ONE action they want. Answer with JSON only: {\"intent\": ..., \"app\": ...}.\n" +
+            "Work out which ONE action they want. Answer with JSON only: {\"intent\": ..., \"app\": ..., \"goal\": ...}.\n" +
             "intent: help_here (help or guide me in the app on screen), walk (walk mode, obstacle warnings while walking), " +
             "look (describe what is in front of me, use the camera), last_photo (describe my latest photo), " +
             "messages (read my new messages), stop (stop or cancel), guide_app (do it together in an app they name), " +
-            "none (anything else).\napp: the app name for guide_app, else null.\n" +
+            "do_task (a concrete job to do in an app, e.g. open YouTube and search lofi songs, add a note saying buy milk), " +
+            "none (anything else).\napp: the app to use for guide_app / do_task (null = the app on screen). " +
+            "goal: for do_task, the job in short English (without the app name), else null.\n" +
             "They may speak Hindi, English or Hinglish, and speech recognition makes mistakes " +
             "(\"help me hear\" means help me here).\n" +
             "Walk means keep watching the way and warning them while they move (\"batate rehna\", \"on the way\"); " +
             "look means describe once, now. If it is none of these (weather, a question, chit-chat), answer none.\n" +
             "Examples: \"I'm going out, warn me on the way\" -> walk; \"chalte waqt batate rehna\" -> walk; " +
-            "\"is app mein meri help karo\" -> help_here; \"ye kya cheez hai saamne\" -> look; \"aaj mausam kaisa hai\" -> none.\n" +
+            "\"is app mein meri help karo\" -> help_here; \"ye kya cheez hai saamne\" -> look; \"aaj mausam kaisa hai\" -> none; " +
+            "\"youtube kholo aur gaane chalao\" -> do_task, app YouTube, goal play songs.\n" +
             "User said: " + said.replace(Regex("[\\r\\n\"{}<>]"), " ").take(160)
 
-    /** (intent, app) from the model's answer, or null when it isn't one of the allowed answers. */
-    fun parse(raw: String?): Pair<String, String?>? {
+    /** The model's answer, or null when it isn't one of the allowed answers. */
+    fun parse(raw: String?): Answer? {
         raw ?: return null
         val o = runCatching { org.json.JSONObject(app.saathi.agent.BrainPrompt.PREFILL + raw) }.getOrNull() ?: return null
         val intent = o.optString("intent").trim().lowercase().takeIf { it in ALL } ?: return null
-        val app = o.optString("app").trim().takeIf { it.isNotEmpty() && it != "null" }?.take(40)
-        return intent to app
+        fun opt(k: String, max: Int) = o.optString(k).trim().takeIf { it.isNotEmpty() && it != "null" }?.take(max)
+        val goal = opt("goal", 200)
+        if (intent == DO_TASK && goal == null) return null
+        return Answer(intent, opt("app", 40), goal)
     }
 }

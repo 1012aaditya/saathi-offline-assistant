@@ -298,7 +298,17 @@ object HiddenField {
     }
 
     /** After typing into Blinkit's search box, the service presses Enter (results only show then). */
-    fun submitsWithEnter(packageName: String, target: app.saathi.safety.Element?): Boolean =
-        target != null && packageName in app.saathi.safety.Apps.ORDER_APPS && target.editable && !target.password &&
-            (target.desc == Blinkit.HIDDEN_FIELD || Regex("search|खोज", RegexOption.IGNORE_CASE).containsMatchIn("${target.text} ${target.desc} ${target.rid}"))
+    fun submitsWithEnter(packageName: String, target: app.saathi.safety.Element?): Boolean {
+        if (target == null || !target.editable || target.password) return false
+        val searchBox = Regex("search|खोज", RegexOption.IGNORE_CASE).containsMatchIn("${target.text} ${target.desc} ${target.rid}")
+        if (packageName in app.saathi.safety.Apps.ORDER_APPS) return target.desc == Blinkit.HIDDEN_FIELD || searchBox
+        // Any other app's search box (YouTube, Play Store …: "do it for me", 14 Oct): Enter runs the search.
+        // Never where Enter can send: WhatsApp, messaging, payments.
+        return searchBox && packageName !in NO_ENTER
+    }
+
+    private val NO_ENTER: Set<String> = app.saathi.safety.Apps.PAYMENT_APPS + setOf(
+        app.saathi.safety.Apps.WHATSAPP, "com.whatsapp.w4b", "com.google.android.apps.messaging", "com.samsung.android.messaging",
+        "org.telegram.messenger", "com.instagram.android", "com.facebook.orca", "com.google.android.gm",
+    )
 }

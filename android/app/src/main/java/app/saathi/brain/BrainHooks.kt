@@ -39,6 +39,16 @@ object BrainHooks {
         )
     }
 
+    /**
+     * "Do it for me" planner: only with the laptop / OpenAI (debug / demo builds); the on-device
+     * model is far too slow for step-by-step planning. Private apps are never sent ([LaptopBrain.mayRead]).
+     */
+    fun agentFor(context: Context, log: (String) -> Unit): app.saathi.agent.AgentPlanner? {
+        if (!LaptopBrain.usable(context)) return null
+        LaptopBrain.probeAsync()
+        return app.saathi.agent.AgentPlanner(LaptopBrain, LaptopBrain::mayRead, onThinking = LlmEngine::setThinking, log = log)
+    }
+
     /** The laptop when it's there, else the on-device model. */
     private object Routed : Brain {
         override val ready: Boolean get() = LaptopBrain.ready || LlmEngine.ready

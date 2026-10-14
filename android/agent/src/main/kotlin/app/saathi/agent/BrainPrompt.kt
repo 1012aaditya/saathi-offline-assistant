@@ -128,6 +128,8 @@ object BrainPrompt {
         append("Work out what they want on the current screen and answer with ONE JSON object and nothing else.\n")
         append("Keys: intent, target, quantity, query, reply.\n")
         append("intent: one of ").append(BrainIntent.WIRE.joinToString(", ")).append(".\n")
+        append("do_task: a job of several steps in this app, e.g. write and save a note, search and play a video (query: the whole job, in English). ")
+        append("If the request needs more than one step (find AND play, open AND write, search AND add), use do_task, not search.\n")
         append("target: the product or button name copied exactly from SCREEN DATA, or null.\n")
         append("quantity: a whole number from 1 to 10 if the user said one, else null.\n")
         append("query: words to search for (search intent), else null.\n")

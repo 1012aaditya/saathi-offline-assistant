@@ -281,6 +281,9 @@ object TaskRunner {
      */
     @Volatile private var floatingRun = 0
 
+    /** A job said on the bubble's home panel for the next guide session to do right away. */
+    @Volatile var pendingGoal: String? = null
+
     /** The app the running guide session is about (the last one it looked at). */
     @Volatile var guideTarget: String? = null
         private set
@@ -535,7 +538,10 @@ object TaskRunner {
         }
         // [brain hook] Smart understanding (on-device AI): null when off / no model file = rules only.
         val brain = BrainHooks.forGuide(app, lang, ::log)
-        val session = GuideSession(device, lang, io, guidePolicy(appState), target, app.packageName, ::log, brain = brain)
+        // "Do it for me" (demo builds: the laptop / OpenAI) and a job asked for on the bubble's home panel.
+        val agent = BrainHooks.agentFor(app, ::log)
+        val goal = pendingGoal.also { pendingGoal = null }
+        val session = GuideSession(device, lang, io, guidePolicy(appState), target, app.packageName, ::log, brain = brain, agent = agent, goal = goal)
         return try {
             session.run(intro, open)
         } catch (e: CancellationException) {

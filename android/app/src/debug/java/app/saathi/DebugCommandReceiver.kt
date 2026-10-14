@@ -36,6 +36,15 @@ class DebugCommandReceiver : BroadcastReceiver() {
         // Timing only: how long the on-device AI takes for a typical guide prompt (made-up products,
         // no screen text). Logged as SaathiBench; nothing is shown, said or done.
         intent.getStringExtra("brainbench")?.let { mode -> brainBench(context.applicationContext, mode); return }
+        // "Do it for me" on the app in front, as if said on the bubble's home panel (testing only).
+        intent.getStringExtra("goal")?.takeIf { it.isNotBlank() }?.let { goal ->
+            val svc = app.saathi.agent.SaathiAccessibilityService.running ?: return
+            val front = svc.frontPackageName() ?: return
+            val d = app.saathi.ui.SharedDeps.peek() ?: return
+            app.saathi.agent.TaskRunner.pendingGoal = goal
+            app.saathi.agent.TaskRunner.startFloatingGuide(svc, front, app.saathi.agent.Requests.lang(d), d.state) { d.voice.speak(it) }
+            return
+        }
         val text = intent.getStringExtra("text")?.takeIf { it.isNotBlank() } ?: return
         // A running guide session (floating panel or Guide screen): hand the words straight to it,
         // like pressing Speak, without bringing Saathi's screen forward (that would close the panel).

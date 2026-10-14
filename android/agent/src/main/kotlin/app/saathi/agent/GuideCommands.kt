@@ -35,6 +35,9 @@ sealed interface GuideCommand {
     /** "What does this picture / banner say?": the pictures on the screen, described (GuideIO.lookAtScreen). */
     data object LookAtPicture : GuideCommand
 
+    /** "Do it for me": a multi-step job in this app, planned step by step ([AgentPlanner]). */
+    data class Do(val goal: String) : GuideCommand
+
     /** "read everything" / "what buttons are there": every line, controls included. */
     data object Everything : GuideCommand
 

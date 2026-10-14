@@ -98,6 +98,8 @@ class Bridge(BaseHTTPRequestHandler):
         try:
             text = answer(body, vision=kind == "vision")
             print(f"{kind}: answered in {time.time() - t0:.1f}s ({len(text)} chars)", flush=True)
+            if os.environ.get("BRIDGE_DEBUG") and kind == "text":  # debugging only: the model's short JSON answer
+                print("   answer:", text.replace("\n", " ")[:200], flush=True)
             self._send(200, {"model": body.get("model"), "message": {"role": "assistant", "content": text}, "done": True})
         except BrokenPipeError:
             print(f"{kind}: the tablet stopped waiting after {time.time() - t0:.1f}s", flush=True)

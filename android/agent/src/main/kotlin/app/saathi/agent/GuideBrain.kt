@@ -218,6 +218,7 @@ class GuideBrain(
         BrainIntent.READ_MORE -> GuideCommand.More
         BrainIntent.WHAT_ON_SCREEN -> GuideCommand.WhatsOnScreen
         BrainIntent.LOOK_AT_PICTURE -> GuideCommand.LookAtPicture
+        BrainIntent.DO_TASK -> GuideCommand.Do(d.query ?: utterance)
         // Facts about the cart and prices are read from the screen by the guide's own code, never by the model.
         BrainIntent.CART_SUMMARY -> if (TOTAL_CUE.containsMatchIn(utterance)) GuideCommand.Total else GuideCommand.Cart
         BrainIntent.DONE -> if (DONE_CUE.containsMatchIn(utterance)) GuideCommand.Done else { say(chat(d, utterance, summary)); null }

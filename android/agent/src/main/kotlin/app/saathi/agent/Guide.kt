@@ -22,6 +22,7 @@ import app.saathi.safety.isCaptcha
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
 
@@ -253,9 +254,14 @@ class GuideSession(
     private val log: (String) -> Unit = {},
     /** [brain hook] On-device understanding for what the rules don't catch; null = rules only. */
     private val brain: GuideBrain? = null,
+    /** "Do it for me": multi-step jobs planned by a model; null = not available (each step by voice). */
+    private val agent: AgentPlanner? = null,
+    /** A job to do right away (said on the bubble's home panel: "open YouTube and search lofi music"). */
+    private val goal: String? = null,
 ) {
     companion object {
         const val IDLE_MS = 3 * 60_000L
+        const val AGENT_READY_WAIT_MS = 3_000
         const val CONFIRM_TIMEOUT_MS = 90_000L
         const val TAP_WAIT_MS = 3_000L
         const val SETTLE_MS = 600L
@@ -303,6 +309,9 @@ class GuideSession(
     private var ordered = false
     private var sent = 0
     private var lastActRan = false
+
+    /** "Do it for me" asked the person something: their next words continue that job. */
+    private var askedGoal: String? = null
 
     /** The last command's kind, for logs/tests (never the words). */
     var lastCommand: String = ""
@@ -360,9 +369,14 @@ class GuideSession(
             val s = look(settle = true) ?: return Outcome.Failed(if (io.floating) t.notInFront else t.couldNotReturn)
             handover(s)?.let { return it }
             setScreen(s)
-            val sum = summary()
-            val first = listOfNotNull(intro ?: t.start, if (intro != null) t.hereIsWhat else null, sum.text, t.pressSpeak)
-            say(Spoken(first.joinToString(" "), sum.hint, sum.suggestions), GuideTurn.Kind.DESCRIBE)
+            if (goal != null) {
+                // Asked for a job: get on with it (no long description first).
+                handle(GuideCommand.Do(goal), goal)?.let { return it }
+            } else {
+                val sum = summary()
+                val first = listOfNotNull(intro ?: t.start, if (intro != null) t.hereIsWhat else null, sum.text, t.pressSpeak)
+                say(Spoken(first.joinToString(" "), sum.hint, sum.suggestions), GuideTurn.Kind.DESCRIBE)
+            }
             while (true) {
                 coroutineContext.ensureActive()
                 val heard = io.next(IDLE_MS) ?: return end(t.idle)
@@ -380,6 +394,15 @@ class GuideSession(
                     log("guide: transcript was one of Saathi's own suggestions, heard ${heard.msAfterSpeech} ms after speech; asked again")
                     say(t.echo, GuideTurn.Kind.REFUSED)
                     continue
+                }
+                // The job asked a question: this answer continues it (unless it's a clear stop / done).
+                val g = askedGoal
+                if (g != null) {
+                    askedGoal = null
+                    if (GuideGrammar.parse(heard.text) != GuideCommand.Done) {
+                        handle(GuideCommand.Do("$g (they answered: ${ScreenSummary.clean(heard.text, 120)})"), heard.text)?.let { return it }
+                        continue
+                    }
                 }
                 val parsed = GuideGrammar.parse(heard.text)
                 val cmd = if (brain == null) parsed else brain.understand(
@@ -418,6 +441,7 @@ class GuideSession(
             }
             GuideCommand.Help -> say("${t.help} ${t.whatNext}")
             GuideCommand.Keep -> say("${t.keptIt} ${t.whatNext}")
+            is GuideCommand.Do -> return doTask(cmd.goal, utterance)
             GuideCommand.LookAtPicture -> {
                 val (ok, out) = refresh(); if (!ok) return out
                 say(t.looking, GuideTurn.Kind.INFO)
@@ -821,6 +845,78 @@ class GuideSession(
             }
         }
         return act(TypeText(text.take(500), chosen.index), t.typed(text), CommandContext(utterance)) { fresh -> GuideTargets.refind(chosen, null, fresh) }
+    }
+
+    // -- "do it for me" -----------------------------------------------------------------------------
+
+    /**
+     * A multi-step job ([AgentPlanner]): look, ask the model for ONE step, do it with [act] (gate,
+     * refusals, Confirm sheet, hand-over: exactly as a spoken command), repeat. Stops on done / ask
+     * / fail, an invalid answer twice, a refusal or a cancelled confirmation (already said), the
+     * same screen three times, or [AgentPlanner.MAX_STEPS]. Private apps are never sent.
+     */
+    private suspend fun doTask(goal: String, utterance: String): Outcome? {
+        val planner = agent ?: run { log("agent: none in this build"); say(t.agentNoBrain, GuideTurn.Kind.REFUSED); return null }
+        // Right after a start the connection check may still be running: give it a moment.
+        var waited = 0
+        while (!planner.ready && waited < AGENT_READY_WAIT_MS) { delay(200); waited += 200 }
+        if (!planner.ready) { log("agent: model not reachable"); say(t.agentNoBrain, GuideTurn.Kind.REFUSED); return null }
+        log("agent: start")
+        say(t.agentStart(goal), GuideTurn.Kind.INFO)
+        val history = mutableListOf<String>()
+        var sameScreen = 0
+        var lastHash = ""
+        repeat(AgentPlanner.MAX_STEPS) {
+            coroutineContext.ensureActive()
+            // The job may move into another app (a share sheet, a link): follow it, unless it is private.
+            device.snapshot()?.packageName?.let { now -> if (now != target && now != ownPackage && refusalFor(now) == null) target = now }
+            val s = look(settle = true) ?: return sayCantReturn()
+            handover(s)?.let { return it }
+            if (!planner.mayRead(s.packageName)) { log("agent: private app, not sent"); say(t.agentPrivate, GuideTurn.Kind.REFUSED); return null }
+            setScreen(s)
+            sameScreen = if (s.hash == lastHash) sameScreen + 1 else 0
+            if (sameScreen > 0 && history.isNotEmpty()) history[history.lastIndex] = history.last() + " (nothing changed)"
+            lastHash = s.hash
+            if (sameScreen >= 3) { log("agent: same screen 3 times"); say(t.agentStuck, GuideTurn.Kind.REFUSED); return null }
+            val v = view!!
+            val step = planner.next(goal, label(s.packageName), s, v.hidden, history)
+                ?: run { say(t.agentStuck, GuideTurn.Kind.REFUSED); return null }
+            val ctx = CommandContext(utterance)
+            lastActRan = false
+            val out: Outcome? = when (step) {
+                is AgentStep.Done -> { say("${t.agentDone(step.summary)} ${t.whatNext}".trim(), GuideTurn.Kind.RESULT); return null }
+                is AgentStep.Ask -> { askedGoal = goal; say(step.question, GuideTurn.Kind.INFO); return null }
+                is AgentStep.Fail -> { say("${t.agentFail(step.reason)} ${t.whatNext}".trim(), GuideTurn.Kind.REFUSED); return null }
+                is AgentStep.Tap -> {
+                    val e = s.elements[step.index]
+                    val name = GuideView.label(e).ifEmpty { "it" }
+                    say(t.agentTap(name), GuideTurn.Kind.INFO)
+                    history += "tapped \"${ScreenSummary.clean(name, 40)}\""
+                    act(Tap(e.index), "", ctx, quiet = true) { fresh -> GuideTargets.refind(e, null, fresh) }
+                }
+                is AgentStep.Type -> {
+                    val e = s.elements[step.index]
+                    if (!e.editable) { say(t.agentStuck, GuideTurn.Kind.REFUSED); return null }
+                    say(t.agentTyping, GuideTurn.Kind.INFO)
+                    history += "typed into \"${ScreenSummary.clean(GuideView.label(e), 30)}\""
+                    act(TypeText(step.text, e.index), "", ctx, quiet = true) { fresh -> GuideTargets.refind(e, null, fresh) }
+                }
+                is AgentStep.Scroll -> {
+                    say(t.agentScrolling, GuideTurn.Kind.INFO)
+                    history += if (step.down) "scrolled down" else "scrolled up"
+                    act(Scroll(if (step.down) Direction.DOWN else Direction.UP), "", ctx, quiet = true)
+                }
+                AgentStep.Back -> {
+                    say(t.agentBack, GuideTurn.Kind.INFO)
+                    history += "went back"
+                    act(Back, "", ctx, quiet = true)
+                }
+            }
+            if (out != null) return out
+            if (!lastActRan) { log("agent: step not carried out (refused / held / failed)"); return null } // already said
+        }
+        say(t.agentTooLong, GuideTurn.Kind.REFUSED)
+        return null
     }
 
     // -- acting -------------------------------------------------------------------------------------
